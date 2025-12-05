@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>抖音视频智能投稿系统</title>
+    <style>
+        /* --- 1. 全局基础与字体优化 --- */
+        :root {
+            --primary-color: #1890ff;
+            --primary-hover: #40a9ff;
+            --bg-color: #f4f7f9;
+            --card-bg: #ffffff;
+            --text-main: #333333;
+            --text-sub: #666666;
+            --border-color: #e8e8e8;
+            --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            background-color: var(--bg-color);
+            padding: 40px 0;
+            color: var(--text-main);
+            line-height: 1.5;
+        }
+
+        .container {
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: var(--shadow-soft);
+            width: 90%;
+            max-width: 640px;
+            margin: 0 auto;
+            transition: transform 0.3s;
+        }
+
+        /* --- 2. 顶部用户信息 --- */
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .welcome-text { font-size: 1.2rem; font-weight: 700; color: #2c3e50; }
+        .stat-group { font-size: 0.85rem; color: var(--text-sub); margin-top: 4px; }
+        .stat-badge { font-weight: 600; margin: 0 2px; }
+        .user-action {
+            color: var(--primary-color); cursor: pointer; font-size: 0.9rem;
+            transition: opacity 0.2s; text-decoration: none;
+        }
+        .user-action:hover { opacity: 0.8; text-decoration: underline; }
+
+        /* --- 3. 提示气泡 (Tooltip) 静态版 --- */
+        .label-wrap { display: flex; align-items: center; gap: 6px; position: relative; width: fit-content; }
+
+        .info-icon {
+            display: inline-flex; justify-content: center; align-items: center;
+            width: 18px; height: 18px; border-radius: 50%;
+            background-color: #e6f7ff; color: var(--primary-color);
+            font-size: 12px; font-weight: bold; cursor: help;
+            transition: background-color 0.2s, color 0.2s;
+            flex-shrink: 0; /* 防止图标被压缩 */
+        }
+
+        .info-icon:hover {
+            background-color: var(--primary-color); color: white;
+        }
+
+        .tooltip-text {
+            visibility: hidden; opacity: 0; width: 240px;
+            background-color: rgba(33, 33, 33, 0.95);
+            color: #fff; text-align: left;
+            border-radius: 8px; padding: 12px; font-size: 0.85rem; line-height: 1.5;
+            position: absolute; z-index: 1000; bottom: 150%; left: 50%;
+            transform: translateX(-50%);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            transition: opacity 0.2s;
+            pointer-events: none; font-weight: normal;
+        }
+        .tooltip-text::after {
+            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px;
+            border-width: 6px; border-style: solid; border-color: rgba(33, 33, 33, 0.95) transparent transparent transparent;
+        }
+        .info-icon:hover + .tooltip-text {
+            visibility: visible; opacity: 1;
+        }
+
+        /* --- 4. 视频卡片 (视觉核心) --- */
+        .video-item-card {
+            background: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            position: relative;
+            transition: all 0.3s ease;
+            animation: slideDown 0.4s ease-out;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .video-item-card:hover {
+            border-color: #b3d8ff;
+            box-shadow: var(--shadow-hover);
+        }
+
+        .input-styled {
+            width: 100%; padding: 10px 12px;
+            border: 1px solid #d9d9d9; border-radius: 6px;
+            font-size: 0.95rem; color: #333; background: #fff;
+            transition: all 0.3s; box-sizing: border-box;
+        }
+        .input-styled:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1);
+            outline: none;
+        }
+
+        .video-url-input { margin-bottom: 15px; padding: 12px; background: #fafafa; }
+        .video-url-input:focus { background: #fff; }
+
+        .btn-remove-card {
+            position: absolute; top: -10px; right: -10px;
+            background: #ff4d4f; color: white; width: 26px; height: 26px;
+            border: none; border-radius: 50%; cursor: pointer;
+            box-shadow: 0 2px 8px rgba(255, 77, 79, 0.4);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 16px; line-height: 1; transition: transform 0.2s;
+        }
+        .btn-remove-card:hover { transform: scale(1.1) rotate(90deg); background: #ff7875; }
+
+        /* --- 5. 选项网格 (紧凑布局) --- */
+        .options-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px;
+            padding-top: 5px;
+        }
+        .option-item { display: flex; flex-direction: column; gap: 6px; }
+        .option-label { font-size: 0.85rem; color: #555; font-weight: 500; }
+        .required-star { color: #ff4d4f; }
+
+        /* --- 6. 全局设置区域 --- */
+        .global-settings-box {
+            border: none;
+            border-radius: 12px;
+            margin-top: 35px;
+            box-shadow: 0 0 0 1px #e6f7ff, 0 4px 15px rgba(24, 144, 255, 0.05);
+            overflow: visible; position: relative;
+            background: #fff;
+        }
+
+        .master-switch-row {
+            background: linear-gradient(to right, #e6f7ff, #f0f9ff);
+            padding: 18px 24px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-top-left-radius: 12px; border-top-right-radius: 12px;
+            border-bottom: 1px solid #bae7ff;
+        }
+        .master-switch-label { font-size: 1.1rem; font-weight: 700; color: #003a8c; display: flex; align-items: center; gap: 8px; }
+
+        .toggle-group { display: flex; background: #fff; padding: 4px; border-radius: 8px; border: 1px solid #bae7ff; }
+        .toggle-label {
+            padding: 6px 24px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;
+            color: var(--primary-color); transition: all 0.2s; border: none;
+        }
+        .toggle-input { display: none; }
+        .toggle-input:checked + .toggle-label {
+            background: var(--primary-color); color: white;
+            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.3);
+        }
+
+        .advanced-options { padding: 24px; }
+        .form-row {
+            display: grid; grid-template-columns: 140px 1fr;
+            align-items: center; margin-bottom: 18px;
+        }
+
+        textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+        /* --- 7. 按钮交互 --- */
+        .btn {
+            width: 100%; padding: 15px; border: none; border-radius: 10px;
+            font-size: 1.05rem; letter-spacing: 0.5px;
+            cursor: pointer; font-weight: 600; margin-top: 15px; color: white;
+            transition: all 0.2s;
+        }
+        .btn:active { transform: scale(0.98); }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #1890ff, #096dd9);
+            box-shadow: 0 4px 15px rgba(24, 144, 255, 0.35);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #40a9ff, #1890ff);
+            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.45);
+        }
+
+        .btn-secondary {
+            background: #fff; border: 1px dashed #d9d9d9; color: var(--text-sub);
+            width: auto; padding: 12px 30px; margin: 0 auto; display: block;
+        }
+        .btn-secondary:hover {
+            border-color: var(--primary-color); color: var(--primary-color);
+            background: #f0f9ff;
+        }
+
+        .hidden { display: none !important; }
+
+        .loader {
+            width: 24px; height: 24px; border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--primary-color); border-radius: 50%;
+            animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        select.input-styled {
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 16px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="auth-section" class="hidden" style="text-align: center; padding: 40px 20px;">
+        <h2 style="color: #2c3e50; margin-bottom: 10px;">👋 欢迎回来</h2>
+        <p style="color:#888; margin-bottom: 30px;">请输入您的名字以同步任务数据</p>
+        <input type="text" id="username-input" class="input-styled" placeholder="例如：Alex" style="margin-bottom: 20px; text-align: center; font-size: 1.1rem;">
+        <button id="login-btn" class="btn btn-primary">进入创作台</button>
+    </div>
+
+    <div id="main-app" class="hidden">
+        <div class="user-info">
+            <div>
+                <div class="welcome-text" id="welcome-msg"></div>
+                <div class="stat-group">
+                    今日投稿 <span id="stat-uploaded" class="stat-badge" style="color:#ff4d4f">--</span> /
+                    待处理 <span id="stat-pending" class="stat-badge" style="color:#faad14">--</span> /
+                    已上传 <span id="stat-remote" class="stat-badge" style="color:#52c41a">--</span>
+                </div>
+            </div>
+            <a class="user-action" onclick="logout()">[退出登录]</a>
+        </div>
+
+        <form id="task-form">
+            <div style="display:flex; align-items:center; margin-bottom: 15px;">
+                <h3 style="margin:0; font-size: 1.1rem; color: #333;">🎥 视频素材列表</h3>
+            </div>
+
+            <div id="video-list-container"></div>
+
+            <div style="margin: 25px 0;">
+                <button type="button" id="add-video-btn" class="btn btn-secondary">
+                    <span style="font-size: 1.2rem; vertical-align: -1px;">+</span> 添加视频链接
+                </button>
+            </div>
+
+            <!-- 全局设置 -->
+            <div class="global-settings-box">
+                <div class="master-switch-row">
+                    <div class="master-switch-label">
+                        是否进行原创处理？
+                        <div class="label-wrap">
+                            <i class="info-icon">?</i>
+                            <span class="tooltip-text">开启后，AI将对视频进行去重、剪辑、配音等深度处理。关闭则为直接搬运。</span>
+                        </div>
+                    </div>
+                    <div class="toggle-group">
+                        <label>
+                            <input type="radio" name="isOriginal" value="yes" class="toggle-input" checked>
+                            <span class="toggle-label">开启</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="isOriginal" value="no" class="toggle-input">
+                            <span class="toggle-label">关闭</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="advanced-options" class="advanced-options">
+
+                    <div class="form-row">
+                        <div class="label-wrap">
+                            <label class="option-label">视频风格类型</label>
+                            <i class="info-icon">?</i>
+                            <span class="tooltip-text">• 通用: 标准风格<br>• 游戏: 高光/击杀时刻<br>• 体育: 动作聚焦<br>• 娱乐: 趣味向剪辑</span>
+                        </div>
+                        <select id="video-type" class="input-styled">
+                            <option value="通用" selected>通用</option>
+                            <option value="游戏">游戏</option>
+                            <option value="体育">体育</option>
+                            <option value="娱乐">娱乐</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="label-wrap">
+                            <label class="option-label">素材保留比例</label>
+                            <i class="info-icon">?</i>
+                            <span class="tooltip-text">• 无要求: 优先逻辑去重(可能变短)<br>• 全量保留: 几乎不删减<br>• 较多保留: 仅删冗余</span>
+                        </div>
+                        <select id="retention-ratio" class="input-styled">
+                            <option value="无要求" selected>无要求 (智能推荐)</option>
+                            <option value="全量保留">全量保留</option>
+                            <option value="较多保留">较多保留</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="label-wrap">
+                            <label class="option-label">预计投稿日期</label>
+                            <i class="info-icon">?</i>
+                            <span class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span>
+                        </div>
+                        <select id="schedule-date" class="input-styled"></select>
+                    </div>
+
+                    <!-- 二级选项 (Grid Layout) -->
+                    <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px;">
+                        <div class="option-item">
+                            <div class="label-wrap">
+                                <span class="option-label">AI 音频替换</span>
+                                <i class="info-icon">?</i>
+                                <span class="tooltip-text">完全替换背景音为AI解说，去重效果最佳。</span>
+                            </div>
+                            <select id="audio-replace" class="input-styled">
+                                <option value="yes" selected>是</option>
+                                <option value="no">否</option>
+                            </select>
+                        </div>
+                        <div class="option-item">
+                            <div class="label-wrap">
+                                <span class="option-label">场景标题与摘要</span>
+                                <i class="info-icon">?</i>
+                                <span class="tooltip-text">自动添加关键帧花字，提升完播率。</span>
+                            </div>
+                            <select id="scene-title" class="input-styled">
+                                <option value="yes" selected>是</option>
+                                <option value="no">否</option>
+                            </select>
+                        </div>
+                        <div class="option-item">
+                            <div class="label-wrap">
+                                <span class="option-label">允许增加解说</span>
+                                <i class="info-icon">?</i>
+                                <span class="tooltip-text">AI自动看图说话，生成解说词。</span>
+                            </div>
+                            <select id="allow-commentary" class="input-styled">
+                                <option value="yes" selected>是</option>
+                                <option value="no">否</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 5px;">
+                        <div class="label-wrap" style="margin-bottom: 8px;">
+                            <label class="option-label">创作指导 (Prompt)</label>
+                            <i class="info-icon">?</i>
+                            <span class="tooltip-text">输入给AI的自然语言指令，如：“剪辑节奏要快”、“配乐要悲伤”。</span>
+                        </div>
+                        <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由AI自由发挥..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <button type="button" id="submit-task-btn" class="btn btn-primary">提交创作任务</button>
+        </form>
+
+        <div id="loading-mask" class="hidden" style="margin-top: 25px; text-align: center; color: var(--primary-color);">
+            <div class="loader"></div> <span id="loading-text" style="font-weight: 500;">正在上传素材并创建任务...</span>
+        </div>
+    </div>
+</div>
+
+<script>
+    const APP = { currentUser: localStorage.getItem('userName'), videoCounter: 0 };
+    const els = {
+        authSection: document.getElementById('auth-section'),
+        mainApp: document.getElementById('main-app'),
+        usernameInput: document.getElementById('username-input'),
+        loginBtn: document.getElementById('login-btn'),
+        welcomeMsg: document.getElementById('welcome-msg'),
+        videoList: document.getElementById('video-list-container'),
+        addVideoBtn: document.getElementById('add-video-btn'),
+        submitBtn: document.getElementById('submit-task-btn'),
+        globalOriginalRadios: document.getElementsByName('isOriginal'),
+        advancedOptions: document.getElementById('advanced-options'),
+        dateSelect: document.getElementById('schedule-date'),
+        stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (APP.currentUser) initMainApp();
+        else els.authSection.classList.remove('hidden');
+        initDateSelect();
+    });
+
+    els.loginBtn.addEventListener('click', () => {
+        const name = els.usernameInput.value.trim();
+        if (!name) return alert('请输入名字');
+        localStorage.setItem('userName', name);
+        APP.currentUser = name;
+        els.authSection.classList.add('hidden');
+        initMainApp();
+    });
+
+    function logout() {
+        if(confirm('确定要退出登录吗？')) { localStorage.removeItem('userName'); location.reload(); }
+    }
+
+    function initMainApp() {
+        els.mainApp.classList.remove('hidden');
+        els.welcomeMsg.textContent = `Hi, ${APP.currentUser}`;
+        fetchUploadStats();
+        addVideoCard();
+    }
+
+    function initDateSelect() {
+        const options = [{l:'今天',o:0}, {l:'明天',o:1}, {l:'后天',o:2}];
+        els.dateSelect.innerHTML = '';
+        const today = new Date();
+        options.forEach(opt => {
+            const date = new Date(today); date.setDate(today.getDate() + opt.o);
+            const optEl = document.createElement('option');
+            optEl.value = date.toISOString().split('T')[0];
+            optEl.textContent = `${opt.l} (${optEl.value})`;
+            els.dateSelect.appendChild(optEl);
+        });
+    }
+
+    async function fetchUploadStats() {
+        try {
+            const r = await fetch(`/get_user_upload_info?userName=${encodeURIComponent(APP.currentUser)}`);
+            if(r.ok) {
+                const d = await r.json();
+                if(d.status === 'success') {
+                    els.stats.uploaded.textContent = d.data.total_count_today;
+                    els.stats.pending.textContent = d.data.unprocessed_count_today;
+                    els.stats.remote.textContent = d.data.remote_upload_count || 0;
+                }
+            }
+        } catch(e) {}
+    }
+
+    function addVideoCard() {
+        APP.videoCounter++;
+        const id = APP.videoCounter;
+        const card = document.createElement('div');
+        card.className = 'video-item-card';
+        card.id = `video-card-${id}`;
+
+        const delBtn = document.querySelectorAll('.video-item-card').length > 0
+            ? `<button type="button" class="btn-remove-card" onclick="removeCard(${id})" title="删除此素材">×</button>` : '';
+
+        // --- 核心修改：为所有选项增加问号和说明 ---
+        card.innerHTML = `
+            ${delBtn}
+            <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
+            <div class="options-grid">
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">包含作者声音? <span class="required-star">*</span></span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">必选。标识原视频中是否包含人声解说或对话，便于AI分离背景音。</span>
+                    </div>
+                    <select class="input-styled select-voice">
+                        <option value="" disabled selected>请选择...</option>
+                        <option value="yes">是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">是否实时视频?</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">是否为新闻、直播切片等强时效内容。</span>
+                    </div>
+                    <select class="input-styled select-realtime">
+                        <option value="yes" selected>是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">需要保留文字?</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">选择“是”保留原字幕；选择“否”将尝试自动消除原视频字幕。</span>
+                    </div>
+                    <select class="input-styled select-text">
+                        <option value="yes" selected>是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">自动配表情包?</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">AI智能分析视频情绪，自动添加趣味表情包。</span>
+                    </div>
+                    <select class="input-styled select-emoji">
+                        <option value="yes" selected>是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
+            </div>
+        `;
+        els.videoList.appendChild(card);
+    }
+
+    els.addVideoBtn.addEventListener('click', addVideoCard);
+    window.removeCard = (id) => document.getElementById(`video-card-${id}`)?.remove();
+
+    Array.from(els.globalOriginalRadios).forEach(r => {
+        r.addEventListener('change', (e) => {
+            if(e.target.value === 'no') {
+                if(confirm('⚠️ 风险警告：\n关闭原创处理将导致视频直接搬运，极易被平台判定重复。\n\n确定要继续吗？')) els.advancedOptions.classList.add('hidden');
+                else document.querySelector('input[name="isOriginal"][value="yes"]').checked = true;
+            } else els.advancedOptions.classList.remove('hidden');
+        });
+    });
+
+    els.submitBtn.addEventListener('click', async () => {
+        const cards = document.querySelectorAll('.video-item-card');
+        const vList = [];
+        let err = null;
+
+        cards.forEach((card, idx) => {
+            if(err) return;
+            const urlInput = card.querySelector('.video-url-input');
+            const url = urlInput.value.trim();
+
+            if(!url) {
+                err = `第 ${idx + 1} 个视频卡片的链接为空！\n如果不使用，请点击右上角红色按钮删除该卡片。`;
+                urlInput.focus();
+                return;
+            }
+
+            const voice = card.querySelector('.select-voice').value;
+            if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
+
+            vList.push({
+                url: url,
+                has_author_voice: voice === 'yes',
+                is_realtime: card.querySelector('.select-realtime').value === 'yes',
+                need_text: card.querySelector('.select-text').value === 'yes',
+                need_emoji: card.querySelector('.select-emoji').value === 'yes'
+            });
+        });
+
+        if(err) return alert(err);
+        if(!vList.length) return alert('请至少添加一个有效的视频链接');
+
+        const isOriginal = document.querySelector('input[name="isOriginal"]:checked').value === 'yes';
+        const payload = {
+            userName: APP.currentUser,
+            global_settings: {
+                is_original: isOriginal,
+                video_type: document.getElementById('video-type').value,
+                retention_ratio: isOriginal ? document.getElementById('retention-ratio').value : '无要求',
+                audio_replace: isOriginal ? (document.getElementById('audio-replace').value === 'yes') : false,
+                scene_title: isOriginal ? (document.getElementById('scene-title').value === 'yes') : false,
+                allow_commentary: isOriginal ? (document.getElementById('allow-commentary').value === 'yes') : false,
+                schedule_date: document.getElementById('schedule-date').value,
+                creative_guidance: document.getElementById('creative-guidance').value.trim()
+            },
+            video_list: vList
+        };
+
+        console.log('Payload:', payload);
+        els.submitBtn.disabled = true;
+        els.submitBtn.innerHTML = '处理中...';
+        document.getElementById('loading-mask').classList.remove('hidden');
+
+        try {
+            const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            const d = await res.json();
+            if(res.ok) {
+                alert('✅ 任务提交成功！');
+                fetchUploadStats();
+            } else {
+                alert('❌ 提交失败: ' + (d.message||'未知错误'));
+            }
+        } catch(e) { alert('❌ 网络连接错误'); }
+        finally {
+            els.submitBtn.disabled = false;
+            els.submitBtn.innerHTML = '提交创作任务';
+            document.getElementById('loading-mask').classList.add('hidden');
+        }
+    });
+</script>
+</body>
+</html>

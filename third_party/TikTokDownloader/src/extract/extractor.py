@@ -314,6 +314,7 @@ class Extractor:
             )
             or item["id"]
         )
+        item["full_title"] = self.__extract_description(data)
         item["create_timestamp"] = self.safe_extract(data, "create_time")
         item["create_time"] = self.__format_date(item["create_timestamp"])
         self.__extract_text_extra(item, data)
@@ -896,28 +897,24 @@ class Extractor:
                     )
                     return id_, name, mark
                 case "mix":
-                    if tiktok:
-                        id_ = mix_id
-                        name = self.cleaner.filter_name(
-                            mix_title,
-                        ).strip()
-                        mark = self.cleaner.filter_name(
-                            mark,
-                            name,
-                        ).strip()
-                    else:
-                        item = self.__select_item(
-                            data,
-                            mix_id,
-                            self.extract_params["mix_id"],
-                        )
-                        id_, name, mark = self.__extract_pretreatment_data(
-                            item,
-                            self.extract_params["mix_id"],
-                            self.extract_params["mix_title"],
-                            mark,
-                            mix_title,
-                        )
+                    item = self.__select_item(
+                        data,
+                        mix_id,
+                        (self.extract_params_tiktok if tiktok else self.extract_params)[
+                            "mix_id"
+                        ],
+                    )
+                    id_, name, mark = self.__extract_pretreatment_data(
+                        item,
+                        (self.extract_params_tiktok if tiktok else self.extract_params)[
+                            "mix_id"
+                        ],
+                        (self.extract_params_tiktok if tiktok else self.extract_params)[
+                            "mix_title"
+                        ],
+                        mark,
+                        mix_title,
+                    )
                     return id_, name, mark
                 case "collects":
                     collect_name = self.cleaner.filter_name(
@@ -1126,32 +1123,32 @@ class Extractor:
         container: SimpleNamespace,
         data: SimpleNamespace,
     ):
-        if data := self.safe_extract(
+        data = self.safe_extract(
             data, f"data.data[{LIVE_DATA_INDEX}]"
-        ) or self.safe_extract(data, "data.room"):
-            live_data = {
-                "status": self.safe_extract(data, "status"),
-                "nickname": self.safe_extract(data, "owner.nickname"),
-                "title": self.safe_extract(data, "title"),
-                "flv_pull_url": vars(
-                    self.safe_extract(
-                        data,
-                        "stream_url.flv_pull_url",
-                        SimpleNamespace(),
-                    )
-                ),
-                "hls_pull_url_map": vars(
-                    self.safe_extract(
-                        data,
-                        "stream_url.hls_pull_url_map",
-                        SimpleNamespace(),
-                    )
-                ),
-                "cover": self.safe_extract(data, f"cover.url_list[{LIVE_COVER_INDEX}]"),
-                "total_user_str": self.safe_extract(data, "stats.total_user_str"),
-                "user_count_str": self.safe_extract(data, "stats.user_count_str"),
-            }
-            container.all_data.append(live_data)
+        ) or self.safe_extract(data, "data.room")
+        live_data = {
+            "status": self.safe_extract(data, "status"),
+            "nickname": self.safe_extract(data, "owner.nickname"),
+            "title": self.safe_extract(data, "title"),
+            "flv_pull_url": vars(
+                self.safe_extract(
+                    data,
+                    "stream_url.flv_pull_url",
+                    SimpleNamespace(),
+                )
+            ),
+            "hls_pull_url_map": vars(
+                self.safe_extract(
+                    data,
+                    "stream_url.hls_pull_url_map",
+                    SimpleNamespace(),
+                )
+            ),
+            "cover": self.safe_extract(data, f"cover.url_list[{LIVE_COVER_INDEX}]"),
+            "total_user_str": self.safe_extract(data, "stats.total_user_str"),
+            "user_count_str": self.safe_extract(data, "stats.user_count_str"),
+        }
+        container.all_data.append(live_data)
 
     def __extract_live_data_tiktok(
         self,

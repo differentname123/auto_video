@@ -32,4 +32,4 @@ def beautify_string(s: str, length: int = 64) -> str:
     length //= 2
     start = truncate_string(s, length)
     end = truncate_string(s[::-1], length)[::-1]
-    return f"{start}...{end}"
+    return f"{start}{end}"
