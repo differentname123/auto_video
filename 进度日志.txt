@@ -23,5 +23,6 @@
     已完成:
         1.测试逆向web的功能，目前图片和视频都能够支持
         2.而且使用的是本地cookie，可能稳定性更高
+        3.修复上传大文件报错的问题：（增加超时时长python/Lib/site-packages/gemini_webapi/utils/upload_file.py的 wait client.post 部分代码 增加timeout=600,）
     待完成：
         1.继续测试逆向web的功能，是否能够稳定使用

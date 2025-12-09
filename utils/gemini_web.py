@@ -13,7 +13,6 @@ os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
 # === 1. 将你获取到的完整 Cookie 字符串填在这里 ===
 # (请务必使用最新的，且获取后已关闭浏览器窗口)
 RAW_COOKIES_STR = ""
-
 def get_cookie_value(key, text):
     """
     简单的辅助函数：从长字符串中提取指定 key 的 value
@@ -55,7 +54,7 @@ async def main_video_summary():
 
         print("客户端初始化成功！")
 
-        video_path = "test.mp4"  # 测试用
+        video_path = "test1.mp4"  # 测试用
 
         if not os.path.exists(video_path):
             print(f"[错误] 找不到文件: {video_path}")
@@ -64,9 +63,9 @@ async def main_video_summary():
         print(f"正在上传文件 '{video_path}' ...")
 
         response = await client.generate_content(
-            "什么动物跑得快。",
+            "内容是什么。",
             model="gemini-2.5-pro",
-            # files=[video_path]
+            files=[video_path]
         )
 
         print("\n--- 分析结果 ---")
