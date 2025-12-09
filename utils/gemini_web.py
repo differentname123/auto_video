@@ -10,7 +10,7 @@ from pathlib import Path
 
 from gemini_webapi import GeminiClient, set_log_level
 from gemini_webapi.exceptions import AuthError
-from utils.common_utils import read_json
+from utils.common_utils import read_json, save_json
 
 # 设置日志级别
 set_log_level("INFO")
@@ -64,8 +64,9 @@ class GeminiAccountManager:
         except Exception:
             return {}
 
-    def _check_and_reset_stuck_accounts(self, stats_data, timeout_seconds=300):
-        """检查并重置僵死账号"""
+    # 【修改 1】: 将超时时间从 300s 调整为 600s (10分钟)
+    def _check_and_reset_stuck_accounts(self, stats_data, timeout_seconds=600):
+        """检查并重置僵死账号，默认超时时间为10分钟"""
         now = datetime.now()
         for name, info in stats_data.items():
             if info.get('status') == 'using':
@@ -74,11 +75,13 @@ class GeminiAccountManager:
                     try:
                         last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
                         if (now - last_time).total_seconds() > timeout_seconds:
-                            print(f"[Manager] 账号 {name} 超时，强制重置")
+                            print(f"[Manager] 账号 {name} 'using'状态超时({timeout_seconds}s)，强制重置为'idle'")
                             info['status'] = 'idle'
                             info['last_error_info'] = "System: Force reset due to timeout"
                     except ValueError:
-                        pass
+                        # 如果时间格式不正确，也将其重置以避免永久锁定
+                        info['status'] = 'idle'
+                        info['last_error_info'] = "System: Force reset due to invalid time format"
         return stats_data
 
     def allocate_account(self, model_name):
@@ -116,7 +119,6 @@ class GeminiAccountManager:
             for name in valid_accounts_map:
                 if name not in stats:
                     stats[name] = {
-                        # 注意：这里不再存储 cookie_str
                         "status": "idle",
                         "last_used_time": "",
                         "last_error_info": None,
@@ -137,9 +139,7 @@ class GeminiAccountManager:
                     })
 
             if not candidates:
-                # 即使没有可用账号，也要保存同步后的状态（比如删除了账号）
-                with open(self.stats_path, 'w', encoding='utf-8') as f:
-                    json.dump(stats, f, indent=4, ensure_ascii=False)
+                save_json(self.stats_path, stats)
                 return None, None
 
             # 6. 排序与选择
@@ -190,10 +190,13 @@ class GeminiAccountManager:
 
 
 # ==========================================
-# 3. 异步请求逻辑
+# 3. 异步请求逻辑 (核心部分)
 # ==========================================
 
 async def _do_gemini_request(cookie_str, prompt, model_name, files):
+    """
+    此函数与原始代码中的 _async_task 保持高度一致。
+    """
     PROXY_URL = "http://127.0.0.1:7890"
 
     def _get_val(k, t):
@@ -206,6 +209,12 @@ async def _do_gemini_request(cookie_str, prompt, model_name, files):
     if not psid:
         raise ValueError("Cookie 无效：缺少 __Secure-1PSID")
 
+    # 【修改 2】: 保持与原始代码一致，添加文件存在性检查
+    if files:
+        for f in files:
+            if not os.path.exists(f):
+                raise FileNotFoundError(f"文件不存在: {f}")
+
     client = GeminiClient(psid, psidts, proxy=PROXY_URL)
 
     try:
@@ -213,6 +222,7 @@ async def _do_gemini_request(cookie_str, prompt, model_name, files):
         response = await client.generate_content(prompt, model=model_name, files=files)
         return response.text
     except Exception as e:
+        # 向上抛出异常，由外部统一处理
         raise e
 
 
@@ -227,15 +237,36 @@ STATS_FILE = BASE_DIR / 'config/gemini_web_stats.json'
 manager = GeminiAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
-def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=None):
+# 【修改 3】: 实现无可用账号时的阻塞等待
+def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=None, wait_timeout=60):
     """
-    对外提供的统一接口
+    对外提供的统一接口。
+
+    Args:
+        prompt (str): 提示词。
+        model_name (str): 模型名称。
+        files (list, optional): 文件路径列表。
+        wait_timeout (int): 当无可用账号时，最长等待时间（秒）。
+
+    Returns:
+        tuple: (error_info, response_str)
     """
-    # 1. 申请账号 (此时计数已+1)
-    account_name, cookie = manager.allocate_account(model_name)
+    start_time = time.time()
+    account_name, cookie = None, None
+
+    # 1. 循环申请账号，直到成功或超时
+    while time.time() - start_time < wait_timeout:
+        account_name, cookie = manager.allocate_account(model_name)
+        if account_name:
+            break  # 成功获取账号，跳出循环
+
+        # 未获取到账号，打印等待信息并休眠
+        elapsed = int(time.time() - start_time)
+        print(f"[System] 无可用账号，进入等待... (已等待 {elapsed}s / {wait_timeout}s)")
+        time.sleep(random.uniform(1, 3))  # 休眠1-3秒，避免高频轮询
 
     if not account_name:
-        return "System Busy: 无可用账号或配置为空", None
+        return f"System Busy: 等待 {wait_timeout} 秒后仍无可用账号。", None
 
     print(f"[System] 分配账号: {account_name}")
 
@@ -246,9 +277,11 @@ def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=N
         # 2. 执行请求
         result_text = asyncio.run(_do_gemini_request(cookie, prompt, model_name, files))
     except Exception as e:
-        error_detail = f"{str(e)}\nTraceback: {traceback.format_exc()}"
+        # 格式化详细错误信息
+        error_detail = f"发生错误: {str(e)}\n\n堆栈追踪:\n{traceback.format_exc()}"
     finally:
-        # 3. 释放账号 (仅重置状态)
+        # 3. 释放账号 (无论成功或失败都执行)
+        print(f"[System] 释放账号: {account_name}")
         manager.release_account(account_name, error_detail)
 
     return error_detail, result_text
@@ -262,15 +295,15 @@ if __name__ == "__main__":
 
     print("开始测试...")
 
-    # 模拟 Config 文件里必须有数据才能跑
-    # 运行后请检查 gemini_stats.json，里面应该只有 counts 和 status，没有 cookie
-
     err, res = generate_gemini_content_managed(
-        prompt="你是哪个型号",
-        model_name="gemini-2.5-pro"
+        prompt="你是哪个模型？",
+        model_name="gemini-2.5-flash",
+        wait_timeout=10  # 测试时可以设置较短的等待时间
     )
 
     if err:
-        print(f"失败: {err}")
+        print("\n======== 调用失败 ========")
+        print(err)
     else:
-        print(f"成功: {res}")
+        print("\n======== 调用成功 ========")
+        print(res)
