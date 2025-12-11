@@ -108,11 +108,16 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
             if file_path:
                 _upload_attachment(page, file_path)
 
-            # 5. 提交 Prompt
-            _submit_prompt(page, prompt)
+            for i in range(3):
+                # 5. 提交 Prompt
+                _submit_prompt(page, prompt)
+                # 6. 等待并获取响应
+                response_text = _wait_and_get_response(page)
+                if "An internal error has occurred." not in response_text:
+                    break
+                time.sleep(2)
+                print("[-] 检测到内部错误，正在重试...")
 
-            # 6. 等待并获取响应
-            response_text = _wait_and_get_response(page)
             print("[+] 任务成功完成。")
 
     except Exception as e:
@@ -165,17 +170,37 @@ def _submit_prompt(page: Page, prompt: str):
     expect(prompt_input).to_be_editable(timeout=15000)
     prompt_input.fill(prompt)
     run_button = page.get_by_role("button", name="Run", exact=True)
-    expect(run_button).to_be_enabled(timeout=15000)
+    expect(run_button).to_be_enabled(timeout=600000)
     run_button.click()
 
+def _scroll_page_to_bottom(page: Page, steps: int = 20, step_px: int = 1500, delay: float = 0.05):
+    """不看任何容器，直接强制往下滚页面，保证滚到最底部"""
+    for _ in range(steps):
+        try:
+            # 将鼠标移到视口中央
+            vp = page.viewport_size or {"width": 1280, "height": 720}
+            page.mouse.move(vp["width"]/2, vp["height"]/2)
+            # 滑轮往下滑
+            page.mouse.wheel(0, step_px)
+        except:
+            pass
+        time.sleep(delay)
+    # 最后用一次键盘 END 强制到底
+    try:
+        page.keyboard.press("End")
+    except:
+        pass
 
 def _wait_and_get_response(page: Page) -> str:
     """(内部调用) 等待流式输出结束并提取文本"""
     print("[*] 等待模型响应中...")
     stop_btn = page.locator("button").filter(has_text="Stop")
     expect(stop_btn).to_be_visible(timeout=30000)
-    expect(stop_btn).to_be_hidden(timeout=300000)
+    expect(stop_btn).to_be_hidden(timeout=600000)
+    _scroll_page_to_bottom(page, steps=40)  # 再滚到底，确保看到最后生成的节点
+    time.sleep(1)  # 等待1秒，确保内容稳定
     response_container = page.locator('[data-turn-role="Model"]').last
+
     expect(response_container).to_be_visible()
     return response_container.inner_text()
 
