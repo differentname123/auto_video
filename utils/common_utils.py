@@ -11,6 +11,7 @@
 import json
 import os
 from pathlib import Path
+from typing import Union
 
 import aiofiles
 import aiohttp
@@ -97,3 +98,31 @@ def get_config(key):
         raise KeyError(f"配置文件中缺少字段: {key}")
 
     return config_data[key]
+
+
+
+
+
+def read_file_to_str(filepath: Union[str, Path],
+                     encoding: str = "utf-8",
+                     errors: str = "strict") -> str:
+    """
+    读取文件并返回整个内容的字符串。
+
+    参数:
+        filepath: 文件路径（str 或 pathlib.Path）。
+        encoding: 文本编码（默认 'utf-8'）。
+        errors: 解码错误处理策略（'strict'|'replace'|'ignore' 等，默认 'strict'）。
+                'strict' 会在遇到无法解码的字节时抛出 UnicodeDecodeError，
+                'replace' 会用替代字符替换无法解码的字节，'ignore' 则忽略它们。
+
+    返回:
+        文件内容（str）。
+
+    抛出:
+        FileNotFoundError 如果文件不存在。
+        UnicodeDecodeError 如果 decoding 失败且 errors='strict'。
+    """
+    p = Path(filepath)
+    with p.open("r", encoding=encoding, errors=errors) as f:
+        return f.read()
