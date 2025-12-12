@@ -16,12 +16,45 @@ import traceback # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\GoogleAIStudio_UserData"
+USER_DATA_DIR = r"W:\temp\base_user"
 TARGET_URL = 'https://aistudio.google.com/'
 
 # ==============================================================================
 # 核心功能函数
 # ==============================================================================
+
+
+class PageCrashedException(Exception):
+    """自定义异常，用于表示页面已崩溃。"""
+    pass
+
+
+def check_for_crash_and_abort(page: Page):
+    """
+    (内部调用) 快速检查页面是否崩溃。如果崩溃，则立即抛出异常以终止任务。
+    """
+    try:
+        # 查找崩溃页面的特征元素：“重新加载”按钮。
+        # 在简体中文环境下，按钮文本是 "重新加载"。
+        reload_button = page.get_by_role("button", name="重新加载")
+
+        # 使用极短的超时来检查，因为它应该立即存在于崩溃页面上。
+        # 如果页面正常，这个检查会很快失败，不会浪费时间。
+        if reload_button.is_visible(timeout=1000):  # 1秒超时
+            error_msg = "页面已崩溃 (检测到 '重新加载' 按钮)，任务终止。"
+            print(f"[!] {error_msg}")
+            # 抛出自定义异常，这样我们可以在主逻辑中捕获它并进行处理。
+            raise PageCrashedException(error_msg)
+
+    except Exception as e:
+        # 如果在1秒内找不到按钮 (抛出 TimeoutError)，或者发生其他错误，
+        # 都意味着页面大概率是正常的，我们可以安全地忽略这个异常。
+        # 我们只关心 PageCrashedException。
+        if isinstance(e, PageCrashedException):
+            raise  # 将我们自己的异常重新抛出
+        # 其他异常（如 TimeoutError）则忽略
+        pass
+
 
 def login_and_save_session():
     """
@@ -35,7 +68,7 @@ def login_and_save_session():
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=False,  # 必须为 False 以便用户可以看到和操作浏览器
-            args=['--disable-blink-features=AutomationControlled', '--start-maximized'],
+            args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
             ignore_default_args=["--enable-automation"]
         )
 
@@ -54,6 +87,33 @@ def login_and_save_session():
         context.close()
         print("\n[+] 登录会话信息已成功保存。现在可以使用 'query' 命令来运行任务了。")
 
+
+def click_acknowledge_if_present(page: Page):
+    """
+    (内部调用) 检查并点击可能出现的 "Acknowledge" 弹窗按钮。
+    此函数会快速检查按钮是否存在，如果不存在则不会等待，避免拖慢流程。
+    """
+    print("[*] 正在检查 'Acknowledge' 弹窗...")
+
+    # 使用 get_by_role 是 Playwright 推荐的最健壮的方式
+    # 它会同时匹配按钮的可见文本 "Acknowledge"
+    acknowledge_button = page.get_by_role("button", name="Acknowledge")
+
+    try:
+        # 使用一个非常短的超时时间来检查按钮是否可见
+        # 如果弹窗存在，它通常会很快出现
+        if acknowledge_button.is_visible(timeout=3000):  # 等待最多3秒
+            print("[+] 检测到 'Acknowledge' 按钮，正在点击...")
+            acknowledge_button.click()
+            # 等待按钮消失，确认弹窗已关闭
+            expect(acknowledge_button).to_be_hidden(timeout=5000)
+            print("[+] 'Acknowledge' 弹窗已处理。")
+        else:
+            print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
+    except Exception:
+        # 如果在3秒内按钮没有出现，is_visible 会返回 False，不会抛出异常。
+        # 这里加一个 except 以防万一，比如页面跳转导致检查失败。
+        print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
 def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -103,10 +163,13 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
             # 3. 访问页面
             print("[*] 正在加载页面...")
             page.goto(TARGET_URL)
-            # time.sleep(100)  # 等待页面完全加载
+            # time.sleep(1000)  # 等待页面完全加载
             # 4. 上传附件 (如果存在)
+            click_acknowledge_if_present(page)
+
             if file_path:
                 _upload_attachment(page, file_path)
+            click_acknowledge_if_present(page)
 
             for i in range(3):
                 # 5. 提交 Prompt
@@ -117,8 +180,9 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
                     break
                 time.sleep(2)
                 print("[-] 检测到内部错误，正在重试...")
-
             print("[+] 任务成功完成。")
+            # time.sleep(1000)
+
 
     except Exception as e:
         error_info = str(e)
@@ -209,99 +273,19 @@ def _wait_and_get_response(page: Page) -> str:
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    # --------- 在这里配置你的查询任务 ---------
-    test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
-    test_prompt = "请详细描述这张图片的内容。"
-    # test_file = None
-    # ----------------------------------------
+    login_and_save_session()
 
-
-
-    # --------- 日志和循环配置 ---------
-    # 使用 .jsonl 扩展名以表示 JSON Lines 格式
-    LOG_FILE = "stability_test_log.jsonl"
-    MIN_INTERVAL_SECONDS = 60  # 每次循环的最小间隔时间（秒）
-    # ----------------------------------
-
-    print(f"测试已开始，日志将记录到 {LOG_FILE}")
-    print(f"每次循环最小间隔为 {MIN_INTERVAL_SECONDS} 秒。")
-    print("按 Ctrl+C 停止测试。")
-
-    iteration_count = 0
-    while True:
-        iteration_count += 1
-        print(f"\n{'=' * 20} 第 {iteration_count} 次测试开始 {'=' * 20}")
-
-        # 1. 记录循环开始时间
-        loop_start_time = time.time()
-
-        # 初始化本次循环的结果变量
-        status = "UNKNOWN"
-        error_message = ""
-        response_content = ""
-        call_duration = 0
-
-        try:
-            # 记录函数调用的开始时间
-            call_start_time = time.time()
-
-            # 2. 调用核心函数
-            err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
-
-            # 记录函数调用的结束时间
-            call_end_time = time.time()
-            call_duration = call_end_time - call_start_time
-
-            if err:
-                status = "FAIL"
-                error_message = str(err)
-                print(f"❌ 函数返回错误: {error_message}")
-            else:
-                status = "SUCCESS"
-                response_content = response
-                print(f"✅ 函数调用成功！")
-                # 为了日志整洁，可以只打印部分内容
-                print(f"   模型回复 (前50字符): {response[:50]}...")
-
-        except Exception as e:
-            # 3. 捕获任何未预料的异常，防止程序崩溃
-            call_end_time = time.time()  # 即使出错，也记录时间
-            call_duration = call_end_time - call_start_time
-            status = "CRASH"
-            # 使用 traceback 获取详细的堆栈信息，便于排查问题
-            error_message = traceback.format_exc()
-            print(f"💥 程序发生严重错误 (CRASH): {e}")
-            print("   详细堆栈信息已记录到日志。")
-
-        # 4. 准备写入日志的数据字典
-        current_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        log_entry = {
-            "timestamp": current_timestamp,
-            "duration_seconds": float(f"{call_duration:.2f}"),
-            "status": status,
-            "error_message": error_message,
-            "response_content": response_content
-        }
-
-        # 5. 将结果字典转换为JSON字符串并追加写入文件
-        try:
-            # 使用 'a' 模式以追加方式打开文件
-            # ensure_ascii=False 保证中文字符能被正确写入，而不是被转义
-            json_string = json.dumps(log_entry, ensure_ascii=False)
-            with open(LOG_FILE, 'a', encoding='utf-8') as f:
-                f.write(json_string + '\n')  # 写入JSON字符串并换行
-
-            print(f"结果已保存到 {LOG_FILE}")
-        except IOError as e:
-            print(f"!!!!!! 严重: 无法写入日志文件 {LOG_FILE}: {e} !!!!!!")
-
-        # 6. 控制循环间隔，确保至少为1分钟
-        loop_end_time = time.time()
-        elapsed_time = loop_end_time - loop_start_time
-
-        if elapsed_time < MIN_INTERVAL_SECONDS:
-            wait_time = MIN_INTERVAL_SECONDS - elapsed_time
-            print(f"本次循环耗时 {elapsed_time:.2f} 秒，等待 {wait_time:.2f} 秒后开始下一次测试...")
-            time.sleep(wait_time)
-        else:
-            print(f"本次循环耗时 {elapsed_time:.2f} 秒，已超过最小间隔，立即开始下一次测试。")
+    # # 测试文件路径
+    # test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
+    # test_prompt = "请详细描述这张图片的内容。"
+    #
+    # # 调用封装好的函数
+    # err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
+    #
+    # if err:
+    #     print("\n======== ❌ 失败 ========")
+    #     print(f"错误信息: {err}")
+    # else:
+    #     print("\n======== ✅ 成功 ========")
+    #     print("模型回复内容:")
+    #     print(response)
