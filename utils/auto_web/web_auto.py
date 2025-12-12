@@ -16,7 +16,7 @@ import traceback # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\taobao9"
+USER_DATA_DIR = r"W:\temp\taobao5"
 TARGET_URL = 'https://aistudio.google.com/prompts/new_chat?model=gemini-2.5-pro'
 
 # ==============================================================================
@@ -300,19 +300,19 @@ def _wait_and_get_response(page: Page) -> str:
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    login_and_save_session()
+    # login_and_save_session()
 
-    # # 测试文件路径
-    # test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
-    # test_prompt = "请详细描述这张图片的内容。"
-    #
-    # # 调用封装好的函数
-    # err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
-    #
-    # if err:
-    #     print("\n======== ❌ 失败 ========")
-    #     print(f"错误信息: {err}")
-    # else:
-    #     print("\n======== ✅ 成功 ========")
-    #     print("模型回复内容:")
-    #     print(response)
+    # 测试文件路径
+    test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
+    test_prompt = "请详细描述这张图片的内容。"
+
+    # 调用封装好的函数
+    err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
+
+    if err:
+        print("\n======== ❌ 失败 ========")
+        print(f"错误信息: {err}")
+    else:
+        print("\n======== ✅ 成功 ========")
+        print("模型回复内容:")
+        print(response)
