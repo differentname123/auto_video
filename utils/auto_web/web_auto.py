@@ -118,12 +118,13 @@ def click_acknowledge_if_present(page: Page):
         print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
 
-def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
+def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR) -> Tuple[Optional[str], Optional[str]]:
     """
     使用已保存的登录会话启动浏览器，上传文件（可选），提交Prompt，并等待返回结果。
 
     Args:
         prompt (str): 提问的内容。
+        user_data_dir (str): 保存浏览器登录状态的用户数据目录。
         file_path (str, optional): 附件文件的绝对路径。默认为 None。
 
     Returns:
@@ -132,8 +133,8 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
         - response_text: 如果成功，返回模型回答；否则为 None。
     """
     # 检查登录会话是否存在
-    if not os.path.isdir(USER_DATA_DIR):
-        error_msg = f"用户数据目录不存在: {USER_DATA_DIR}\n请先运行 'python {os.path.basename(__file__)} login' 命令进行登录。"
+    if not os.path.isdir(user_data_dir): # <-- 使用传入的参数
+        error_msg = f"用户数据目录不存在: {user_data_dir}\n请先运行 'python {os.path.basename(__file__)} login --user-data-dir <你的目录>' 命令进行登录。"
         return error_msg, None
 
     error_info = None
@@ -150,9 +151,9 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
         # 2. 启动 Playwright
         with sync_playwright() as p:
             try:
-                # 启动持久化上下文，它会自动加载 USER_DATA_DIR 中的登录信息
+                # 启动持久化上下文，它会自动加载 user_data_dir 中的登录信息
                 context = p.chromium.launch_persistent_context(
-                    user_data_dir=USER_DATA_DIR,
+                    user_data_dir=user_data_dir, # <-- 使用传入的参数
                     headless=False,  # 调试时建议开启 False，稳定后可改为 True
                     args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
                     ignore_default_args=["--enable-automation"]
@@ -229,6 +230,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
                 pass
 
     return error_info, response_text
+
 
 
 # ==============================================================================
