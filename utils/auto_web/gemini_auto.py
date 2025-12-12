@@ -20,6 +20,11 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = BASE_DIR / 'config/gemini_auto.json'
 STATS_FILE = BASE_DIR / 'config/gemini_auto_stats.json'
+
+# 【新增配置】全局默认最大并发数 (如果配置文件中没有设置 max_concurrency，则使用此值)
+# 根据你的电脑性能调整，建议：8G内存设为 2-3，16G内存设为 4-6
+DEFAULT_MAX_CONCURRENCY = 3
+
 # 假设这个引用是存在的，保持不变
 from utils.auto_web.web_auto import query_google_ai_studio
 from utils.common_utils import save_json, read_json
@@ -94,6 +99,10 @@ class PlaywrightAccountManager:
 
             config_list = raw_config.get('account_list', [])
 
+            # 【新增逻辑 1】获取最大并发限制
+            # 优先从配置文件读取 'max_concurrency'，如果没有则使用代码顶部的默认值
+            max_concurrency = raw_config.get('max_concurrency', DEFAULT_MAX_CONCURRENCY)
+
             # 建立有效账号映射表
             valid_accounts_map = {
                 item['name']: item.get('user_data_dir', '')
@@ -116,8 +125,19 @@ class PlaywrightAccountManager:
                         "total_usage": 0
                     }
 
-            # 3. 检查异常状态
+            # 3. 检查异常状态 (防止死锁)
             stats = self._check_and_reset_stuck_accounts(stats)
+
+            # 【新增逻辑 2】检查当前并发数
+            current_using_count = sum(1 for info in stats.values() if info.get('status') == 'using')
+
+            if current_using_count >= max_concurrency:
+                # 只有当是为了调试时才打印，否则日志会很频繁
+                # print(f"[Manager] 达到最大并发限制 ({current_using_count}/{max_concurrency})，等待释放...")
+
+                # 即使不分配，也需要保存一下 stats（因为上面可能执行了超时重置逻辑）
+                save_json(self.stats_path, stats)
+                return None, None
 
             # 4. 筛选空闲账号
             candidates = [
@@ -126,7 +146,7 @@ class PlaywrightAccountManager:
             ]
 
             if not candidates:
-                # 没有可用账号，保存当前状态（可能发生了重置）并返回
+                # 没有可用账号（都在忙，或者被封禁等），保存状态并返回
                 save_json(self.stats_path, stats)
                 return None, None
 
@@ -190,11 +210,15 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600)
             break
 
         elapsed = int(time.time() - start_time)
-        print(f"{log_prefix} 无可用账号，进入等待... (已等待 {elapsed}s / {wait_timeout}s)")
+        # 这里把等待日志的频率稍微降低一点，或者简单打印
+        if elapsed % 10 == 0:
+            print(f"{log_prefix} 资源繁忙(并发已满或无空闲号)，等待中... (已等待 {elapsed}s / {wait_timeout}s)")
+
+        # 随机等待一段时间再重试
         time.sleep(random.uniform(5, 15))
 
     if not account_name:
-        return f"System Busy: 等待 {wait_timeout} 秒后仍无可用账号。", None
+        return f"System Busy: 等待 {wait_timeout} 秒后仍无可用资源。", None
 
     print(f"{log_prefix} 分配账号: {account_name} ({os.path.basename(user_data_dir)})")
 
@@ -221,7 +245,6 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600)
         manager.release_account(account_name, error_detail)
 
     return error_detail, result_text
-
 
 
 def validate_all_accounts():
