@@ -16,8 +16,8 @@ import traceback # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\taobao9"
-TARGET_URL = 'https://aistudio.google.com/prompts/new_chat?model=gemini-2.5-pro'
+USER_DATA_DIR = r"W:\temp\base_user"
+TARGET_URL = 'https://aistudio.google.com/'
 
 # ==============================================================================
 # 核心功能函数
@@ -117,9 +117,11 @@ def click_acknowledge_if_present(page: Page):
         # 这里加一个 except 以防万一，比如页面跳转导致检查失败。
         print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
+# ... (前面的代码保持不变) ...
 
 def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR) -> Tuple[Optional[str], Optional[str]]:
     """
+    (已修改为无头模式)
     使用已保存的登录会话启动浏览器，上传文件（可选），提交Prompt，并等待返回结果。
 
     Args:
@@ -132,9 +134,9 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
         - error_info: 如果出错，返回错误描述；否则为 None。
         - response_text: 如果成功，返回模型回答；否则为 None。
     """
-    # 检查登录会话是否存在
-    if not os.path.isdir(user_data_dir): # <-- 使用传入的参数
-        error_msg = f"用户数据目录不存在: {user_data_dir}\n请先运行 'python {os.path.basename(__file__)} login --user-data-dir <你的目录>' 命令进行登录。"
+    # 检查登录会话是否存在 (逻辑不变)
+    if not os.path.isdir(user_data_dir):
+        error_msg = f"用户数据目录不存在: {user_data_dir}\n请先运行 'python {os.path.basename(__file__)} login' 命令进行登录。"
         return error_msg, None
 
     error_info = None
@@ -144,48 +146,53 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
     print(f"--- 开始任务: Prompt='{prompt[:20]}...', File='{file_path}' --- 当前时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
-        # 1. 检查文件路径（如果有）
+        # 1. 检查文件路径 (逻辑不变)
         if file_path and not os.path.exists(file_path):
             raise FileNotFoundError(f"附件文件不存在: {file_path}")
 
         # 2. 启动 Playwright
         with sync_playwright() as p:
             try:
-                # 启动持久化上下文，它会自动加载 user_data_dir 中的登录信息
+                # [修改] 这是将脚本变为无头模式的核心改动区域
                 context = p.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir, # <-- 使用传入的参数
-                    headless=False,  # 调试时建议开启 False，稳定后可改为 True
-                    args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
+                    user_data_dir=user_data_dir,
+                    headless=True,  # [修改] 从 False 改为 True，开启无头模式
+
+                    # [新增] 以下参数是为了在无头模式下更好地模拟真实用户，对抗反作弊
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    viewport={'width': 1920, 'height': 1080}, # 设置一个常见的大屏幕分辨率，避免默认的小窗口
+                    locale='en-US', # 伪装成英文环境的浏览器
+                    timezone_id='America/New_York', # 伪装成特定时区
+
+                    # [保留] 这些是你原来就有的、非常有效的反检测参数
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        # '--start-maximized', # [修改] 无头模式下此参数无效，已被上面的 viewport 替代
+                        '--disable-gpu'
+                    ],
                     ignore_default_args=["--enable-automation"]
                 )
             except Exception as e:
                 raise Exception(f"启动浏览器失败，请检查或确认浏览器是否已关闭: {e}")
 
             page = context.pages[0] if context.pages else context.new_page()
-            page.set_default_timeout(60000)  # 设置默认超时时间 60秒
+            page.set_default_timeout(60000)
 
-            # 3. 访问页面
+            # 3. 访问页面 (逻辑不变)
             print("[*] 正在加载页面...")
             page.goto(TARGET_URL)
-            # time.sleep(1000)
-            # [修改] 页面加载后立即检查崩溃
             check_for_crash_and_abort(page)
 
-            # 4. 处理弹窗和上传附件
+            # 4. 处理弹窗和上传附件 (逻辑不变)
             click_acknowledge_if_present(page)
-
             if file_path:
-                # [修改] 操作前再次检查
                 check_for_crash_and_abort(page)
                 _upload_attachment(page, file_path)
 
-            # [修改] 提交前也检查一下，确保页面状态良好
+            # 5. 提交 Prompt (逻辑不变)
             check_for_crash_and_abort(page)
-
             for i in range(3):
-                # 5. 提交 Prompt
                 _submit_prompt(page, prompt)
-                # 6. 等待并获取响应
                 response_text = _wait_and_get_response(page)
                 if "An internal error has occurred." not in response_text:
                     break
@@ -193,24 +200,20 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
                 print("[-] 检测到内部错误，正在重试...")
             print("[+] 任务成功完成。")
 
-    # [修改] 新增对页面崩溃异常的捕获
+    # (异常处理逻辑保持不变)
     except PageCrashedException as crash_e:
         error_info = str(crash_e)
-        # 崩溃时截图
         if context and context.pages:
             try:
                 screenshot_path = f"crash_screenshot_{int(time.time())}.png"
-                # 确保有页面可以截图
                 if context.pages:
                     context.pages[0].screenshot(path=screenshot_path)
                     print(f"[*] 崩溃截图已保存至: {screenshot_path}")
             except Exception as screenshot_e:
                 print(f"[!] 截取崩溃快照失败: {screenshot_e}")
-
     except Exception as e:
         error_info = str(e)
         print(f"[!] 执行过程中发生错误: {error_info}")
-        # 可选：出错时截图
         if context and context.pages:
             try:
                 screenshot_path = f"error_screenshot_{int(time.time())}.png"
@@ -219,9 +222,8 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
                     print(f"[*] 错误截图已保存至: {screenshot_path}")
             except Exception as screenshot_e:
                 print(f"[!] 截取错误快照失败: {screenshot_e}")
-
     finally:
-        # 7. 清理资源
+        # 7. 清理资源 (逻辑不变)
         if context:
             try:
                 context.close()
@@ -232,6 +234,9 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
     return error_info, response_text
 
 
+# ... (后面的代码保持不变) ...
+
+
 
 # ==============================================================================
 # 内部辅助函数 (与原版相同，无需修改)
@@ -240,8 +245,6 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 def _upload_attachment(page: Page, file_path: str):
     """(内部调用) 上传附件逻辑"""
     print(f"[*] 正在上传附件: {os.path.basename(file_path)}")
-    click_acknowledge_if_present(page)
-
     with page.expect_file_chooser(timeout=15000) as fc_info:
         attachment_button = page.locator('[aria-label="Insert images, videos, audio, or files"]')
         attachment_button.click()
@@ -287,7 +290,7 @@ def _wait_and_get_response(page: Page) -> str:
     print("[*] 等待模型响应中...")
     stop_btn = page.locator("button").filter(has_text="Stop")
     expect(stop_btn).to_be_visible(timeout=30000)
-    expect(stop_btn).to_be_hidden(timeout=300000)
+    expect(stop_btn).to_be_hidden(timeout=600000)
     _scroll_page_to_bottom(page, steps=40)  # 再滚到底，确保看到最后生成的节点
     time.sleep(1)  # 等待1秒，确保内容稳定
     response_container = page.locator('[data-turn-role="Model"]').last
@@ -300,19 +303,19 @@ def _wait_and_get_response(page: Page) -> str:
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    login_and_save_session()
+    # login_and_save_session()
 
-    # # 测试文件路径
-    # test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
-    # test_prompt = "请详细描述这张图片的内容。"
-    #
-    # # 调用封装好的函数
-    # err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
-    #
-    # if err:
-    #     print("\n======== ❌ 失败 ========")
-    #     print(f"错误信息: {err}")
-    # else:
-    #     print("\n======== ✅ 成功 ========")
-    #     print("模型回复内容:")
-    #     print(response)
+    # 测试文件路径
+    test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
+    test_prompt = "请详细描述这张图片的内容。"
+
+    # 调用封装好的函数
+    err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
+
+    if err:
+        print("\n======== ❌ 失败 ========")
+        print(f"错误信息: {err}")
+    else:
+        print("\n======== ✅ 成功 ========")
+        print("模型回复内容:")
+        print(response)

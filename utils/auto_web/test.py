@@ -23,9 +23,10 @@ import csv
 import os
 import traceback # 用于捕获更详细的异常信息
 
-from utils.auto_web.web_auto import query_google_ai_studio
+from utils.auto_web.web_auto_headless import query_google_ai_studio
 from utils.common_utils import read_json, read_file_to_str, save_json, is_valid_target_file_simple
 
+USER_DATA_DIR = r"W:\temp\taobao5"
 
 def fun():
     test_prompt = read_file_to_str("视频场景逻辑切分只根据视频内容.txt")
@@ -80,9 +81,9 @@ def fun():
             call_start_time = time.time()
 
             # 2. 调用核心函数
-            err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
+            err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file, user_data_dir=USER_DATA_DIR)
             if "You've reached your rate limit. Please try again later" in response:
-                print("[-] 检测到速率限制，等待10分钟后重试...")
+                print(f"[-] 检测到速率限制，等待10分钟后重试...{response} {err}")
                 time.sleep(600)
 
             # 记录函数调用的结束时间
