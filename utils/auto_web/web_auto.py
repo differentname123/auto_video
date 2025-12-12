@@ -115,6 +115,7 @@ def click_acknowledge_if_present(page: Page):
         # 这里加一个 except 以防万一，比如页面跳转导致检查失败。
         print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
+
 def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """
     使用已保存的登录会话启动浏览器，上传文件（可选），提交Prompt，并等待返回结果。
@@ -151,7 +152,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=USER_DATA_DIR,
                     headless=False,  # 调试时建议开启 False，稳定后可改为 True
-                    args=['--disable-blink-features=AutomationControlled', '--start-maximized'],
+                    args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
                     ignore_default_args=["--enable-automation"]
                 )
             except Exception as e:
@@ -163,13 +164,20 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
             # 3. 访问页面
             print("[*] 正在加载页面...")
             page.goto(TARGET_URL)
-            # time.sleep(1000)  # 等待页面完全加载
-            # 4. 上传附件 (如果存在)
+
+            # [修改] 页面加载后立即检查崩溃
+            check_for_crash_and_abort(page)
+
+            # 4. 处理弹窗和上传附件
             click_acknowledge_if_present(page)
 
             if file_path:
+                # [修改] 操作前再次检查
+                check_for_crash_and_abort(page)
                 _upload_attachment(page, file_path)
-            click_acknowledge_if_present(page)
+
+            # [修改] 提交前也检查一下，确保页面状态良好
+            check_for_crash_and_abort(page)
 
             for i in range(3):
                 # 5. 提交 Prompt
@@ -181,8 +189,20 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
                 time.sleep(2)
                 print("[-] 检测到内部错误，正在重试...")
             print("[+] 任务成功完成。")
-            # time.sleep(1000)
 
+    # [修改] 新增对页面崩溃异常的捕获
+    except PageCrashedException as crash_e:
+        error_info = str(crash_e)
+        # 崩溃时截图
+        if context and context.pages:
+            try:
+                screenshot_path = f"crash_screenshot_{int(time.time())}.png"
+                # 确保有页面可以截图
+                if context.pages:
+                    context.pages[0].screenshot(path=screenshot_path)
+                    print(f"[*] 崩溃截图已保存至: {screenshot_path}")
+            except Exception as screenshot_e:
+                print(f"[!] 截取崩溃快照失败: {screenshot_e}")
 
     except Exception as e:
         error_info = str(e)
@@ -191,8 +211,9 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
         if context and context.pages:
             try:
                 screenshot_path = f"error_screenshot_{int(time.time())}.png"
-                context.pages[0].screenshot(path=screenshot_path)
-                print(f"[*] 错误截图已保存至: {screenshot_path}")
+                if context.pages:
+                    context.pages[0].screenshot(path=screenshot_path)
+                    print(f"[*] 错误截图已保存至: {screenshot_path}")
             except Exception as screenshot_e:
                 print(f"[!] 截取错误快照失败: {screenshot_e}")
 
