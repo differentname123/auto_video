@@ -59,6 +59,10 @@ def fun():
         if video_id in exist_video_id_list and "has_overall_bgm" in response_content:
             print(f"[+] 视频已测试过，跳过处理: {video_id}")
             continue
+
+        if "Content blocke" in response_content:
+            print(f"[+] 视频被内容屏蔽，跳过处理: {video_id}")
+            continue
         test_file = video_path
 
         iteration_count += 1

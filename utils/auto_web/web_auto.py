@@ -164,6 +164,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
             # 3. 访问页面
             print("[*] 正在加载页面...")
             page.goto(TARGET_URL)
+            time.sleep(1)
 
             # [修改] 页面加载后立即检查崩溃
             check_for_crash_and_abort(page)
