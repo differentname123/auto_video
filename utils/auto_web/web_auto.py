@@ -94,6 +94,7 @@ def click_acknowledge_if_present(page: Page):
     此函数会快速检查按钮是否存在，如果不存在则不会等待，避免拖慢流程。
     """
     # print("[*] 正在检查 'Acknowledge' 弹窗...")
+    time.sleep(2)
 
     # 使用 get_by_role 是 Playwright 推荐的最健壮的方式
     # 它会同时匹配按钮的可见文本 "Acknowledge"
@@ -109,7 +110,7 @@ def click_acknowledge_if_present(page: Page):
             expect(acknowledge_button).to_be_hidden(timeout=5000)
             print("[+] 'Acknowledge' 弹窗已处理。")
         else:
-            # print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
+            print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
             pass
     except Exception:
         # 如果在3秒内按钮没有出现，is_visible 会返回 False，不会抛出异常。
@@ -139,7 +140,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
     response_text = None
     context = None
 
-    print(f"--- 开始任务: Prompt='{prompt[:20]}...', File='{file_path}' ---")
+    print(f"--- 开始任务: Prompt='{prompt[:20]}...', File='{file_path}' --- 当前时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
         # 1. 检查文件路径（如果有）
@@ -165,8 +166,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None) -> Tupl
             # 3. 访问页面
             print("[*] 正在加载页面...")
             page.goto(TARGET_URL)
-            time.sleep(1)
-
+            # time.sleep(1000)
             # [修改] 页面加载后立即检查崩溃
             check_for_crash_and_abort(page)
 
@@ -257,7 +257,7 @@ def _submit_prompt(page: Page, prompt: str):
     expect(prompt_input).to_be_editable(timeout=15000)
     prompt_input.fill(prompt)
     run_button = page.get_by_role("button", name="Run", exact=True)
-    expect(run_button).to_be_enabled(timeout=600000)
+    expect(run_button).to_be_enabled(timeout=300000)
     run_button.click()
 
 def _scroll_page_to_bottom(page: Page, steps: int = 20, step_px: int = 1500, delay: float = 0.05):
