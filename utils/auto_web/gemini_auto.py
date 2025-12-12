@@ -172,7 +172,7 @@ if not CONFIG_FILE.parent.exists():
 manager = PlaywrightAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
-def generate_gemini_content_playwright(prompt, files=None, wait_timeout=600):
+def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600):
     """
     使用 Playwright 账号管理器安全地调用 Gemini。
     """
@@ -201,11 +201,11 @@ def generate_gemini_content_playwright(prompt, files=None, wait_timeout=600):
     error_detail, result_text = None, None
     try:
         file_to_upload = None
-        if files:
-            if isinstance(files, list) and files:
-                file_to_upload = files[0]
-            elif isinstance(files, str):
-                file_to_upload = files
+        if file_path:
+            if isinstance(file_path, list) and file_path:
+                file_to_upload = file_path[0]
+            elif isinstance(file_path, str):
+                file_to_upload = file_path
 
         # 2. 调用核心函数
         error_detail, result_text = query_google_ai_studio(

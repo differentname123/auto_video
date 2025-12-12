@@ -23,6 +23,7 @@ import csv
 import os
 import traceback # 用于捕获更详细的异常信息
 
+from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.auto_web.web_auto_headless import query_google_ai_studio
 from utils.common_utils import read_json, read_file_to_str, save_json, is_valid_target_file_simple
 
@@ -81,7 +82,7 @@ def fun():
             call_start_time = time.time()
 
             # 2. 调用核心函数
-            err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file, user_data_dir=USER_DATA_DIR)
+            err, response = generate_gemini_content_playwright(prompt=test_prompt, file_path=test_file)
             if "You've reached your rate limit. Please try again later" in response:
                 print(f"[-] 检测到速率限制，等待10分钟后重试...{response} {err}")
                 time.sleep(600)
