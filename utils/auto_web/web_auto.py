@@ -93,7 +93,7 @@ def click_acknowledge_if_present(page: Page):
     (内部调用) 检查并点击可能出现的 "Acknowledge" 弹窗按钮。
     此函数会快速检查按钮是否存在，如果不存在则不会等待，避免拖慢流程。
     """
-    print("[*] 正在检查 'Acknowledge' 弹窗...")
+    # print("[*] 正在检查 'Acknowledge' 弹窗...")
 
     # 使用 get_by_role 是 Playwright 推荐的最健壮的方式
     # 它会同时匹配按钮的可见文本 "Acknowledge"
@@ -109,7 +109,8 @@ def click_acknowledge_if_present(page: Page):
             expect(acknowledge_button).to_be_hidden(timeout=5000)
             print("[+] 'Acknowledge' 弹窗已处理。")
         else:
-            print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
+            # print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
+            pass
     except Exception:
         # 如果在3秒内按钮没有出现，is_visible 会返回 False，不会抛出异常。
         # 这里加一个 except 以防万一，比如页面跳转导致检查失败。
