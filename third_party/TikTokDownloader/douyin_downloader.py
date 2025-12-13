@@ -102,7 +102,7 @@ async def _async_download_and_get_latest_file(douyin_video_url: str, only_meta=F
 
             # 如果只需要元数据，在此返回
             if only_meta:
-                return None, processed_data  # path 为 None
+                return processed_data  # path 为 None
 
             if not processed_data:
                 console.error("处理视频元数据失败。")
