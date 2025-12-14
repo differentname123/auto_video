@@ -59,6 +59,23 @@ class MongoManager:
     # video_materials 表相关操作
     # ==========================================
 
+    def find_unfinished_tasks(self):
+        """
+        查询所有状态不为 '已完成' 的发布任务。
+        这对于获取待处理或正在处理的任务列表非常有用。
+
+        Returns:
+            list: 包含所有状态不为 '已完成' 的任务文档的列表。
+        """
+        query = {
+            "status": {
+                "$ne": "已完成"  # 使用 $ne (not equal) 操作符
+            }
+        }
+        # 同时，我们也可以排除那些根本没有 status 字段的旧数据（可选，但建议）
+        # query["status"] = {"$exists": True, "$ne": "已完成"}
+        return self.db.find_many(self.tasks_collection, query)
+
     def find_materials_by_ids(self, video_id_list: list):
         """
         1. 根据 video_id 列表，查询所有匹配的视频素材记录。

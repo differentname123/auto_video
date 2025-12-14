@@ -13,6 +13,8 @@ from dataclasses import dataclass
 
 from flask import Flask, request, jsonify, render_template, Response
 
+from video_common_config import TaskStatus
+
 
 # =============================================================================
 # 路径配置
@@ -47,11 +49,6 @@ from third_party.TikTokDownloader.douyin_downloader import get_meta_info
 # 常量定义
 # =============================================================================
 
-class TaskStatus:
-    """任务状态常量"""
-    PROCESSING = '处理中'
-    COMPLETED = '已完成'
-    FAILED = '失败'
 
 
 class ResponseStatus:
@@ -238,6 +235,7 @@ class PublishTaskBuilder:
             'video_id_list': video_id_list,
             'userName': user_name,
             'status': TaskStatus.PROCESSING,
+            'failed_count': 0,
             'original_url_info_list': original_url_info_list,
             'creation_guidance_info': {
                 'retain_ratio': global_settings.get('retention_ratio'),
