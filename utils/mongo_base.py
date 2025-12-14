@@ -10,7 +10,7 @@
 """
 import urllib.parse
 from pymongo import MongoClient, UpdateOne, ASCENDING, DESCENDING
-from pymongo.errors import PyMongoError, DuplicateKeyError
+from pymongo.errors import PyMongoError, DuplicateKeyError, BulkWriteError
 from bson.objectid import ObjectId
 
 from utils.common_utils import get_config
@@ -188,7 +188,6 @@ class MongoBase:
     def bulk_upsert(self, collection_name, data_list, unique_key_field):
         """
         批量 Upsert（高性能）：
-        适用于一次性需要更新/插入几百条数据，比循环调用 update_one 快得多。
         """
         if not data_list: return
 
@@ -196,11 +195,8 @@ class MongoBase:
         operations = []
 
         for item in data_list:
-            # 假设 item 中包含用于匹配的唯一键
-            filter_q = {unique_key_field: item[unique_key_field]}
-            # 将 item 作为 $set 的内容
+            filter_q = {unique_key_field: item.get(unique_key_field)}
             update_op = {"$set": item}
-
             operations.append(UpdateOne(filter_q, update_op, upsert=True))
 
         if operations:
@@ -208,8 +204,15 @@ class MongoBase:
                 result = col.bulk_write(operations, ordered=False)
                 print(
                     f"批量操作完成: 匹配 {result.matched_count}, 修改 {result.modified_count}, 插入 {result.upserted_count}")
+            except BulkWriteError as bwe:
+                # 捕获具体的 BulkWriteError
+                print(f"❌ 批量写入时发生验证错误: {bwe.details}")
+                # 将异常重新抛出，让上层处理！
+                raise bwe
             except PyMongoError as e:
-                print(f"❌ 批量写入错误: {e}")
+                print(f"❌ 发生未知批量写入错误: {e}")
+                # 其他错误也重新抛出
+                raise e
 
     def create_index(self, collection_name, keys, unique=False):
         """
