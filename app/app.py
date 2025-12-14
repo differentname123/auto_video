@@ -1,70 +1,177 @@
+"""
+视频处理与发布任务管理服务
+
+该模块提供Flask Web服务，用于接收前端提交的视频处理任务，
+解析抖音视频元数据，并将任务信息存储到MongoDB中。
+"""
+
 import sys
 import os
+import time
+from typing import Optional
+from dataclasses import dataclass
+
+from flask import Flask, request, jsonify, render_template, Response
+
+
+# =============================================================================
+# 路径配置
+# =============================================================================
+
+def _configure_third_party_paths() -> None:
+    """
+    配置第三方库路径。
+
+    TikTokDownloader 库内部使用 'from src...' 的导入方式，
+    需要将其根目录添加到 sys.path 中才能正常工作。
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    downloader_root = os.path.join(project_root, 'third_party', 'TikTokDownloader')
+
+    if downloader_root not in sys.path:
+        sys.path.insert(0, downloader_root)
+
+
+_configure_third_party_paths()
+
+# =============================================================================
+# 依赖导入（必须在路径配置之后）
+# =============================================================================
 
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
-
-# --- 新的、修正后的代码 ---
-# 1. 先计算出项目的根目录
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 2. 构造出那个行为不标准的第三方库的根目录
-#    它的内部代码（如 console.py）是基于这个目录来写 'from src...' 的
-downloader_root = os.path.join(project_root, 'third_party', 'TikTokDownloader')
-
-# 3. 将这个特定的库目录添加到 sys.path 中
-#    这样 'from src' 就能在这个目录里找到 src 文件夹了
-if downloader_root not in sys.path:
-    sys.path.insert(0, downloader_root)
-# --- 代码修改结束 ---
-
-
-
-from flask import Flask, request, jsonify, render_template
-
 from third_party.TikTokDownloader.douyin_downloader import get_meta_info
+
+
+# =============================================================================
+# 常量定义
+# =============================================================================
+
+class TaskStatus:
+    """任务状态常量"""
+    PROCESSING = '处理中'
+    COMPLETED = '已完成'
+    FAILED = '失败'
+
+
+class ResponseStatus:
+    """API响应状态常量"""
+    SUCCESS = 'success'
+    ERROR = 'error'
+
+
+class ErrorMessage:
+    """错误消息常量"""
+    EMPTY_REQUEST_BODY = '请求体为空'
+    MISSING_REQUIRED_FIELDS = '用户名或视频列表为空'
+    PARTIAL_PARSE_FAILURE = '部分视频解析失败，任务未创建。'
+    TASK_ALREADY_EXISTS = '任务已存在，无需重复创建。'
+    PARSE_NO_METADATA = '解析失败：未能从链接中提取到任何元数据'
+
+
+# =============================================================================
+# 数据类定义
+# =============================================================================
+
+@dataclass
+class ParseResult:
+    """视频URL解析结果"""
+    success: bool
+    meta_data: Optional[dict] = None
+    error_message: Optional[str] = None
+
+
+# =============================================================================
+# 应用初始化
+# =============================================================================
 
 app = Flask(__name__)
 
-print("Initializing MongoDB connection for the application...")
-mongo_base_instance = gen_db_object()
-manager = MongoManager(mongo_base_instance)
-print("✅ MongoDB Manager is ready.")
-def parse_douyin_url(video_url):
-    """
-    解析出抖音视频信息
-    """
-    try:
-        meta_data_list = get_meta_info(video_url)
-        if not meta_data_list:  # 检查列表是否为空
-            return "解析失败：未能从链接中提取到任何元数据", None
 
-        # 假设总是取第一个结果
-        return "", meta_data_list[0]
-    except Exception as e:
-        print(f"解析URL '{video_url}' 时发生异常: {e}")
-        return f"解析异常: {e}", None
+def _init_mongo_manager() -> MongoManager:
+    """初始化MongoDB管理器"""
+    print("Initializing MongoDB connection for the application...")
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
+    print("✅ MongoDB Manager is ready.")
+    return manager
 
 
-# --- 辅助函数：用于创建 video_materials 数据 ---
-def _create_video_material(video_item, global_settings, meta_data, video_id):
-    """
-    根据输入信息，组装单个 video_materials 对象。
+mongo_manager = _init_mongo_manager()
 
-    Args:
-        video_item (dict): 来自前端 video_list 的单个视频项。
-        global_settings (dict): 来自前端的全局设置。
-        meta_data (dict): 解析视频URL后得到的元数据。
-        video_id (str): 为该视频生成的唯一ID。
 
-    Returns:
-        dict: 符合 video_materials 表结构的字典。
-    """
-    return {
-        'video_id': video_id,
-        'status': '处理中',
-        'error_info': None,
-        'base_info': {
+# =============================================================================
+# 视频解析服务
+# =============================================================================
+
+class DouyinVideoParser:
+    """抖音视频解析器"""
+
+    @staticmethod
+    def parse(video_url: str) -> ParseResult:
+        """
+        解析抖音视频URL，提取元数据。
+
+        Args:
+            video_url: 抖音视频链接
+
+        Returns:
+            ParseResult: 包含解析状态和元数据的结果对象
+        """
+        try:
+            meta_data_list = get_meta_info(video_url)
+
+            if not meta_data_list:
+                return ParseResult(
+                    success=False,
+                    error_message=ErrorMessage.PARSE_NO_METADATA
+                )
+
+            return ParseResult(success=True, meta_data=meta_data_list[0])
+
+        except Exception as e:
+            print(f"解析URL '{video_url}' 时发生异常: {e}")
+            return ParseResult(success=False, error_message=f"解析异常: {e}")
+
+
+# =============================================================================
+# 数据构建器
+# =============================================================================
+
+class VideoMaterialBuilder:
+    """视频素材数据构建器"""
+
+    @staticmethod
+    def build(
+            video_item: dict,
+            global_settings: dict,
+            meta_data: dict,
+            video_id: str
+    ) -> dict:
+        """
+        构建视频素材数据对象。
+
+        Args:
+            video_item: 前端提交的单个视频项
+            global_settings: 全局设置
+            meta_data: 视频元数据
+            video_id: 视频唯一标识
+
+        Returns:
+            符合 video_materials 表结构的字典
+        """
+        return {
+            'video_id': video_id,
+            'status': TaskStatus.PROCESSING,
+            'error_info': None,
+            'base_info': VideoMaterialBuilder._build_base_info(video_item, meta_data),
+            'extra_info': VideoMaterialBuilder._build_extra_info(video_item, global_settings)
+        }
+
+    @staticmethod
+    def _build_base_info(video_item: dict, meta_data: dict) -> dict:
+        """构建视频基础信息"""
+        return {
             'video_title': meta_data.get('full_title') or meta_data.get('desc'),
             'video_desc': meta_data.get('desc'),
             'collection_time': meta_data.get('collection_time'),
@@ -75,219 +182,310 @@ def _create_video_material(video_item, global_settings, meta_data, video_id):
             'height': meta_data.get('height'),
             'width': meta_data.get('width'),
             'original_url': video_item.get('url'),
-            'download_url': meta_data.get('downloads'),  # 注意：这是临时链接，后续应更新为云存储地址
+            'download_url': meta_data.get('downloads'),
             'dynamic_cover': meta_data.get('dynamic_cover'),
             'static_cover': meta_data.get('static_cover'),
-            'comment_list': [],  # 缺失字段，需要后续获取
+            'comment_list': [],
             'digg_count': meta_data.get('digg_count'),
             'comment_count': meta_data.get('comment_count'),
             'collect_count': meta_data.get('collect_count'),
             'share_count': meta_data.get('share_count')
-        },
-        'extra_info': {
+        }
+
+    @staticmethod
+    def _build_extra_info(video_item: dict, global_settings: dict) -> dict:
+        """构建视频扩展信息"""
+        return {
             'is_requires_text': video_item.get('need_text'),
             'is_needs_stickers': video_item.get('need_emoji'),
             'is_needs_audio_replace': global_settings.get('audio_replace'),
             'is_realtime_video': video_item.get('is_realtime'),
-            # 以下字段需要后续处理才能填充
             'scene_timestamp_list': None,
             'logical_scene_info': None,
             'asr_info': None,
             'owner_subtitle_box_info': None
         }
-    }
 
 
-# --- 辅助函数：用于创建 publish_tasks 数据 ---
-def _create_publish_task(user_name, global_settings, video_materials_list):
-    """
-    根据本次请求的所有信息，组装 publish_tasks 对象。
+class PublishTaskBuilder:
+    """发布任务数据构建器"""
 
-    Args:
-        user_name (str): 用户名。
-        global_settings (dict): 全局设置。
-        video_materials_list (list): 本次任务生成的所有 video_materials 对象列表。
+    @staticmethod
+    def build(
+            user_name: str,
+            global_settings: dict,
+            video_materials: list,
+            video_list: list
+    ) -> dict:
+        """
+        构建发布任务数据对象。
 
-    Returns:
-        dict: 符合 publish_tasks 表结构的字典。
-    """
-    # 从 video_materials_list 中提取任务所需信息
-    video_id_list = [m['video_id'] for m in video_materials_list]
-    original_url_info_list = [
-        {
-            'origin_url': m['base_info']['original_url'],
-            'video_id': m['video_id'],
-            # 注意: 'is_contains_creator_voice' 不在 material 中, 需要从原始 video_item 获取
-            # 这里为了简化，我们假设它可以通过其他方式回溯，或在主流程中构建
-            'is_requires_text': m['extra_info']['is_requires_text'],
-            'is_needs_stickers': m['extra_info']['is_needs_stickers'],
-            'is_needs_audio_replace': m['extra_info']['is_needs_audio_replace'],
-            'is_realtime_video': m['extra_info']['is_realtime_video']
-        }
-        for m in video_materials_list
-    ]
+        Args:
+            user_name: 用户名
+            global_settings: 全局设置
+            video_materials: 视频素材列表
+            video_list: 原始视频列表（来自前端）
 
-    return {
-        'video_id_list': video_id_list,
-        'userName': user_name,
-        'original_url_info_list': original_url_info_list,  # 注意：此实现缺少 is_contains_creator_voice
-        'creation_guidance_info': {
-            'retain_ratio': global_settings.get('retention_ratio'),
-            'is_need_original': global_settings.get('is_original'),
-            'is_need_narration': global_settings.get('allow_commentary'),
-            'is_need_scene_title_and_summary': global_settings.get('scene_title')
-        },
-        'new_video_script_info': None,  # 缺失字段，后续生成
-        'expected_publish_time': global_settings.get('schedule_date'),
-        'upload_info': None  # 缺失字段，后续生成
-    }
+        Returns:
+            符合 publish_tasks 表结构的字典
+        """
+        video_id_list = [m['video_id'] for m in video_materials]
+        original_url_info_list = PublishTaskBuilder._build_url_info_list(
+            video_materials, video_list
+        )
 
-@app.route('/one-click-generate', methods=['POST'])
-def one_click_generate():
-    """
-    接收前端提交的任务请求，并提供准确的响应信息。
-    """
-    try:
-        # --- 阶段 0: 数据准备 (逻辑不变) ---
-        data = request.get_json()
-        if not data:
-            return jsonify({'status': 'error', 'message': '请求体为空'}), 400
-
-        user_name = data.get('userName')
-        global_settings = data.get('global_settings', {})
-        video_list = data.get('video_list', [])
-
-        if not user_name or not video_list:
-            return jsonify({'status': 'error', 'message': '用户名或视频列表为空'}), 400
-
-        print(f"收到请求 | 用户: {user_name} | 视频数: {len(video_list)}")
-
-        # --- 阶段 1: 解析和验证 ---
-        generated_materials = []
-        parsing_errors = []
-
-        for index, video_item in enumerate(video_list):
-            video_url = video_item.get('url', '').strip()
-            if not video_url:
-                # 可以选择记录一个错误或直接跳过
-                parsing_errors.append(f"第 {index + 1} 条视频链接为空。")
-                continue
-
-            error_info, meta_data = parse_douyin_url(video_url)
-
-            if error_info or not meta_data:
-                # 需求1：收集详细的错误信息
-                short_url = video_url[-20:] # 取URL后20位，避免太长
-                error_msg = f"第 {index + 1} 条视频链接 (...{short_url}) 解析失败，原因：{error_info or '未知'}"
-                parsing_errors.append(error_msg)
-                print(error_msg)
-                continue # 继续解析下一个，而不是中断
-
-            video_id = meta_data.get('id')
-            if not video_id:
-                short_url = video_url[-20:]
-                error_msg = f"第 {index + 1} 条视频链接 (...{short_url}) 解析成功但缺少'id'字段"
-                parsing_errors.append(error_msg)
-                continue
-
-            material = _create_video_material(video_item, global_settings, meta_data, video_id)
-            generated_materials.append(material)
-
-        # 如果在解析阶段就有错误，则立即返回，不进行后续操作
-        if parsing_errors:
-            return jsonify({
-                'status': 'error',
-                'message': '部分视频解析失败，任务未创建。',
-                'errors': parsing_errors # 将所有错误信息返回给前端
-            }), 400
-
-        # --- 阶段 2: 任务存在性检查 ---
-        video_id_list_for_task = [m['video_id'] for m in generated_materials]
-
-        # 需求2：查询任务是否已存在
-        # 注意：find_task_by_exact_video_ids 内部会自动排序
-        existing_task = manager.find_task_by_exact_video_ids(video_id_list_for_task)
-        if existing_task:
-            print("检测到重复任务，已存在相同的视频ID列表，跳过创建新任务。")
-            return jsonify({
-                'status': 'success', # 操作是成功的，只是结果是“已存在”
-                'message': '任务已存在，无需重复创建。'
-            })
-
-        # --- 阶段 3: 数据写入 (只有在解析全部成功且任务不存在时执行) ---
-
-        # 3.1 批量写入素材
-        if generated_materials:
-            manager.upsert_materials(generated_materials)
-
-        # 3.2 构造并写入任务
-        original_url_info_list = []
-        successful_urls = {m['base_info']['original_url'] for m in generated_materials}
-        for item in video_list:
-             if item.get('url') in successful_urls:
-                mat = next((m for m in generated_materials if m['base_info']['original_url'] == item['url']), None)
-                if mat:
-                     original_url_info_list.append({
-                        'origin_url': item['url'],
-                        'video_id': mat['video_id'],
-                        'is_contains_creator_voice': item.get('has_author_voice'),
-                        'is_requires_text': item.get('need_text'),
-                        # ... 其他字段 ...
-                    })
-
-        publish_task_data = {
-            'video_id_list': video_id_list_for_task,
+        return {
+            'video_id_list': video_id_list,
             'userName': user_name,
+            'status': TaskStatus.PROCESSING,
             'original_url_info_list': original_url_info_list,
-            'creation_guidance_info': global_settings, # 可以简化
+            'creation_guidance_info': {
+                'retain_ratio': global_settings.get('retention_ratio'),
+                'is_need_original': global_settings.get('is_original'),
+                'is_need_narration': global_settings.get('allow_commentary'),
+                'is_need_scene_title_and_summary': global_settings.get('scene_title')
+            },
             'new_video_script_info': None,
             'expected_publish_time': global_settings.get('schedule_date'),
             'upload_info': None
         }
-        manager.upsert_tasks([publish_task_data])
 
-        return jsonify({
-            'status': 'success',
-            'message': f'新任务已成功创建，包含 {len(generated_materials)} 个视频。'
-        })
+    @staticmethod
+    def _build_url_info_list(video_materials: list, video_list: list) -> list:
+        """构建原始URL信息列表"""
+        successful_urls = {m['base_info']['original_url'] for m in video_materials}
+        url_info_list = []
+
+        for item in video_list:
+            item_url = item.get('url')
+            if item_url not in successful_urls:
+                continue
+
+            material = next(
+                (m for m in video_materials if m['base_info']['original_url'] == item_url),
+                None
+            )
+            if not material:
+                continue
+
+            url_info_list.append({
+                'origin_url': item_url,
+                'video_id': material['video_id'],
+                'is_contains_creator_voice': item.get('has_author_voice'),
+                'is_requires_text': item.get('need_text'),
+                'is_needs_stickers': item.get('need_emoji'),
+                'is_needs_audio_replace': material['extra_info']['is_needs_audio_replace'],
+                'is_realtime_video': item.get('is_realtime')
+            })
+
+        return url_info_list
+
+
+# =============================================================================
+# 请求处理服务
+# =============================================================================
+
+class OneClickGenerateService:
+    """一键生成服务"""
+
+    def __init__(self, manager: MongoManager):
+        self.manager = manager
+        self.parser = DouyinVideoParser()
+
+    def process(self, data: dict) -> tuple[dict, int]:
+        """
+        处理一键生成请求。
+
+        Args:
+            data: 请求数据
+
+        Returns:
+            (响应数据, HTTP状态码)
+        """
+        # 参数验证
+        validation_error = self._validate_request(data)
+        if validation_error:
+            return validation_error
+
+        user_name = data['userName']
+        global_settings = data.get('global_settings', {})
+        video_list = data['video_list']
+
+        print(f"收到请求 | 用户: {user_name} | 视频数: {len(video_list)}")
+
+        # 解析视频
+        materials, errors = self._parse_videos(video_list, global_settings)
+
+        if errors:
+            return self._error_response(
+                ErrorMessage.PARTIAL_PARSE_FAILURE,
+                errors=errors
+            ), 400
+
+        # 检查任务是否已存在
+        video_ids = [m['video_id'] for m in materials]
+        if self.manager.find_task_by_exact_video_ids(video_ids):
+            print(f"{video_ids} {user_name} 检测到重复任务，跳过创建。")
+            return self._success_response(ErrorMessage.TASK_ALREADY_EXISTS), 200
+
+        # 保存数据
+        self._save_task(user_name, global_settings, materials, video_list)
+
+        return self._success_response(
+            f'新任务已成功创建，包含 {len(materials)} 个视频。'
+        ), 200
+
+    def _validate_request(self, data: dict) -> Optional[tuple[dict, int]]:
+        """验证请求数据"""
+        if not data:
+            return self._error_response(ErrorMessage.EMPTY_REQUEST_BODY), 400
+
+        if not data.get('userName') or not data.get('video_list'):
+            return self._error_response(ErrorMessage.MISSING_REQUIRED_FIELDS), 400
+
+        return None
+
+    def _parse_videos(
+            self,
+            video_list: list,
+            global_settings: dict
+    ) -> tuple[list, list]:
+        """
+        批量解析视频。
+
+        Returns:
+            (素材列表, 错误列表)
+        """
+        materials = []
+        errors = []
+
+        for index, video_item in enumerate(video_list, start=1):
+            video_url = video_item.get('url', '').strip()
+
+            if not video_url:
+                errors.append(f"第 {index} 条视频链接为空。")
+                continue
+
+            result = self.parser.parse(video_url)
+
+            if not result.success:
+                url_suffix = video_url[-20:]
+                errors.append(
+                    f"第 {index} 条视频链接 (...{url_suffix}) 解析失败，"
+                    f"原因：{result.error_message or '未知'}"
+                )
+                continue
+
+            video_id = result.meta_data.get('id')
+            if not video_id:
+                url_suffix = video_url[-20:]
+                errors.append(
+                    f"第 {index} 条视频链接 (...{url_suffix}) 解析成功但缺少'id'字段"
+                )
+                continue
+
+            material = VideoMaterialBuilder.build(
+                video_item, global_settings, result.meta_data, video_id
+            )
+            materials.append(material)
+
+        return materials, errors
+
+    def _save_task(
+            self,
+            user_name: str,
+            global_settings: dict,
+            materials: list,
+            video_list: list
+    ) -> None:
+        """保存任务和素材到数据库"""
+        if materials:
+            self.manager.upsert_materials(materials)
+
+        task_data = PublishTaskBuilder.build(
+            user_name, global_settings, materials, video_list
+        )
+        self.manager.upsert_tasks([task_data])
+
+    @staticmethod
+    def _success_response(message: str) -> dict:
+        """构建成功响应"""
+        return {'status': ResponseStatus.SUCCESS, 'message': message}
+
+    @staticmethod
+    def _error_response(message: str, errors: list = None) -> dict:
+        """构建错误响应"""
+        response = {'status': ResponseStatus.ERROR, 'message': message}
+        if errors:
+            response['errors'] = errors
+        return response
+
+
+# 初始化服务实例
+one_click_service = OneClickGenerateService(mongo_manager)
+
+
+# =============================================================================
+# API路由
+# =============================================================================
+
+@app.route('/')
+def index() -> str:
+    """首页"""
+    return render_template('index.html')
+
+
+@app.route('/one-click-generate', methods=['POST'])
+def one_click_generate() -> tuple[Response, int]:
+    """
+    一键生成接口。
+
+    接收前端提交的视频任务请求，解析视频元数据，
+    创建处理任务并存储到数据库。
+    """
+    try:
+        data = request.get_json()
+        print(f"当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 收到数据为{data}")
+        response_data, status_code = one_click_service.process(data)
+        return jsonify(response_data), status_code
 
     except Exception as e:
-        app.logger.exception("An unhandled exception occurred in one_click_generate")
-        return jsonify({'status': 'error', 'message': f'内部服务器错误: {e}'}), 500
+        app.logger.exception("one_click_generate 接口发生未处理异常")
+        return jsonify({
+            'status': ResponseStatus.ERROR,
+            'message': f'内部服务器错误: {e}'
+        }), 500
 
-
-# ==============================================================================
-# 2. 辅助统计接口 (Mock)
-# ==============================================================================
 
 @app.route('/get_user_upload_info', methods=['GET'])
-def get_user_upload_info():
+def get_user_upload_info() -> Response:
     """
-    前端页面加载时调用的统计接口
-    """
-    user_name = request.args.get('userName')
+    获取用户上传统计信息。
 
-    # 这里直接返回模拟数据，让前端页面能正常显示
+    前端页面加载时调用，返回用户的投稿统计数据。
+    当前为Mock实现。
+    """
+    _ = request.args.get('userName')
+
     return jsonify({
-        'status': 'success',
+        'status': ResponseStatus.SUCCESS,
         'data': {
-            'total_count_today': 0,  # 今日投稿
-            'unprocessed_count_today': 0,  # 待处理
-            'remote_upload_count': 0  # 已上传
+            'total_count_today': 0,
+            'unprocessed_count_today': 0,
+            'remote_upload_count': 0
         }
     })
 
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-# ==============================================================================
-# 3. 启动
-# ==============================================================================
+# =============================================================================
+# 应用启动
+# =============================================================================
 
 if __name__ == "__main__":
-    # threaded=True 允许 Flask 并行处理多个请求 (默认就是 True)
     print("Flask 接口服务启动...")
-    app.run(host='0.0.0.0', port=5002, debug=True, use_reloader=False)
+    app.run(
+        host='0.0.0.0',
+        port=5002,
+        debug=True,
+        use_reloader=False
+    )
