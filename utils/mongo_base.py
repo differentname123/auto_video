@@ -222,7 +222,7 @@ class MongoBase:
         try:
             col = self.get_collection(collection_name)
             col.create_index(keys, unique=unique)
-            print(f"索引创建成功: {collection_name} -> {keys}")
+            # print(f"索引创建成功: {collection_name} -> {keys}")
         except PyMongoError as e:
             print(f"索引创建失败: {e}")
 

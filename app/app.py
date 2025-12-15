@@ -13,25 +13,12 @@ from dataclasses import dataclass
 
 from flask import Flask, request, jsonify, render_template, Response
 
-from video_common_config import TaskStatus
-
+from video_common_config import TaskStatus, _configure_third_party_paths
 
 # =============================================================================
 # 路径配置
 # =============================================================================
 
-def _configure_third_party_paths() -> None:
-    """
-    配置第三方库路径。
-
-    TikTokDownloader 库内部使用 'from src...' 的导入方式，
-    需要将其根目录添加到 sys.path 中才能正常工作。
-    """
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    downloader_root = os.path.join(project_root, 'third_party', 'TikTokDownloader')
-
-    if downloader_root not in sys.path:
-        sys.path.insert(0, downloader_root)
 
 
 _configure_third_party_paths()

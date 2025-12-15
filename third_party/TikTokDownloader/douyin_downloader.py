@@ -70,7 +70,9 @@ class DouyinScraperContext:
 
 # 3. 核心异步逻辑 (视频/元数据)
 async def _async_download_and_get_latest_file(douyin_video_url: str, only_meta=False) -> Optional[Tuple[str, list]]:
-    download_path_str = 'Volume/Download'
+    # download_path_str = 'Volume/Download'
+    download_path_str = Path(__file__).parent / 'Volume' / 'Download'
+
     try:
         async with DouyinScraperContext() as (params, console):
             link_extractor = LinkExtractor(params)
@@ -125,7 +127,7 @@ async def _async_download_and_get_latest_file(douyin_video_url: str, only_meta=F
 
             name = f"{name}.mp4"
             latest_file = Path(download_path_str) / name
-
+            print(latest_file.resolve())
             if latest_file.exists():
                 console.info("\n下载任务完成！")
                 return str(latest_file.resolve()), processed_data
@@ -264,7 +266,7 @@ def main_download():
     演示如何调用封装好的 *同步* 下载函数。
     【演示性修改】: 修改此函数以展示如何处理新的返回值。
     """
-    douyin_video_url = "https://www.douyin.com/video/7576594497246747250"
+    douyin_video_url = "https://www.douyin.com/video/7515150135140306215"
     print(f"开始下载视频: {douyin_video_url}")
 
     # 接收返回的元组

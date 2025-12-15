@@ -346,7 +346,7 @@ class Downloader:
         await self.downloader_chart(
             tasks, count, self.general_progress_object(), **kwargs
         )
-        self.statistics_count(count)
+        # self.statistics_count(count)
 
     async def downloader_chart(
         self,
