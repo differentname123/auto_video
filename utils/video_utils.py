@@ -446,3 +446,14 @@ def reduce_and_replace_video(video_path: str, **kwargs) -> bool:
             os.remove(temp_path)
             print(f"临时文件已清理: {temp_path}")
         print("-" * 50)
+
+
+def probe_duration(path):
+    """返回视频时长（秒）"""
+    out = subprocess.check_output([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        path
+    ])
+    return float(out)

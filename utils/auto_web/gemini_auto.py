@@ -17,17 +17,19 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+from utils.auto_web.web_auto import query_google_ai_studio
+from utils.common_utils import read_json, save_json
+
+BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_FILE = BASE_DIR / 'config/gemini_auto.json'
 STATS_FILE = BASE_DIR / 'config/gemini_auto_stats.json'
 
-# 【新增配置】全局默认最大并发数 (如果配置文件中没有设置 max_concurrency，则使用此值)
+# 全局默认最大并发数 (如果配置文件中没有设置 max_concurrency，则使用此值)
 # 根据你的电脑性能调整，建议：8G内存设为 2-3，16G内存设为 4-6
-DEFAULT_MAX_CONCURRENCY = 3
+DEFAULT_MAX_CONCURRENCY = 2
 
-# 假设这个引用是存在的，保持不变
-from utils.auto_web.web_auto import query_google_ai_studio
-from utils.common_utils import save_json, read_json
+# 【新增配置】每个账号连续使用的默认次数
+DEFAULT_USAGE_STREAK_LIMIT = 10
 
 
 # ==========================================
@@ -75,7 +77,11 @@ class PlaywrightAccountManager:
     def _check_and_reset_stuck_accounts(self, stats_data, timeout_seconds=900):
         """检查并重置长时间处于 using 状态的账号"""
         now = datetime.now()
+        # 【修改点】只检查账号信息，不检查顶级字段
         for name, info in stats_data.items():
+            # 跳过非字典类型的顶级键 (如我们新增的 active_pool)
+            if not isinstance(info, dict):
+                continue
             if info.get('status') == 'using':
                 last_time_str = info.get('last_used_time', '')
                 if last_time_str:
@@ -90,100 +96,118 @@ class PlaywrightAccountManager:
                         info['last_error_info'] = "System: Force reset due to invalid time format"
         return stats_data
 
-    def allocate_account(self):
-        """分配一个空闲账号"""
+    def allocate_account(self, model_name=None):
+        """
+        分配一个空闲账号。
+        【修复版】引入前置全局并发检查，防止轮换瞬间产生 N+1 个进程。
+        """
         with SimpleFileLock(self.lock_path):
-            # 读取配置和统计信息
+            # 1. 读取配置和统计信息
             raw_config = read_json(self.config_path)
             stats = read_json(self.stats_path)
-
             config_list = raw_config.get('account_list', [])
 
-            # 【新增逻辑 1】获取最大并发限制
-            # 优先从配置文件读取 'max_concurrency'，如果没有则使用代码顶部的默认值
+            # 2. 获取配置参数
             max_concurrency = raw_config.get('max_concurrency', DEFAULT_MAX_CONCURRENCY)
+            usage_streak_limit = raw_config.get('usage_streak_limit', DEFAULT_USAGE_STREAK_LIMIT)
 
-            # 建立有效账号映射表
+            # 3. 数据预处理
             valid_accounts_map = {
                 item['name']: item.get('user_data_dir', '')
                 for item in config_list if item.get('name') and item.get('user_data_dir')
             }
 
-            # 1. 清理：从统计中移除已在配置中删除的账号
+            # 3.1 基础同步与清理
             for name in list(stats.keys()):
-                if name not in valid_accounts_map:
-                    print(f"[Manager] 从配置中移除账号 {name}，同步删除统计信息。")
-                    del stats[name]
+                if name == 'active_pool': continue
+                if name not in valid_accounts_map: del stats[name]
 
-            # 2. 初始化：为新账号添加统计记录
             for name in valid_accounts_map:
                 if name not in stats:
-                    stats[name] = {
-                        "status": "idle",
-                        "last_used_time": "",
-                        "last_error_info": None,
-                        "total_usage": 0
-                    }
+                    stats[name] = {"status": "idle", "last_used_time": "", "last_error_info": None, "total_usage": 0,
+                                   "current_streak": 0, "last_used_model": None}
 
-            # 3. 检查异常状态 (防止死锁)
+            # 3.2 超时重置
             stats = self._check_and_reset_stuck_accounts(stats)
 
-            # 【新增逻辑 2】检查当前并发数
-            current_using_count = sum(1 for info in stats.values() if info.get('status') == 'using')
-
-            if current_using_count >= max_concurrency:
-                # 只有当是为了调试时才打印，否则日志会很频繁
-                # print(f"[Manager] 达到最大并发限制 ({current_using_count}/{max_concurrency})，等待释放...")
-
-                # 即使不分配，也需要保存一下 stats（因为上面可能执行了超时重置逻辑）
+            # 4. 【核心修复：前置全局并发检查】
+            # 必须先统计全系统正在 status='using' 的总数，达到上限直接返回 None，不执行后续轮换逻辑
+            current_using_total = sum(
+                1 for name, info in stats.items() if isinstance(info, dict) and info.get('status') == 'using')
+            if current_using_total >= max_concurrency:
                 save_json(self.stats_path, stats)
                 return None, None
 
-            # 4. 筛选空闲账号
-            candidates = [
-                {'name': name, 'count': info.get('total_usage', 0)}
-                for name, info in stats.items() if info.get('status') == 'idle'
-            ]
+            # 5. 维护活跃池 (Active Pool)
+            exhausted_accounts = set()
+            for name, info in stats.items():
+                if isinstance(info, dict) and info.get('current_streak', 0) >= usage_streak_limit:
+                    info['current_streak'] = 0  # 达到上限，准备轮换
+                    exhausted_accounts.add(name)
 
-            if not candidates:
-                # 没有可用账号（都在忙，或者被封禁等），保存状态并返回
+            active_pool = stats.get('active_pool', [])
+            # 过滤掉已失效或已用完次数的账号
+            active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
+
+            # 如果池不满，补充新账号（优先选总使用次数最少的）
+            needed = max_concurrency - len(active_pool)
+            if needed > 0:
+                candidates = [n for n in valid_accounts_map if n not in active_pool]
+                candidates.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+                active_pool.extend(candidates[:needed])
+
+            stats['active_pool'] = active_pool
+
+            # 6. 从活跃池中选择一个空闲账号分配
+            target_name = None
+            idle_in_pool = [n for n in active_pool if stats.get(n, {}).get('status') == 'idle']
+
+            if idle_in_pool:
+                idle_in_pool.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+                target_name = idle_in_pool[0]
+            else:
+                # 备选逻辑：如果池内恰好没空位（极其罕见），从池外找一个空闲的
+                all_idle = [n for n, info in stats.items() if isinstance(info, dict) and info.get('status') == 'idle']
+                if all_idle:
+                    all_idle.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+                    target_name = all_idle[0]
+
+            if not target_name:
                 save_json(self.stats_path, stats)
                 return None, None
 
-            # 5. 负载均衡策略：随机打乱后，选使用次数最少的
-            random.shuffle(candidates)
-            best_account = sorted(candidates, key=lambda x: x['count'])[0]
-            target_name = best_account['name']
-
-            # 6. 更新状态为 using
+            # 7. 更新状态
             target_info = stats[target_name]
             target_info['status'] = 'using'
             target_info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             target_info['total_usage'] = target_info.get('total_usage', 0) + 1
-
+            target_info['current_streak'] = target_info.get('current_streak', 0) + 1
+            target_info['last_used_model'] = model_name
             save_json(self.stats_path, stats)
-
             return target_name, valid_accounts_map[target_name]
 
     def release_account(self, account_name, error_info=None):
-        """释放账号，重置为 idle"""
+        """释放账号，重置为 idle。注意：此函数不重置 streak，streak 只在分配时管理。"""
         with SimpleFileLock(self.lock_path):
             stats = read_json(self.stats_path)
 
-            if account_name in stats:
+            if account_name in stats and isinstance(stats[account_name], dict):
                 info = stats[account_name]
                 info['status'] = 'idle'
                 info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 # 记录最后一次错误信息，如果成功则为 None
                 info['last_error_info'] = str(error_info)[:1000] if error_info else None
+                # 如果有错误，可以选择重置连续使用计数，让它有机会被轮换出去
+                if error_info:
+                    print(f"[Manager] 账号 {account_name} 出现错误，重置其连续使用次数。")
+                    info['current_streak'] = 0
 
             save_json(self.stats_path, stats)
 
 
 # ==========================================
-# 4. 对外统一接口
+# 4. 对外统一接口 (保持不变)
 # ==========================================
-
 
 # 确保配置目录存在
 if not CONFIG_FILE.parent.exists():
@@ -192,20 +216,20 @@ if not CONFIG_FILE.parent.exists():
 manager = PlaywrightAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
-def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600):
+def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600, model_name="gemini-2.5-pro"):
     """
     使用 Playwright 账号管理器安全地调用 Gemini。
     """
     pid = os.getpid()
     tid = threading.get_ident()
-    log_prefix = f"[System][PID:{pid},TID:{tid}]"
+    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path}"
 
     start_time = time.time()
     account_name, user_data_dir = None, None
 
     # 1. 循环申请账号
     while time.time() - start_time < wait_timeout:
-        account_name, user_data_dir = manager.allocate_account()
+        account_name, user_data_dir = manager.allocate_account(model_name=model_name)
         if account_name:
             break
 
@@ -220,7 +244,7 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600)
     if not account_name:
         return f"System Busy: 等待 {wait_timeout} 秒后仍无可用资源。", None
 
-    print(f"{log_prefix} 分配账号: {account_name} ({os.path.basename(user_data_dir)})")
+    print(f"{log_prefix} 分配账号: {account_name} ({os.path.basename(user_data_dir)}) {model_name} {file_path}")
 
     error_detail, result_text = None, None
     try:
@@ -235,14 +259,48 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600)
         error_detail, result_text = query_google_ai_studio(
             prompt=prompt,
             file_path=file_to_upload,
-            user_data_dir=user_data_dir
+            user_data_dir=user_data_dir,
+            model_name=model_name
         )
     except Exception as e:
         error_detail = f"管理器外部发生严重错误: {str(e)}\n\n{traceback.format_exc()}"
     finally:
         # 3. 释放账号
         print(f"{log_prefix} 释放账号: {account_name}")
-        manager.release_account(account_name, error_detail)
+
+        # 如果返回包含 rate limit 的提示，把该账号的 current_streak 直接提升到上限，
+        # 并相应增加 total_usage，防止短时间内再次选到它。
+        try:
+            if result_text and "You've reached your rate limit. Please try again later" in result_text:
+                with SimpleFileLock(manager.lock_path):
+                    stats = read_json(manager.stats_path)
+                    raw_config = read_json(manager.config_path) or {}
+                    usage_streak_limit = raw_config.get('usage_streak_limit', DEFAULT_USAGE_STREAK_LIMIT)
+
+                    if account_name in stats and isinstance(stats[account_name], dict):
+                        info = stats[account_name]
+                        cur = info.get('current_streak', 0)
+                        if cur < usage_streak_limit:
+                            inc = usage_streak_limit - cur
+                            info['current_streak'] = usage_streak_limit
+                            info['total_usage'] = info.get('total_usage', 0) + inc
+                        # 标记为 idle，记录最后使用时间与错误信息，避免后续 release_account 把 streak 重置
+                        info['status'] = 'idle'
+                        info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        info['last_error_info'] = "Remote: rate limit detected"
+                    save_json(manager.stats_path, stats)
+                print(
+                    f"{log_prefix} 账号 {account_name} 检测到 rate limit，已将 current_streak 置为上限并增加 total_usage。")
+            else:
+                # 常规释放流程（包含可能的 error_detail，会在 release_account 中记录并在有错误时重置 streak）
+                manager.release_account(account_name, error_detail)
+        except Exception as e:
+            # 避免释放流程抛出异常导致上层失败，记录并尝试常规释放一次
+            print(f"{log_prefix} 在处理释放/rate-limit 更新时发生异常: {e}")
+            try:
+                manager.release_account(account_name, error_detail)
+            except Exception as e2:
+                print(f"{log_prefix} 尝试常规释放账号时再次失败: {e2}")
 
     return error_detail, result_text
 
@@ -283,10 +341,12 @@ def validate_all_accounts():
             continue
 
         print(f"\n[{i + 1}/{total_accounts}] 正在验证账号: {name}...")
+        test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
 
         # 直接调用 query_google_ai_studio 进行测试
         error, response = query_google_ai_studio(
             prompt="你是谁",
+            file_path=test_file,
             user_data_dir=user_data_dir
         )
 
@@ -294,7 +354,6 @@ def validate_all_accounts():
             # 这里的打印也可以顺便截取一下，保持日志整洁
             print(f"  [✅ OK] 账号 {name} 验证通过。")
 
-            # 【修改点 1】: 将 name 和 response 一起存入 valid_accounts
             valid_accounts.append({
                 "name": name,
                 "response": response
@@ -315,10 +374,8 @@ def validate_all_accounts():
     if valid_accounts:
         print("\n--- ✅ 有效账号列表 ---")
         for item in valid_accounts:
-            # 【修改点 2】: 提取响应，去除换行符，并截取前50个字符
             raw_response = item['response'].strip().replace('\n', ' ').replace('\r', ' ')
             preview = raw_response[:50]
-            # 如果长度超过50，加省略号
             if len(raw_response) > 50:
                 preview += "..."
 

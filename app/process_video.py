@@ -15,9 +15,10 @@ import os
 import shutil
 import time
 
-from utils.video_utils import remove_static_background_video, reduce_and_replace_video
+from app.llm_generator import gen_logical_scene_llm
+from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
-    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT
+    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
 
 _configure_third_party_paths()
 
@@ -119,6 +120,44 @@ def process_origin_video(video_id):
     print(f"视频 {video_id} 的原始视频处理完成。")
 
 
+def gen_extra_info(task_info, video_info_dict):
+    """
+    为每个视频生成额外信息
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    failure_details = {}
+    is_need_original = task_info.get('creation_guidance_info', {}).get('is_need_original', False)
+    if not is_need_original:
+        print(f"{task_info} 任务不需要原始视频，跳过生成额外信息步骤。")
+        return failure_details
+    original_url_info_list = task_info.get('original_url_info_list', [])
+
+    for original_url_info in original_url_info_list:
+        video_id = original_url_info.get('video_id')
+        if not video_id:
+            error_info = "Missing video_id in original_url_info"
+            failure_details[video_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            continue
+        video_info = video_info_dict.get(video_id)
+        if not video_info:
+            error_info = "Video info not found in database"
+            failure_details[video_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            continue
+        path_info = build_video_paths(video_id)
+        logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
+        video_path = path_info['low_resolution_video_path']
+        duration = probe_duration(video_path)
+
+        if not logical_scene_info:
+            error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info)
 
 
 

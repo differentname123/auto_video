@@ -20,6 +20,17 @@ class TaskStatus:
     DOWNLOADED = '已下载'
 
 
+class ERROR_STATUS:
+    """
+    错误的严重等级
+    """
+    WARNING = 'warning'  # 警告级别错误
+    ERROR = 'error'      # 错误级别
+    CRITICAL = 'critical'  # 严重错误
+
+
+
+
 def _configure_third_party_paths() -> None:
     """
     配置第三方库路径。

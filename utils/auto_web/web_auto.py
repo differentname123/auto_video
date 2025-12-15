@@ -1,10 +1,13 @@
 import json
 import os
+import re
 import time
 import argparse
 import sys
 from typing import Tuple, Optional
 from playwright.sync_api import sync_playwright, Page, expect
+from playwright.sync_api import Page, expect, Locator
+
 import time
 import datetime
 import sys
@@ -16,8 +19,8 @@ import traceback # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\taobao5"
-TARGET_URL = 'https://aistudio.google.com/prompts/new_chat?model=gemini-2.5-pro'
+USER_DATA_DIR = r"W:\temp\taobao2"
+TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 # ==============================================================================
 # 核心功能函数
@@ -56,7 +59,7 @@ def check_for_crash_and_abort(page: Page):
         pass
 
 
-def login_and_save_session():
+def login_and_save_session(model_name: str = "gemini-2.5-pro"):
     """
     启动浏览器，让用户手动登录，并将登录会话保存到 USER_DATA_DIR。
     """
@@ -73,7 +76,8 @@ def login_and_save_session():
         )
 
         page = context.new_page()
-        page.goto(TARGET_URL)
+        target_url = f"{TARGET_URL_BASE}?model={model_name}"
+        page.goto(target_url)
 
         print("\n" + "="*60)
         print("浏览器已打开。请在浏览器窗口中手动完成登录操作。")
@@ -118,7 +122,7 @@ def click_acknowledge_if_present(page: Page):
         print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
 
-def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR) -> Tuple[Optional[str], Optional[str]]:
+def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR, model_name: str = "gemini-2.5-pro") -> Tuple[Optional[str], Optional[str]]:
     """
     使用已保存的登录会话启动浏览器，上传文件（可选），提交Prompt，并等待返回结果。
 
@@ -166,7 +170,8 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 
             # 3. 访问页面
             print("[*] 正在加载页面...")
-            page.goto(TARGET_URL)
+            target_url = f"{TARGET_URL_BASE}?model={model_name}"
+            page.goto(target_url)
             # time.sleep(1000)
             # [修改] 页面加载后立即检查崩溃
             check_for_crash_and_abort(page)
@@ -191,7 +196,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
                     break
                 time.sleep(2)
                 print("[-] 检测到内部错误，正在重试...")
-            print("[+] 任务成功完成。")
+            print(f"[+] 任务成功任务完成任务。{file_path} {response_text[:100]}...")
 
     # [修改] 新增对页面崩溃异常的捕获
     except PageCrashedException as crash_e:
@@ -209,7 +214,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 
     except Exception as e:
         error_info = str(e)
-        print(f"[!] 执行过程中发生错误: {error_info}")
+        print(f"[!] 执行过程中发生错误: {error_info} {file_path}")
         # 可选：出错时截图
         if context and context.pages:
             try:
@@ -238,31 +243,97 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 # ==============================================================================
 
 def _upload_attachment(page: Page, file_path: str):
-    """(内部调用) 上传附件逻辑"""
+    """(内部调用) 上传附件逻辑 (两步点击均已强化，具备高兼容性)"""
     print(f"[*] 正在上传附件: {os.path.basename(file_path)}")
     click_acknowledge_if_present(page)
 
     with page.expect_file_chooser(timeout=15000) as fc_info:
-        attachment_button = page.locator('[aria-label="Insert images, videos, audio, or files"]')
+        # --- 第 1 步: 点击主附件按钮 (已强化) ---
+        best_locator = page.locator('[data-test-add-chunk-menu-button]')
+        fallback_locator = page.get_by_role(
+            "button",
+            name=re.compile(r"images, videos, files, or audio", re.IGNORECASE)
+        )
+        attachment_button = best_locator.or_(fallback_locator)
         attachment_button.click()
-        upload_option = page.get_by_role("menuitem", name="Upload a file")
+
+        # --- 第 2 步: 点击"上传文件"菜单项 (新增的强化) ---
+        # 使用正则表达式来兼容 "Upload a file" 和 "Upload File" 等多种写法
+        upload_option = page.get_by_role(
+            "menuitem",
+            name=re.compile(r"Upload (a )?file", re.IGNORECASE)
+        )
         upload_option.click()
+
     file_chooser = fc_info.value
     file_chooser.set_files(file_path)
+
     spinner = page.locator(".upload-spinner")
     expect(spinner).to_be_hidden(timeout=60000)
     print("[+] 附件上传完毕。")
 
 
 def _submit_prompt(page: Page, prompt: str):
-    """(内部调用) 填写并提交Prompt"""
+    """(内部调用) 填写并提交Prompt (已升级为高兼容性定位器)"""
     print("[*] 正在提交Prompt...")
-    prompt_input = page.get_by_placeholder("Start typing a prompt")
+
+    # --- 1. 定位输入框 (替换旧的 get_by_placeholder) ---
+    prompt_input: Locator | None = None
+    try:
+        # 步骤 A: 基础筛选 - 获取所有可见的 textbox 元素
+        all_textboxes = page.get_by_role("textbox").filter(has_not_text="hidden").all()
+
+        if not all_textboxes:
+            raise Exception("在页面上找不到任何可见的输入框 (role='textbox')。")
+
+        # 步骤 B: 位置筛选 - 过滤出位于页面下半部分的
+        viewport_height = page.viewport_size['height']
+        lower_half_textboxes = [
+            box for box in all_textboxes
+            if box.bounding_box()['y'] > viewport_height / 3
+        ]
+
+        if not lower_half_textboxes:
+            raise Exception("在页面的下半部分找不到任何可见的输入框。")
+
+        # 步骤 C: 智能决胜
+        if len(lower_half_textboxes) == 1:
+            prompt_input = lower_half_textboxes[0]
+        else:
+            # 优先选择 aria-label 包含关键意图词的
+            tie_breaker_keywords = re.compile("prompt|type|enter|start typing", re.IGNORECASE)
+
+            preferred_candidates = [
+                box for box in lower_half_textboxes
+                if tie_breaker_keywords.search(box.get_attribute("aria-label") or "")
+            ]
+
+            if len(preferred_candidates) == 1:
+                prompt_input = preferred_candidates[0]
+            else:
+                # 备用策略：选择最后一个
+                prompt_input = lower_half_textboxes[-1]
+
+    except Exception as e:
+        print(f"[!] 错误：定位Prompt输入框失败。 {e}")
+        # 如果你想兼容旧版，可以在这里回退到旧的定位器
+        print("[!] 尝试使用旧的 placeholder 定位器作为备用方案...")
+        prompt_input = page.get_by_placeholder("Start typing a prompt")
+
+    # --- 2. 填写Prompt (与原代码一致) ---
     expect(prompt_input).to_be_editable(timeout=15000)
     prompt_input.fill(prompt)
-    run_button = page.get_by_role("button", name="Run", exact=True)
+
+    # --- 3. 定位并点击运行按钮 (增加对 "Generate" 的兼容) ---
+    # 使用正则表达式同时匹配 "Run" 和 "Generate"
+    run_button = page.get_by_role(
+        "button",
+        name=re.compile(r"^(Run|Generate)$", re.IGNORECASE)
+    )
+
     expect(run_button).to_be_enabled(timeout=300000)
     run_button.click()
+
 
 def _scroll_page_to_bottom(page: Page, steps: int = 20, step_px: int = 1500, delay: float = 0.05):
     """不看任何容器，直接强制往下滚页面，保证滚到最底部"""
@@ -297,10 +368,11 @@ def _wait_and_get_response(page: Page) -> str:
 
 
 # ==============================================================================
+# ==============================================================================
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    # login_and_save_session()
+    login_and_save_session()
 
     # 测试文件路径
     test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"

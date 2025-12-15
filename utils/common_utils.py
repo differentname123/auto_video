@@ -150,7 +150,7 @@ def string_to_object(input_str: str):
     该函数增强了对不规范格式的容忍度，特别适合处理来自 LLM 的输出。
 
     核心功能：
-    1.  **智能提取**: 自动在整个字符串中定位 JSON/Python 对象的边界（从第一个 '{' 或 '[' 到最后一个 '}' 或 ']'），
+    1.  **智能提取**: 自动在整个字符串中定位 JSON/Python 对象的边界（从第一个 '{' 或 '[' 到最后一个 '}' 或 ']），
         忽略前导和尾随的无关文本（例如 "当然，这是您要的JSON："）。
     2.  **兼容 Markdown**: 能够处理被 ```json ... ``` 代码块包裹的内容。
     3.  **错误修正**:
@@ -166,52 +166,125 @@ def string_to_object(input_str: str):
     :param input_str: 包含列表或字典的输入字符串。
     :return: 解析后的 Python 列表或字典。
     :raises ValueError: 如果无法从字符串中找到或解析出有效的对象。
+    :raises TypeError: 如果输入不是字符串。
     """
+    # 0. 输入校验：处理 None 或非字符串输入
+    if not isinstance(input_str, str):
+        # 抛出 TypeError 更符合 Python 语义，但根据您的要求统一为 ValueError 也可以
+        raise TypeError(f"输入必须是字符串，但收到了 {type(input_str).__name__}。")
+
+    # 创建一个统一的错误信息生成器
+    def _create_error_message(reason: str) -> str:
+        # 预览原始输入的前50个字符
+        preview = (input_str[:50] + '...') if len(input_str) > 50 else input_str
+        return f"{reason} | 输入内容预览: '{preview}'"
+
+    # 1. 智能提取：在字符串中寻找对象边界 (重构后，逻辑更清晰)
+    first_bracket = input_str.find('[')
+    first_curly = input_str.find('{')
+
+    # 确定第一个开括号的位置
+    if first_bracket == -1 and first_curly == -1:
+        raise ValueError(_create_error_message("输入字符串中未找到疑似列表或字典的起始符号 '[' 或 '{'"))
+
+    if first_bracket == -1:
+        start_pos = first_curly
+    elif first_curly == -1:
+        start_pos = first_bracket
+    else:
+        start_pos = min(first_bracket, first_curly)
+
+    # 确定最后一个闭括号的位置
+    end_pos = max(input_str.rfind(']'), input_str.rfind('}'))
+
+    if end_pos <= start_pos:
+        raise ValueError(_create_error_message("未找到与起始括号匹配的结束括号 ']' 或 '}'"))
+
+    # 提取出最可能包含对象的子字符串
+    potential_obj_str = input_str[start_pos: end_pos + 1]
+
+    # 2. 错误修正：清理提取出的字符串
+    # 移除 JavaScript/JSONC 风格的注释
+    potential_obj_str = re.sub(r"//.*", "", potential_obj_str)
+    potential_obj_str = re.sub(r"/\*[\s\S]*?\*/", "", potential_obj_str, flags=re.MULTILINE)
+    # 移除尾随逗号 (例如, [1, 2,])
+    potential_obj_str = re.sub(r",\s*([}\]])", r"\1", potential_obj_str)
+    cleaned_str = potential_obj_str.strip()
+
+    # 3. 双引擎解析
     try:
-        # 1. 智能提取：在字符串中寻找对象边界
-        try:
-            # 寻找第一个 '{' 或 '['
-            start_pos = min(
-                i for i in (input_str.find('{'), input_str.find('[')) if i != -1
-            )
-            # 寻找最后一个 '}' 或 ']'
-            end_pos = max(input_str.rfind('}'), input_str.rfind(']'))
-
-            if end_pos <= start_pos:
-                raise ValueError("未找到匹配的括号/方括号。")
-
-            # 提取出最可能包含对象的子字符串
-            potential_obj_str = input_str[start_pos: end_pos + 1]
-
-        except (ValueError, IndexError):
-            raise ValueError("输入字符串中未找到疑似列表或字典的结构。")
-
-        # 2. 错误修正：清理提取出的字符串
-        # 移除 JavaScript/JSONC 风格的注释
-        # 移除 // 单行注释
-        potential_obj_str = re.sub(r"//.*", "", potential_obj_str)
-        # 移除 /* */ 多行注释
-        potential_obj_str = re.sub(r"/\*[\s\S]*?\*/", "", potential_obj_str, flags=re.MULTILINE)
-
-        # 移除尾随逗号 (例如, [1, 2,])
-        potential_obj_str = re.sub(r",\s*([}\]])", r"\1", potential_obj_str)
-
-        # 清理字符串前后的空白字符
-        cleaned_str = potential_obj_str.strip()
-
-        # 3. 双引擎解析
         # 首先尝试使用 json.loads (更标准，通常更快)
+        return json.loads(cleaned_str)
+    except json.JSONDecodeError:
+        # 如果 json.loads 失败，回退到 ast.literal_eval (更宽容，支持 Python 语法)
         try:
-            return json.loads(cleaned_str)
-        except json.JSONDecodeError:
-            # 如果 json.loads 失败，回退到 ast.literal_eval (更宽容，支持 Python 语法)
-            try:
-                return ast.literal_eval(cleaned_str)
-            except (ValueError, SyntaxError, MemoryError) as e:
-                # 如果两种方法都失败，则抛出最终的异常
-                error_msg = f"无法将提取的字符串解析为列表或字典。错误: {e}"
-                # 附上清理后待解析的字符串片段，便于调试
-                preview = (cleaned_str[:150] + '...') if len(cleaned_str) > 150 else cleaned_str
-                raise ValueError(f"{error_msg}\n尝试解析的内容 (清理后): '''{preview}'''")
-    except Exception as e:
-        raise ValueError(f"解析字符串时发生错误: {e} {input_str}")
+            return ast.literal_eval(cleaned_str)
+        except (ValueError, SyntaxError, MemoryError) as e:
+            # 如果两种方法都失败，则抛出最终的异常，并提供丰富的上下文信息
+            cleaned_preview = (cleaned_str[:150] + '...') if len(cleaned_str) > 150 else cleaned_str
+            error_reason = f"无法将提取的内容解析为列表或字典，解析器错误: {e}"
+            # 最终的错误信息包含：原因，原始输入预览，以及尝试解析的内容预览
+            raise ValueError(f"{_create_error_message(error_reason)}\n"
+                             f"尝试解析的内容 (清理后): '''{cleaned_preview}'''")
+
+
+
+def time_to_ms(time_input: str | float | int) -> int:
+    """
+    将多种时间格式统一转换为毫秒。
+    该函数非常稳健，可以处理以下格式：
+    - 数字 (int/float): 12.345 (代表秒)
+    - 纯秒数字符串: "12.345"
+    - 标准SRT时间码: "00:01:02,345" 或 "00:01:02.345"
+    - 省略小时的时间码: "01:02.345"
+    - 只有分秒的时间码: "03.482"
+
+    Args:
+        time_input: 多种格式的时间输入。
+
+    Returns:
+        总毫秒数 (int)。
+    """
+    if isinstance(time_input, (int, float)):
+        return int(time_input * 1000)
+
+    time_str = str(time_input).strip()
+
+    try:
+        return int(float(time_str.replace(',', '.')) * 1000)
+    except ValueError:
+        pass
+
+    time_str = time_str.replace(',', '.')
+
+    parts = time_str.split(':')
+    h, m, s = 0, 0, 0.0
+
+    try:
+        if len(parts) == 3:  # HH:MM:SS.ms
+            h = int(parts[0])
+            m = int(parts[1])
+            s = float(parts[2])
+        elif len(parts) == 2:  # MM:SS.ms
+            m = int(parts[0])
+            s = float(parts[1])
+        elif len(parts) == 1:  # SS.ms
+            s = float(parts[0])
+        else:
+            raise ValueError("时间码中的冒号过多")
+
+        return int((h * 3600 + m * 60 + s) * 1000)
+
+    except (ValueError, IndexError):
+        raise ValueError(f"无法解析的时间格式: '{time_input}'")
+
+
+def ms_to_time(ms: int) -> str:
+    """将毫秒转换为'HH:MM:SS.ms'格式的时间字符串。"""
+    ms = int(ms)  # 确保输入是整数
+    if ms < 0: ms = 0
+    s, ms_rem = divmod(ms, 1000)
+    m, s = divmod(s, 60)
+    h, m = divmod(m, 60)
+    # --- 修改点：将逗号改为点 ---
+    return f"{h:02d}:{m:02d}:{s:02d}.{ms_rem:03d}"
