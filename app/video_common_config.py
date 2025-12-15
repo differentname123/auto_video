@@ -17,6 +17,7 @@ class TaskStatus:
     PROCESSING = '处理中'
     COMPLETED = '已完成'
     FAILED = '失败'
+    DOWNLOADED = '已下载'
 
 
 def _configure_third_party_paths() -> None:

@@ -12,8 +12,10 @@
 """
 import json
 import os
+import shutil
 import time
 
+from utils.video_utils import remove_static_background_video, reduce_and_replace_video
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT
 
@@ -58,11 +60,11 @@ def build_video_paths(video_id):
     :param video_id:
     :return:
     """
-    origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
+    origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
     static_cut_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                         f"{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
+                                         f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
     low_resolution_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                             f"{video_id}_low_resolution.mp4")  # 这个是静态剪辑后视频再进行降低分辨率和降低帧率后的数据，用于和大模型交互
+                                             f"{video_id}/{video_id}_low_resolution.mp4")  # 这个是静态剪辑后视频再进行降低分辨率和降低帧率后的数据，用于和大模型交互
     return {
         'origin_video_path': origin_video_path,
         'static_cut_video_path': static_cut_video_path,
@@ -82,6 +84,42 @@ def run():
     manager = MongoManager(mongo_base_instance)
     for task_info in tasks_to_process:
         process_single_task(task_info, manager)
+
+def process_origin_video(video_id):
+    """
+    处理原始视频生成后续需要处理的视频
+    :param video_id:
+    :return:
+    """
+    video_path_info = build_video_paths(video_id)
+    origin_video_path = video_path_info['origin_video_path']
+    static_cut_video_path = video_path_info['static_cut_video_path']
+    low_resolution_video_path = video_path_info['low_resolution_video_path']
+
+    if not is_valid_target_file_simple(origin_video_path):
+        raise FileNotFoundError(f"原始视频文件不存在: {origin_video_path}")
+
+    if not is_valid_target_file_simple(static_cut_video_path):
+        # 第一步先进行降低分辨率和帧率
+        params = {
+            'crf': 23,
+            'target_width': 2560,
+            'target_fps': 30
+            }
+        reduce_and_replace_video(origin_video_path, **params)
+
+        # 第二步进行静态背景去除
+        crop_result, crop_path = remove_static_background_video(origin_video_path)
+        shutil.copy2(crop_path, static_cut_video_path)
+
+    if not is_valid_target_file_simple(low_resolution_video_path):
+        # 第三步进行降低分辨率和帧率
+        shutil.copy2(static_cut_video_path, low_resolution_video_path)
+        reduce_and_replace_video(low_resolution_video_path)
+    print(f"视频 {video_id} 的原始视频处理完成。")
+
+
+
 
 
 def process_single_task(task_info, manager):
@@ -190,14 +228,12 @@ def process_single_task(task_info, manager):
     # 3. 批量更新物料信息
     if materials_to_update:
         unique_materials = {v['video_id']: v for v in materials_to_update}.values()
-        manager.ups_ert_materials(list(unique_materials))
+        manager.upsert_materials(list(unique_materials))
         print(f"任务 {task_id}: 批量更新了 {len(unique_materials)} 个物料信息。")
 
     # 4. 根据处理结果更新任务状态 (这部分逻辑无需修改)
     if not failure_details:
-        print(f"任务 {task_id} 全部成功。")
-        task_info['status'] = TaskStatus.COMPLETED
-        task_info.pop('last_error', None)
+        task_info['last_error'] = None
     else:
         error_msg = json.dumps(failure_details, ensure_ascii=False, indent=2)
         print(f"任务 {task_id} 处理完成，但存在失败项:\n{error_msg}")
@@ -206,16 +242,44 @@ def process_single_task(task_info, manager):
         if not successful_video_ids:
             current_failures = task_info.get('failed_count', 0) + 1
             task_info['failed_count'] = current_failures
-            if current_failures > VIDEO_MAX_RETRY_TIMES:
-                task_info['status'] = TaskStatus.FAILED
-                print(f"任务 {task_id} 已达到最大重试次数，标记为最终失败。")
-            else:
-                print(f"任务 {task_id} 本次全部失败，失败次数增加到 {current_failures}。")
-        else:
-            task_info['status'] = TaskStatus.COMPLETED
+            task_info['status'] = TaskStatus.FAILED
 
     task_info['finished_time'] = time.time()
+    # 完成数据拉取阶段，可以先保存一份数据
     manager.upsert_tasks([task_info])
+
+    # 如果上一步出现过错误直接结束
+    if failure_details:
+        return
+
+    # 进行原始视频的加工，生成后续要处理的视频
+    for video_id in successful_video_ids:
+        try:
+            process_origin_video(video_id)
+        except Exception as e:
+            print(f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {e}")
+            failure_details[video_id] = f"Error processing origin video: {str(e)}"
+            video_info = video_info_dict.get(video_id)
+            if video_info:
+                video_info['processing_error'] = str(e)
+                manager.upsert_materials([video_info])
+            continue
+
+    if not failure_details:
+        task_info['last_error'] = None
+    else:
+        error_msg = json.dumps(failure_details, ensure_ascii=False, indent=2)
+        print(f"任务 {task_id} 原始视频处理完成，但存在失败项:\n{error_msg}")
+        task_info['last_error'] = error_msg
+
+        if not successful_video_ids:
+            current_failures = task_info.get('failed_count', 0) + 1
+            task_info['failed_count'] = current_failures
+            task_info['status'] = TaskStatus.FAILED
+
+    # 如果上一步出现过错误直接结束
+    if failure_details:
+        return
 
 
 if __name__ == '__main__':

@@ -202,8 +202,7 @@ class MongoBase:
         if operations:
             try:
                 result = col.bulk_write(operations, ordered=False)
-                print(
-                    f"批量操作完成: 匹配 {result.matched_count}, 修改 {result.modified_count}, 插入 {result.upserted_count}")
+                print(f"批量操作完成: 匹配 {result.matched_count}, 修改 {result.modified_count}, 插入 {result.upserted_count}")
             except BulkWriteError as bwe:
                 # 捕获具体的 BulkWriteError
                 print(f"❌ 批量写入时发生验证错误: {bwe.details}")

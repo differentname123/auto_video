@@ -53,7 +53,7 @@ class MongoManager:
         self.db.create_index(self.materials_collection, [('video_id', 1)], unique=True)
         # 为 publish_tasks 的 video_id_list 创建索引，加速查询
         self.db.create_index(self.tasks_collection, [('video_id_list', 1)], unique=False)
-        print("✅ 核心索引已确保存在。")
+        # print("✅ 核心索引已确保存在。")
 
     # ==========================================
     # video_materials 表相关操作
