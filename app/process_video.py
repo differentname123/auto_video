@@ -277,6 +277,8 @@ def process_single_task(task_info, manager):
             task_info['failed_count'] = current_failures
             task_info['status'] = TaskStatus.FAILED
 
+    manager.upsert_tasks([task_info])
+
     # 如果上一步出现过错误直接结束
     if failure_details:
         return
