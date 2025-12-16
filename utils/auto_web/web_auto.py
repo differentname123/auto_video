@@ -252,7 +252,7 @@ def _upload_attachment(page: Page, file_path: str):
         best_locator = page.locator('[data-test-add-chunk-menu-button]')
         fallback_locator = page.get_by_role(
             "button",
-            name=re.compile(r"images, videos, files, or audio", re.IGNORECASE)
+            name=re.compile(r"(?=.*images)(?=.*videos)(?=.*audio)(?=.*files)", re.IGNORECASE)
         )
         attachment_button = best_locator.or_(fallback_locator)
         attachment_button.click()

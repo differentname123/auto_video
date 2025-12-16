@@ -334,6 +334,8 @@ def process_single_task(task_info, manager):
 
     gen_extra_info(task_info, video_info_dict, manager)
 
+    print(f"任务 {task_id} 全部处理完成，无错误。")
+
 
 if __name__ == '__main__':
     run()

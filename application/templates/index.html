@@ -462,7 +462,7 @@
         const delBtn = document.querySelectorAll('.video-item-card').length > 0
             ? `<button type="button" class="btn-remove-card" onclick="removeCard(${id})" title="删除此素材">×</button>` : '';
 
-        // --- 核心修改：为所有选项增加问号和说明 ---
+        // --- 核心修改：在 options-grid 中增加 "素材分解场景数" ---
         card.innerHTML = `
             ${delBtn}
             <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
@@ -512,6 +512,20 @@
                         <option value="no">否</option>
                     </select>
                 </div>
+                <!-- 新增：素材分解场景数 -->
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">素材最多分解场景数</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">限制该素材最多能够被分解成多少个场景。</span>
+                    </div>
+                    <select class="input-styled select-max-scenes">
+                        <option value="0" selected>自动分割</option>
+                        <option value="1">不超过1个场景(也就是不分割)</option>
+                        <option value="5">不超过5个场景</option>
+                        <option value="10">不超过10个场景</option>
+                    </select>
+                </div>
             </div>
         `;
         els.videoList.appendChild(card);
@@ -548,12 +562,16 @@
             const voice = card.querySelector('.select-voice').value;
             if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
 
+            // --- 核心修改：读取新的 max_scenes 值并转换为整数 ---
+            const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
+
             vList.push({
                 url: url,
                 has_author_voice: voice === 'yes',
                 is_realtime: card.querySelector('.select-realtime').value === 'yes',
                 need_text: card.querySelector('.select-text').value === 'yes',
-                need_emoji: card.querySelector('.select-emoji').value === 'yes'
+                need_emoji: card.querySelector('.select-emoji').value === 'yes',
+                max_scenes: maxScenesVal // 传递给后端的字段
             });
         });
 

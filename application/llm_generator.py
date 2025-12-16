@@ -12,10 +12,10 @@ import time
 
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
-from utils.video_utils import probe_duration
+from utils.video_utils import probe_duration, get_scene
 
 
-def check_logical_scene(logical_scene_info: dict, video_duration_ms: int) -> tuple[bool, str]:
+def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes) -> tuple[bool, str]:
     """
      检查 logical_scene_info 的有效性，并在检查过程中将时间字符串转换为毫秒整数（in-place-modification）。
 
@@ -43,8 +43,8 @@ def check_logical_scene(logical_scene_info: dict, video_duration_ms: int) -> tup
         return False, "检查失败：deleted_scene 中的场景数量超过3个，可能存在误操作。"
 
     # 检查 new_scene_info 中的场景数量，不能超过15个
-    if len(new_scene_info) > 15:
-        return False, "检查失败：new_scene_info 中的场景数量超过15个，可能存在误操作。"
+    if len(new_scene_info) > max_scenes and max_scenes > 0:
+        return False, f"检查失败：new_scene_info 中的场景数量超过{max_scenes}个，可能存在误操作。"
     # 1. 遍历并转换所有场景，同时进行初步检查
     for scene_list in scene_lists_to_process:
         for i, scene in enumerate(scene_list):
@@ -141,11 +141,77 @@ def gen_base_prompt(video_path, video_info):
     return base_prompt
 
 
+def fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1000):
+    """
+     将 logical_scene_info 中的每个 scene 的 start/end 对齐到 camera shot。
+     对齐原则：
+     1. 寻找 max_delta_ms 毫秒容差范围内的所有 camera shot。
+     2. 在这些候选中，选择出现次数最多的那个。
+     3. 如果出现次数相同，则选择与原始时间戳差值最小（最近）的那个。
+     打印每个时间戳调整前后的对比。返回修改后的 logical_scene_info。
+
+     Args:
+         video_path (str): 视频文件路径。
+         scenes (list of list): camera shot 信息，每个元素是 [timestamp_ms, count]。
+         logical_scene_info (dict): 包含 'new_scene_info' 的逻辑场景信息。
+         output_dir (str): 输出目录，用于保存调试帧。
+         max_delta_ms (int): 查找候选 camera shot 的最大时间差（毫秒）。
+     """
+
+    camera_shots_with_counts = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
+    if not camera_shots_with_counts:
+        print("⚠️ 无有效 camera_shot 时间戳，跳过调整。")
+        return logical_scene_info
+
+    for i, scene in enumerate(logical_scene_info.get('new_scene_info', [])):
+        for key in ('start', 'end'):
+            orig_ts = scene.get(key)
+            if orig_ts is None:
+                print(f"[Scene {i}] {key}: 无法解析原始时间 ({orig_ts})，跳过。")
+                continue
+
+            # 步骤 1: 筛选候选者
+            candidates = [
+                shot for shot in camera_shots_with_counts
+                if abs(shot[0] - orig_ts) <= max_delta_ms
+            ]
+
+            if not candidates:
+                print(f"[Scene {i}] {key}: 保持不变 {orig_ts} (在 {max_delta_ms}ms 范围内无候选 camera shot)")
+            else:
+                # 步骤 2: 使用 min() 和一个计算分数的 key 来找到最佳匹配
+                # key 返回一个元组，min() 会依次比较元组中的元素
+                # 1. 主要比较分数: (差值 / 次数)
+                # 2. 次要比较（分数相同时）: 差值本身，确保选择更近的
+                def calculate_key(shot):
+                    diff = abs(shot[0] - orig_ts)
+                    count = shot[1]
+                    # 安全起见，虽然前面过滤了，但这里处理 count=0 的情况
+                    score = diff / count if count > 0 else float('inf')
+                    return (score, diff)
+
+                best_shot = min(candidates, key=calculate_key)
+
+                new_ts = int(best_shot[0])
+                count = best_shot[1]
+                diff = abs(new_ts - orig_ts)
+                score = diff / count if count > 0 else float('inf')
+
+                scene[key] = new_ts
+                print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已调整)")
+
+                # 如果需要调试，可以取消下面的注释
+                # save_frames_around_timestamp(video_path, ms_to_time(orig_ts), 5, str(os.path.join(output_dir, 'orig', str(orig_ts))))
+                # save_frames_around_timestamp(video_path, ms_to_time(new_ts), 5, str(os.path.join(output_dir,'closest', str(new_ts))))
+
+    return logical_scene_info
+
 def gen_logical_scene_llm(video_path, video_info):
     """
     生成新的视频方案
     """
     base_prompt = gen_base_prompt(video_path, video_info)
+    max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
     log_pre = f"{video_path} 逻辑性场景划分 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     try:
         video_duration = probe_duration(video_path)
@@ -159,6 +225,9 @@ def gen_logical_scene_llm(video_path, video_info):
     prompt_file_path = './prompt/视频场景逻辑切分只根据视频内容.txt'
     full_prompt = read_file_to_str(prompt_file_path)
     full_prompt += f'\n{base_prompt}'
+    if max_scenes > 0:
+        full_prompt += f'\n请将生成的场景数量控制在 {max_scenes} 个以内。'
+
     error_info = ""
     for attempt in range(1, max_retries + 1):
         try:
@@ -166,9 +235,13 @@ def gen_logical_scene_llm(video_path, video_info):
             error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
             logical_scene_info = string_to_object(raw)
-            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms)
+            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes)
             if not check_result:
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
+
+            merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes)
+            logical_scene_info = fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1000)
+
             return None, logical_scene_info
         except Exception as e:
             error_str = f"{error_info} {str(e)}"
