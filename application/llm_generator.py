@@ -145,7 +145,7 @@ def gen_logical_scene_llm(video_path, video_info):
     """
     生成新的视频方案
     """
-    base_prompt = "base_prompt"
+    base_prompt = gen_base_prompt(video_path, video_info)
     log_pre = f"{video_path} 逻辑性场景划分 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     try:
         video_duration = probe_duration(video_path)

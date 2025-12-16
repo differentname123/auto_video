@@ -4,8 +4,8 @@
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/python" />
       <excludeFolder url="file://$MODULE_DIR$/videos" />
-      <excludeFolder url="file://$MODULE_DIR$/app/Download" />
-      <excludeFolder url="file://$MODULE_DIR$/app/Volume" />
+      <excludeFolder url="file://$MODULE_DIR$/application/Download" />
+      <excludeFolder url="file://$MODULE_DIR$/application/Volume" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (auto_video)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -20,7 +20,7 @@ from pathlib import Path
 from utils.auto_web.web_auto import query_google_ai_studio
 from utils.common_utils import read_json, save_json
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 CONFIG_FILE = BASE_DIR / 'config/gemini_auto.json'
 STATS_FILE = BASE_DIR / 'config/gemini_auto_stats.json'
 

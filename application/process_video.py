@@ -15,7 +15,7 @@ import os
 import shutil
 import time
 
-from app.llm_generator import gen_logical_scene_llm
+from application.llm_generator import gen_logical_scene_llm
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
@@ -120,7 +120,7 @@ def process_origin_video(video_id):
     print(f"视频 {video_id} 的原始视频处理完成。")
 
 
-def gen_extra_info(task_info, video_info_dict):
+def gen_extra_info(task_info, video_info_dict, manager):
     """
     为每个视频生成额外信息
     :param task_info:
@@ -154,11 +154,21 @@ def gen_extra_info(task_info, video_info_dict):
         path_info = build_video_paths(video_id)
         logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
         video_path = path_info['low_resolution_video_path']
-        duration = probe_duration(video_path)
 
         if not logical_scene_info:
             error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info)
+            if not error_info:
+                video_info['extra_info']['logical_scene_info'] = logical_scene_info
+            else:
+                failure_details[video_id] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.ERROR
+                }
+                video_info["logical_error"] = error_info
 
+            manager.upsert_materials([video_info])
+            if error_info:
+                continue
 
 
 def process_single_task(task_info, manager):
@@ -321,6 +331,8 @@ def process_single_task(task_info, manager):
     # 如果上一步出现过错误直接结束
     if failure_details:
         return
+
+    gen_extra_info(task_info, video_info_dict, manager)
 
 
 if __name__ == '__main__':

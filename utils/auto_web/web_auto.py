@@ -19,7 +19,7 @@ import traceback # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\taobao2"
+USER_DATA_DIR = r"W:\temp\xianyu1"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 # ==============================================================================
@@ -372,7 +372,7 @@ def _wait_and_get_response(page: Page) -> str:
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    login_and_save_session()
+    # login_and_save_session()
 
     # 测试文件路径
     test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
