@@ -12,6 +12,7 @@ import time
 
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
+from utils.gemini import get_llm_content_gemini_flash_video
 from utils.video_utils import probe_duration, get_scene
 
 
@@ -229,14 +230,16 @@ def gen_logical_scene_llm(video_path, video_info):
         full_prompt += f'\n请将生成的场景数量控制在 {max_scenes} 个以内。'
 
     error_info = ""
+    gen_error_info = ""
     for attempt in range(1, max_retries + 1):
         try:
             print(f"正在生成逻辑性场景划分 (尝试 {attempt}/{max_retries}) {log_pre}")
-            error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
+            gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
             logical_scene_info = string_to_object(raw)
             check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes)
             if not check_result:
+                error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
 
             merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes)
@@ -245,7 +248,181 @@ def gen_logical_scene_llm(video_path, video_info):
             return None, logical_scene_info
         except Exception as e:
             error_str = f"{error_info} {str(e)}"
-            print(f"生成逻辑性场景划分失败 (尝试 {attempt}/{max_retries}): {error_str} {log_pre}")
+            print(f"生成逻辑性场景划分失败 (尝试 {attempt}/{max_retries}): {error_str} {log_pre} {gen_error_info}")
+            if attempt < max_retries:
+                print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
+                time.sleep(retry_delay)  # 等待一段时间后再重试
+            else:
+                print(f"达到最大重试次数，失败. {log_pre}")
+                return error_str, None  # 达到最大重试次数后返回 None
+
+def check_overlays_text(optimized_video_plan, video_duration_ms):
+    """
+    检查优化的方案
+    """
+
+    overlays = optimized_video_plan.get('overlays', [])
+    # 长度要大于2
+    if len(overlays) < 2:
+        return False, f"优化方案检查失败：overlays 长度必须至少为 2。当前长度为 {len(overlays)}。"
+    # 每个start必须都在视频时长范围内
+    for i, overlay in enumerate(overlays):
+        start = overlay.get('start')
+        start_ms = time_to_ms(start)
+        text = overlay.get('text', '').strip()
+        if len(text) > 12:
+            return False, f"优化方案检查失败：第 {i + 1} 个 overlay 的文本长度过长（>=10）。文本: {text}"
+        if not (0 <= start_ms <= video_duration_ms):
+            return False, f"优化方案检查失败：第 {i + 1} 个 overlay 的 start 时间 {start} 超出视频时长范围 [0, {video_duration_ms}ms]。"
+    return True, "优化方案检查通过。"
+
+
+def gen_overlays_text_llm(video_path, video_info):
+    """
+    生成新的视频优化方案
+    """
+    log_pre = f"{video_path} 视频覆盖文字生成 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    base_prompt = gen_base_prompt(video_path, video_info)
+    error_info = ""
+    # --- 2. 初始化和预处理 ---
+    try:
+        video_duration = probe_duration(video_path)
+        video_duration_ms = int(video_duration * 1000)
+    except Exception as e:
+        error_info = f"获取视频时长失败: {e} {log_pre}"
+        return error_info, None
+
+    retry_delay = 10
+    max_retries = 5
+    prompt_file_path = './prompt/视频质量提高生成画面文字.txt'
+    prompt = read_file_to_str(prompt_file_path)
+    full_prompt = f'{prompt}'
+    full_prompt += f'\n{base_prompt}'
+    raw = ""
+    for attempt in range(1, max_retries + 1):
+        try:
+            model_name = "gemini-flash-latest"
+            # model_name = "gemini-flash-latest"
+            print(f"正在视频覆盖文字生成 (尝试 {attempt}/{max_retries}) {log_pre}")
+            raw = get_llm_content_gemini_flash_video(prompt=full_prompt, video_path=video_path, model_name=model_name)
+            video_overlays_text_info = string_to_object(raw)
+            check_result, check_info = check_overlays_text(video_overlays_text_info, video_duration_ms)
+            if not check_result:
+                error_info = f"优化方案检查未通过: {check_info} {raw} {log_pre}"
+                raise ValueError(error_info)
+            return error_info, video_overlays_text_info
+        except Exception as e:
+            error_str = f"{error_info} {str(e)}"
+            print(f"视频覆盖文字方案检查未通过 (尝试 {attempt}/{max_retries}): {e} {raw} {log_pre}")
+            if attempt < max_retries:
+                print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
+                time.sleep(retry_delay)  # 等待一段时间后再重试
+            else:
+                print(f"达到最大重试次数，失败. {log_pre}")
+                return error_str, None  # 达到最大重试次数后返回 None
+
+def check_owner_asr(owner_asr_info, video_duration):
+    """
+        检查生成的asr文本是否正确，第一是验证每个时间是否合理（1.最长跨度不能够超过20s 2.时长的合理性（也就是最快和最慢的语速就能够知道文本对应的时长是否合理） 3.owner语音和本地speaker说话人日志的差异不能够太大）
+
+    :param owner_asr_info: 包含 ASR 信息的字典列表
+    :return: 错误信息列表，若没有错误则返回空列表
+    """
+    max_end_time_ms = 0
+    error_info = 'asr文本检查通过'
+    # 使用 enumerate 获取索引和元素，便于日志记录
+    for i, segment in enumerate(owner_asr_info):
+        try:
+            start_str = segment.get("start")
+            end_str = segment.get("end")
+
+            # 检查 start 和 end 是否为字符串，如果不是，则格式错误
+            if not isinstance(start_str, str) or not isinstance(end_str, str):
+                error_info = f"[ERROR] 片段 {i} 的时间格式不正确，应为字符串。数据: {segment}"
+                return False, error_info
+
+            start_time_ms = time_to_ms(start_str)
+            end_time_ms = time_to_ms(end_str)
+
+            # --- 核心修改步骤：原地更新字典 ---
+            segment["start"] = start_time_ms
+            segment["end"] = end_time_ms
+            # ------------------------------------
+
+            # 更新整个 ASR 列表的最大结束时间
+            max_end_time_ms = max(max_end_time_ms, end_time_ms)
+
+            duration_ms = end_time_ms - start_time_ms
+
+            # 1. 最大文案长度不能超过 20s
+            if len(owner_asr_info[i]['final_text']) > 200 and owner_asr_info[i]['speaker'] == 'owner':
+                error_info = f"[ERROR] 片段 {i} 文案长度：{len(owner_asr_info[i]['final_text'])} 跨度过长: {duration_ms} ms 文案为:{owner_asr_info[i]['final_text']}"
+                return False, error_info
+
+        except (ValueError, TypeError) as e:
+            error_info = f"[ERROR] 处理片段 {i} 时发生时间转换错误: {e}. 数据: {segment}"
+            return False, error_info
+
+    # 循环结束后，检查 ASR 的最大时间是否超过视频总时长（允许1秒的误差）
+    if max_end_time_ms > video_duration + 1000:
+        error_info = f"[ERROR] ASR 最大结束时间 {max_end_time_ms} ms 超过视频总时长 {video_duration} ms"
+        return False, error_info
+
+    # 为owner_asr_info增加source_clip_id字段，从1开始
+    source_clip_id = 0
+    for segment in owner_asr_info:
+        source_clip_id += 1
+        segment['source_clip_id'] = source_clip_id
+
+    return True, error_info
+
+
+def gen_owner_asr_by_llm(video_path, video_info):
+    """
+    通过大模型生成带说话人识别的ASR文本。
+    """
+    log_pre = f"{video_path} owner asr 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    base_prompt = gen_base_prompt(video_path, video_info)
+    error_info = ""
+    gen_error_info = ""
+    # --- 1. 配置常量 ---
+    max_retries = 3
+    retry_delay = 10  # 秒
+    PROMPT_FILE_PATH = './prompt/视频分解素材_直接进行asr转录与owner识别严格.txt'
+
+    # --- 2. 初始化和预处理 ---
+    try:
+        video_duration = probe_duration(video_path)
+        video_duration_ms = int(video_duration * 1000)
+    except Exception as e:
+        error_info = f"获取视频时长失败: {e} {log_pre}"
+        return error_info, None
+    # --- 4. 准备Prompt ---
+    try:
+        prompt = read_file_to_str(PROMPT_FILE_PATH)
+    except Exception as e:
+        error_info = f"读取Prompt文件失败: {PROMPT_FILE_PATH}, 错误: {e} {log_pre}"
+        print(error_info)
+        return error_info, None
+    prompt = f"{prompt}{base_prompt}"
+    # --- 5. 带重试机制的核心逻辑 ---
+    for attempt in range(1, max_retries + 1):
+        print(f"尝试生成ASR信息... (第 {attempt}/{max_retries} 次) {log_pre}")
+        raw_response = ""
+        try:
+            gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro")
+
+
+            # 解析和校验
+            owner_asr_info = string_to_object(raw_response)
+            check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms)
+            if not check_result:
+                error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
+                raise ValueError(error_info)
+            return error_info, owner_asr_info
+        except Exception as e:
+            error_str = f"{error_info} {str(e)} {gen_error_info}"
+            print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
                 time.sleep(retry_delay)  # 等待一段时间后再重试

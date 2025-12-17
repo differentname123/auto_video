@@ -184,10 +184,11 @@ class VideoMaterialBuilder:
             'is_needs_stickers': video_item.get('need_emoji'),
             'is_needs_audio_replace': global_settings.get('audio_replace'),
             'is_realtime_video': video_item.get('is_realtime'),
+            'is_contains_creator_voice': video_item.get('has_author_voice'),
             'max_scenes': video_item.get('max_scenes'),
             'scene_timestamp_list': None,
             'logical_scene_info': None,
-            'asr_info': None,
+            'owner_asr_info': None,
             'owner_subtitle_box_info': None
         }
 

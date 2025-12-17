@@ -15,7 +15,7 @@ import os
 import shutil
 import time
 
-from application.llm_generator import gen_logical_scene_llm
+from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
@@ -122,7 +122,7 @@ def process_origin_video(video_id):
 
 def gen_extra_info(task_info, video_info_dict, manager):
     """
-    为每个视频生成额外信息
+    为每个视频生成额外信息 逻辑场景划分 覆盖文字识别 作者语音识别
     :param task_info:
     :param video_info_dict:
     :return:
@@ -154,7 +154,7 @@ def gen_extra_info(task_info, video_info_dict, manager):
         path_info = build_video_paths(video_id)
         logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
         video_path = path_info['low_resolution_video_path']
-
+        error_info = ""
         if not logical_scene_info:
             error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info)
             if not error_info:
@@ -169,6 +169,63 @@ def gen_extra_info(task_info, video_info_dict, manager):
             manager.upsert_materials([video_info])
             if error_info:
                 continue
+        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+
+
+
+
+        video_overlays_text_info = video_info.get('extra_info', {}).get('video_overlays_text_info', {})
+        if not video_overlays_text_info:
+            error_info, video_overlays_text_info = gen_overlays_text_llm(video_path, video_info)
+            if not error_info:
+                video_info['extra_info']['video_overlays_text_info'] = video_overlays_text_info
+            else:
+                failure_details[video_id] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.WARNING
+                }
+                video_info["overlays_text_error"] = error_info
+
+            manager.upsert_materials([video_info])
+            if error_info:
+                print(f"视频 {video_id} overlays_text_info 生成失败: {error_info} 但是非必要可以继续运行")
+        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+
+
+
+
+
+        owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
+        is_contains_creator_voice = video_info.get('extra_info', {}).get('has_author_voice', True)
+        if is_contains_creator_voice and not owner_asr_info:
+            error_info, owner_asr_info = gen_owner_asr_by_llm(video_path, video_info)
+            if not error_info:
+                video_info['extra_info']['owner_asr_info'] = owner_asr_info
+            else:
+                failure_details[video_id] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.ERROR
+                }
+                video_info["owner_asr_error"] = error_info
+            manager.upsert_materials([video_info])
+            if error_info:
+                continue
+        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+
+    return failure_details
+
+
+def check_failure_details(failure_details):
+    """
+    判断failure_details中错误等级是否有超过ERROR的
+    :param failure_details:
+    :return:
+    """
+    for video_id, detail in failure_details.items():
+        if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
+            return True
+    return False
+
 
 
 def process_single_task(task_info, manager):
@@ -204,7 +261,10 @@ def process_single_task(task_info, manager):
 
             if not video_info:
                 print(f"严重错误: 视频 {video_id} 在物料库中不存在，已跳过。")
-                failure_details[video_id] = "Material not found in database"
+                failure_details[video_id] = {
+                    "error_info": "Video info not found in database",
+                    "error_level": ERROR_STATUS.CRITICAL
+                }
                 continue
 
             needs_db_update = False
@@ -228,7 +288,10 @@ def process_single_task(task_info, manager):
                 if not result:
                     print(f"错误: 视频 {video_id} 下载失败。")
                     video_info["download_error"] = VIDEO_ERROR.DOWNLOAD_FAILED
-                    failure_details[video_id] = "Video download failed"
+                    failure_details[video_id] = {
+                        "error_info": "Download failed",
+                        "error_level": ERROR_STATUS.ERROR
+                    }
                     materials_to_update.append(video_info)
                     continue
 
@@ -268,7 +331,10 @@ def process_single_task(task_info, manager):
 
         except Exception as e:
             print(f"严重错误: 处理视频 {video_id} 时发生未知异常: {e}")
-            failure_details[video_id] = f"Unexpected error: {str(e)}"
+            failure_details[video_id] = {
+                "error_info": f"Unexpected error: {str(e)}",
+                "error_level": ERROR_STATUS.ERROR
+            }
             if 'video_info' in locals() and video_info:
                 video_info['processing_error'] = str(e)  # 这里是设置错误，保持不变
                 materials_to_update.append(video_info)
@@ -298,7 +364,7 @@ def process_single_task(task_info, manager):
     manager.upsert_tasks([task_info])
 
     # 如果上一步出现过错误直接结束
-    if failure_details:
+    if check_failure_details(failure_details):
         return
 
     # 进行原始视频的加工，生成后续要处理的视频
@@ -307,7 +373,10 @@ def process_single_task(task_info, manager):
             process_origin_video(video_id)
         except Exception as e:
             print(f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {e}")
-            failure_details[video_id] = f"Error processing origin video: {str(e)}"
+            failure_details[video_id] = {
+                "error_info": f"Error processing origin video: {str(e)}",
+                "error_level": ERROR_STATUS.ERROR
+            }
             video_info = video_info_dict.get(video_id)
             if video_info:
                 video_info['processing_error'] = str(e)
@@ -329,12 +398,17 @@ def process_single_task(task_info, manager):
     manager.upsert_tasks([task_info])
 
     # 如果上一步出现过错误直接结束
-    if failure_details:
+    if check_failure_details(failure_details):
         return
 
-    gen_extra_info(task_info, video_info_dict, manager)
+    failure_details = gen_extra_info(task_info, video_info_dict, manager)
 
-    print(f"任务 {task_id} 全部处理完成，无错误。")
+    if check_failure_details(failure_details):
+        return
+
+
+
+    print(f"任务 {task_id} 全部处理完成，无错误。\n")
 
 
 if __name__ == '__main__':
