@@ -1,64 +1,78 @@
-# -- coding: utf-8 --
-""":authors:
-    zhuxiaohu
-:create_date:
-    2025/12/15 18:13
-:last_date:
-    2025/12/15 18:13
-:description:
-    
-"""
-import os
+# 修正版：使用 silero_vad 的当前接口，并包含能量微调与容错
+from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
+import librosa
+import numpy as np
+import sys
 
-os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
-os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
-import torch
-import torchaudio
-from pprint import pprint
+AUDIO_PATH = 'temp/vocals.wav'   # <-- 确保和下面 librosa.load 使用的是同一文件
 
-# 1. 加载模型和工具
-# 第一次运行时会自动从网上下载模型
-model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                              model='silero_vad',
-                              force_reload=True)  # 设置为True确保下载最新版本
+# 1) load model (不要解包)
+model = load_silero_vad()
 
-# 从utils中获取我们需要的函数
-(get_speech_timestamps,
- save_audio,
- read_audio,
- VADIterator,
- collect_chunks) = utils
+# 2) read audio for VAD using package helper (silero expects 16k mono)
+wav = read_audio(AUDIO_PATH)   # 返回 numpy array (float32)，采样率已变为 16k（silero 内部做了处理）
+# 若 read_audio 返回 torch.Tensor，则转为 numpy（下面做了兼容）
+if hasattr(wav, "numpy"):
+    try:
+        wav = wav.numpy()
+    except Exception:
+        wav = np.asarray(wav)
 
-# 2. 准备示例音频
-# Silero VAD 期望的音频格式是：16kHz, 单声道, 16-bit PCM
-# 你可以使用自己的WAV文件，或下载一个示例
-SAMPLING_RATE = 16000  # Silero VAD 默认采样率
-wav_file = 'temp/test.mp3'
+# 3) get speech timestamps (秒)
+speech_ts = get_speech_timestamps(wav, model, return_seconds=True)
 
-# 使用 torchaudio 读取音频
-# 注意：它返回的是一个tensor，这正是模型需要的格式
-audio_tensor = read_audio(wav_file, sampling_rate=SAMPLING_RATE)
+if not speech_ts:
+    print("No speech segments detected.")
+    sys.exit(0)
 
-# 3. 进行语音检测
-# `get_speech_timestamps` 是最常用的函数，我们将在下一节详细讲解
-# 这里我们先手动遍历音频块来理解基本原理
-speech_probs = []
-window_size_samples = 512  # VAD模型处理的窗口大小（以采样点计）
+# 4) 合并短停顿为“句”（示例阈值 0.35s）
+records = []
+pause_thresh = 0.35
+cur_start = speech_ts[0]['start']
+cur_end = speech_ts[0]['end']
+for s in speech_ts[1:]:
+    if s['start'] - cur_end >= pause_thresh:
+        records.append({'start': cur_start, 'end': cur_end})
+        cur_start = s['start']
+        cur_end = s['end']
+    else:
+        cur_end = s['end']
+records.append({'start': cur_start, 'end': cur_end})
 
-# 遍历整个音频张量
-for i in range(0, len(audio_tensor), window_size_samples):
-    chunk = audio_tensor[i: i + window_size_samples]
-    if len(chunk) < window_size_samples:
-        break  # 如果最后一块不够长，则忽略
+# 5) 用 librosa 重新加载音频用于短时能量微调（保证 sr=16000）
+y, sr = librosa.load(AUDIO_PATH, sr=16000, mono=True)
+hop = 0.01                        # 帧移 10ms
+frame_len = int(0.02 * sr)        # 帧长 20ms
 
-    # `model()` 是核心的调用方法
-    speech_prob = model(chunk, SAMPLING_RATE).item()
-    speech_probs.append(speech_prob)
+for r in records:
+    center = int(r['end'] * sr)
+    w = int(0.2 * sr)             # ±0.2s 搜索窗口
+    start = max(0, center - w)
+    stop = min(len(y), center + w)
+    seg = y[start:stop]
 
-# `model.reset_states()` 用于重置模型的内部状态，处理新文件前调用
-model.reset_states()
+    # 如果片段太短，直接用原 end
+    if len(seg) < frame_len + 1:
+        r['end_refined'] = r['end']
+        continue
 
-print("前10个音频块的语音置信度：")
-pprint(speech_probs[:10])
+    # 将段分帧并计算 short-time energy
+    hop_n = int(hop * sr)
+    try:
+        frames = librosa.util.frame(seg, frame_length=frame_len, hop_length=hop_n).T
+    except Exception:
+        # 防御：若 frame 失败（长度等问题），直接不调整
+        r['end_refined'] = r['end']
+        continue
 
-# 你可以看到，输出是一系列0到1之间的浮点数，数值越高代表是语音的可能性越大
+    ste = (frames ** 2).sum(axis=1)
+    min_i = int(np.argmin(ste))
+    adj_sample = start + min_i * hop_n
+    adj_time = adj_sample / sr
+    # 保证微调后不超过原来 end + 0.3s 或小于 start
+    adj_time = max(r['start'], min(adj_time, r['end'] + 0.3))
+    r['end_refined'] = adj_time
+
+# 输出结果
+for i, r in enumerate(records):
+    print(f"segment {i}: start={r['start']:.3f}s  end_raw={r['end']:.3f}s  end_refined={r.get('end_refined', r['end']):.3f}s")
