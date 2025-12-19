@@ -15,7 +15,7 @@ import os
 import shutil
 import time
 
-from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm
+from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, gen_hudong_by_llm
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
@@ -211,6 +211,25 @@ def gen_extra_info(task_info, video_info_dict, manager):
             if error_info:
                 continue
         print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+
+
+
+        hudong_info = video_info.get('extra_info', {}).get('hudong_info', {})
+
+        if not hudong_info:
+            error_info, hudong_info = gen_hudong_by_llm(video_path, video_info)
+            if not error_info:
+                video_info['extra_info']['hudong_info'] = hudong_info
+            else:
+                failure_details[video_id] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.ERROR
+                }
+                video_info["hudong_error"] = error_info
+            manager.upsert_materials([video_info])
+            if error_info:
+                continue
+        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
 
     return failure_details
 

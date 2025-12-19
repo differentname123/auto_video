@@ -429,3 +429,105 @@ def gen_owner_asr_by_llm(video_path, video_info):
             else:
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None  # 达到最大重试次数后返回 None
+
+def validate_danmu_result(result: any):
+    """
+    检测LLM返回结果的正确性。
+
+    Args:
+        result: 从LLM返回并经过解析后的对象。
+
+    Returns:
+        bool: 如果结果正确则返回 True，否则返回 False。
+    """
+    error_info = ""
+    if not isinstance(result, dict):
+        error_info = f"验证失败：结果不是一个字典 (dict)，实际类型为 {type(result)}。 {result}"
+        return False, error_info
+
+    if "视频分析" not in result:
+        error_info = f"验证失败：结果字典中缺少 '视频分析' 字段。{result}"
+        return False, error_info
+
+    video_analysis = result.get("视频分析")
+
+    if not isinstance(video_analysis, dict):
+        error_info = (f"验证失败：'视频分析' 字段不是字典：{video_analysis}")
+        return False, error_info
+
+    # 检查题材字段必须存在并非空
+    genre = video_analysis.get("题材")
+    if not genre:
+        error_info = (f"验证失败：'视频分析' 下缺少 '题材' 字段，或其值为空。当前值：{genre}")
+        return False, error_info
+
+    return True, error_info
+
+
+
+def gen_hudong_by_llm(video_path, video_info):
+    """
+    通过视频和描述生成弹幕，带有重试和验证机制。
+    """
+    MAX_RETRIES = 3  # 设置最大重试次数
+    prompt_file_path = './prompt/筛选出合适的弹幕.txt'
+    base_prompt = gen_base_prompt(video_path, video_info)
+    log_pre = f"{video_path} 生成弹幕互动信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    try:
+        prompt = read_file_to_str(prompt_file_path)
+        duration = probe_duration(video_path)
+    except Exception as e:
+        print(f"初始化prompt或获取视频时长时出错: {e} {log_pre}")
+        return None
+
+    prompt_with_duration = f"{prompt}{base_prompt}"
+    comment_list = video_info.get('base_info', {}).get('comment_list', [])
+    temp_comments = [(c[0], c[1]) for c in comment_list]
+    desc = f"\n已有评论列表 (数字表示已获赞数量): {temp_comments}"
+    # 模型选择逻辑（与原版保持一致）
+    max_duration = 600
+    model_name = "gemini-flash-latest"
+    if duration > max_duration:
+        # 即使超过时长，模型名也没变，但保留打印语句
+        print(f"视频时长 {duration} 秒超过最大限制 {max_duration} 秒，使用默认处理方式。  {log_pre}")
+    error_info = ""
+    # 开始重试循环
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"\n--- [第 {attempt}/{MAX_RETRIES} 次尝试] ---  {log_pre}")
+
+        # 策略：首次尝试带 desc，后续重试不带 desc
+        if attempt == 1:
+            current_prompt = f"{prompt_with_duration}\n{desc}"
+            print(f"生成弹幕互动信息 首次尝试：使用包含 `desc` 的完整 prompt。 {log_pre}")
+        else:
+            current_prompt = prompt_with_duration
+            print(f"生成弹幕互动信息 重试尝试：使用不包含 `desc` 的基础 prompt。 {log_pre}")
+
+        try:
+            # 1. 调用 LLM 获取原始文本
+            raw = get_llm_content_gemini_flash_video(
+                prompt=current_prompt,
+                video_path=video_path,
+                model_name=model_name
+            )
+
+            # 2. 尝试解析文本为对象
+            try:
+                result = string_to_object(raw)
+                check_result, check_info = validate_danmu_result(result)
+                if not check_result:
+                    raise ValueError(f"生成弹幕互动信息 结果验证未通过: {check_info} {raw} {log_pre}")
+                return error_info, result
+            except Exception as e:
+                error_info = f"生成弹幕互动信息 解析返回结果时出错: {str(e)}"
+                print(f"生成弹幕互动信息 解析返回结果时出错: {str(e)}")
+                return error_info, None
+
+        except Exception as e:
+            error_info = f"生成弹幕互动信息 解析返回结果时出错: {str(e)}"
+            print(f"生成弹幕互动信息 在第 {attempt} 次调用 LLM API 时发生严重错误: {e}")
+            # 如果API调用本身就失败了，也计为一次失败的尝试
+            if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
+                print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
+                break  # 使用 break 更清晰地跳出循环
+            return error_info, None
