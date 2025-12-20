@@ -186,6 +186,9 @@ class VideoMaterialBuilder:
             'is_realtime_video': video_item.get('is_realtime'),
             'is_contains_creator_voice': video_item.get('has_author_voice'),
             'max_scenes': video_item.get('max_scenes'),
+            'has_ads ': video_item.get('has_ads '),
+            'has_author_face ': video_item.get('has_author_face '),
+
             'scene_timestamp_list': None,
             'logical_scene_info': None,
             'owner_asr_info': None,
@@ -263,7 +266,9 @@ class PublishTaskBuilder:
                 'is_needs_stickers': item.get('need_emoji'),
                 'is_needs_audio_replace': material['extra_info']['is_needs_audio_replace'],
                 'is_realtime_video': item.get('is_realtime'),
-                'max_scenes': item.get('max_scenes')
+                'max_scenes': item.get('max_scenes'),
+                'has_ads ': item.get('has_ads '),
+                'has_author_face ': item.get('has_author_face '),
             })
 
         return url_info_list

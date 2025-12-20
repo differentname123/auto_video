@@ -15,7 +15,8 @@ import os
 import shutil
 import time
 
-from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, gen_hudong_by_llm
+from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
+    gen_hudong_by_llm, gen_video_script_llm
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
@@ -425,6 +426,9 @@ def process_single_task(task_info, manager):
     if check_failure_details(failure_details):
         return
 
+    gen_video_script_llm(task_info, video_info_dict, manager)
+
+     # 最终更新任务状态为已完成
 
 
     print(f"任务 {task_id} 全部处理完成，无错误。\n")

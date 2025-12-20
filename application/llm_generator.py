@@ -9,6 +9,7 @@
     主要是调用大模型生成内容的业务代码
 """
 import time
+from collections import Counter
 
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
@@ -531,3 +532,178 @@ def gen_hudong_by_llm(video_path, video_info):
                 print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
                 break  # 使用 break 更清晰地跳出循环
             return error_info, None
+
+
+def analyze_scene_content(scene_list, top_k=5, merge_mode='global'):
+    """
+    分析场景列表。
+
+    Args:
+        scene_list (list): 包含场景字典的列表。
+        top_k (int): 需要返回的高频标签数量。
+        merge_mode (str): 合并模式，支持以下三种：
+            - 'global': 全局合并，所有场景作为一个整体返回 1 个结果。
+            - 'smart' : 智能合并，根据 is_adjustable=True 进行切分，False 则合并到上一段。
+            - 'none'  : 不合并，每个场景单独处理，返回 N 个结果。
+
+    Returns:
+        list: 一个列表，其中每个元素都是一个字典。
+    """
+
+    if not scene_list:
+        return []
+
+    # --- 1. 内部辅助函数：处理一组场景并计算标签 ---
+    def _process_segment(segment_scenes):
+        visual_descriptions = []
+        all_emotions = []
+        all_themes = []
+
+        for scene in segment_scenes:
+            # 提取 visual_description
+            v_desc = scene.get('visual_description')
+            if v_desc:
+                visual_descriptions.append(v_desc)
+
+            # 提取 tags
+            potential = scene.get('scene_potential', {})
+            all_emotions.extend(potential.get('emotion_tags', []))
+            all_themes.extend(potential.get('theme_tags', []))
+
+        # 计数并取 Top K
+        top_emotions = [tag for tag, count in Counter(all_emotions).most_common(top_k)]
+        top_themes = [tag for tag, count in Counter(all_themes).most_common(top_k)]
+
+        return {
+            'visual_description_list': visual_descriptions,
+            'emotion_tags': top_emotions,
+            'theme_tags': top_themes
+        }
+
+    # --- 2. 根据模式构建 Segments (列表的列表) ---
+    segments = []
+
+    if merge_mode == 'global':
+        # 模式 1: 全部作为一个整体
+        segments.append(scene_list)
+
+    elif merge_mode == 'none':
+        # 模式 3: 完全不合并，每个场景单独成为一组
+        for scene in scene_list:
+            segments.append([scene])
+
+    elif merge_mode == 'smart':
+        # 模式 2: 根据 is_adjustable 智能分段
+        current_segment = [scene_list[0]]
+
+        for scene in scene_list[1:]:
+            is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
+
+            if is_adjustable:
+                # True: 这是一个独立模块，断开上一段，开启新的一段
+                segments.append(current_segment)
+                current_segment = [scene]
+            else:
+                # False: 这是一个依附模块，合并到当前段
+                current_segment.append(scene)
+
+        segments.append(current_segment)
+
+    else:
+        raise ValueError(f"Unsupported merge_mode: {merge_mode}. Use 'global', 'smart', or 'none'.")
+
+    # --- 3. 处理每个 Segment 并返回结果 ---
+    result_list = []
+    for segment in segments:
+        result_list.append(_process_segment(segment))
+
+    return result_list
+
+def is_contain_owner_speaker(owner_asr_info):
+    """
+    检查是否包含owner的文本
+    """
+    for asr_info in owner_asr_info:
+        speaker = asr_info.get('speaker', 'unknown')
+        final_text = asr_info.get('final_text', '').strip()
+        if speaker == 'owner' and final_text:
+            return True
+    return False
+
+
+def build_prompt_data(task_info, video_info_dict):
+    """
+    组织好最终的数据，不同的选项有不同的组织方式
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    creation_guidance_info = task_info.get('creation_guidance_info', {})
+    is_need_original = creation_guidance_info.get('is_need_original', True)
+    is_need_narration = creation_guidance_info.get('is_need_narration', False)
+    final_info_list = []
+
+
+
+    for video_id, video_info in video_info_dict.items():
+        owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
+        if not is_need_original: # 如果不需要原创就应该全量保留而且不能够改变顺序
+            merge_mode = 'global'
+        else:
+            if is_need_narration and is_contain_owner_speaker(owner_asr_info):
+                merge_mode = 'none'
+            else:
+                merge_mode = 'smart'
+
+        logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
+        video_summary = logical_scene_info.get('video_summary', '')
+        new_scene_info = logical_scene_info.get('new_scene_info', [])
+        # 获取new_scene_info每个元素的visual_description，放入一个列表中
+        merged_scene_list = analyze_scene_content(new_scene_info, merge_mode=merge_mode)
+        counted_scene = 0
+        for scene in merged_scene_list:
+            counted_scene += 1
+            scene['scene_id'] = f"{video_id}_part{counted_scene}"
+
+        temp_info = {
+            'scene_summary': video_summary,
+            'scene_visual_description_list': merged_scene_list
+        }
+        final_info_list.append(temp_info)
+    return final_info_list
+
+
+def gen_video_script_llm(task_info, video_info_dict, manager):
+    """
+    生成新的脚本
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    creation_guidance_info = task_info.get('creation_guidance_info', {})
+    is_need_original = creation_guidance_info.get('is_need_original', True)
+    final_info_list = build_prompt_data(task_info, video_info_dict)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
