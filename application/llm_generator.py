@@ -534,7 +534,7 @@ def gen_hudong_by_llm(video_path, video_info):
             return error_info, None
 
 
-def analyze_scene_content(scene_list, top_k=5, merge_mode='global'):
+def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
     """
     分析场景列表。
 
@@ -575,7 +575,7 @@ def analyze_scene_content(scene_list, top_k=5, merge_mode='global'):
         top_themes = [tag for tag, count in Counter(all_themes).most_common(top_k)]
 
         return {
-            'visual_description_list': visual_descriptions,
+            'visual_descriptions': visual_descriptions,
             'emotion_tags': top_emotions,
             'theme_tags': top_themes
         }
@@ -641,7 +641,8 @@ def build_prompt_data(task_info, video_info_dict):
     creation_guidance_info = task_info.get('creation_guidance_info', {})
     is_need_original = creation_guidance_info.get('is_need_original', True)
     is_need_narration = creation_guidance_info.get('is_need_narration', False)
-    final_info_list = []
+    video_summary_info = {}
+    all_scene_info_list = []
 
 
 
@@ -657,6 +658,10 @@ def build_prompt_data(task_info, video_info_dict):
 
         logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
         video_summary = logical_scene_info.get('video_summary', '')
+        video_summary_info[video_id] ={
+                "source_video_id": video_id,
+                "summary": video_summary
+            }
         new_scene_info = logical_scene_info.get('new_scene_info', [])
         # 获取new_scene_info每个元素的visual_description，放入一个列表中
         merged_scene_list = analyze_scene_content(new_scene_info, merge_mode=merge_mode)
@@ -664,13 +669,15 @@ def build_prompt_data(task_info, video_info_dict):
         for scene in merged_scene_list:
             counted_scene += 1
             scene['scene_id'] = f"{video_id}_part{counted_scene}"
+            scene['source_video_id'] = video_id
+        all_scene_info_list.extend(merged_scene_list)
 
-        temp_info = {
-            'scene_summary': video_summary,
-            'scene_visual_description_list': merged_scene_list
-        }
-        final_info_list.append(temp_info)
-    return final_info_list
+    final_info = {
+        "video_summaries": video_summary_info,
+        "all_scenes": all_scene_info_list
+
+    }
+    return final_info
 
 
 def gen_video_script_llm(task_info, video_info_dict, manager):
