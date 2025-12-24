@@ -188,6 +188,7 @@ class VideoMaterialBuilder:
             'max_scenes': video_item.get('max_scenes'),
             'has_ads ': video_item.get('has_ads '),
             'has_author_face ': video_item.get('has_author_face '),
+            'scene_order_fixed': video_item.get('scene_order_fixed'),
 
             'scene_timestamp_list': None,
             'logical_scene_info': None,
@@ -269,6 +270,7 @@ class PublishTaskBuilder:
                 'max_scenes': item.get('max_scenes'),
                 'has_ads ': item.get('has_ads '),
                 'has_author_face ': item.get('has_author_face '),
+                'scene_order_fixed': item.get('scene_order_fixed')
             })
 
         return url_info_list

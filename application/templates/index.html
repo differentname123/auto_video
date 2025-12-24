@@ -265,7 +265,6 @@
                 </button>
             </div>
 
-            <!-- 全局设置 -->
             <div class="global-settings-box">
                 <div class="master-switch-row">
                     <div class="master-switch-label">
@@ -325,7 +324,6 @@
                         <select id="schedule-date" class="input-styled"></select>
                     </div>
 
-                    <!-- 二级选项 (Grid Layout) -->
                     <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px;">
                         <div class="option-item">
                             <div class="label-wrap">
@@ -462,6 +460,7 @@
         const delBtn = document.querySelectorAll('.video-item-card').length > 0
             ? `<button type="button" class="btn-remove-card" onclick="removeCard(${id})" title="删除此素材">×</button>` : '';
 
+        // --- 注意：此处已添加了"是否场景不能够改变顺序"的选项 ---
         card.innerHTML = `
             ${delBtn}
             <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
@@ -479,7 +478,6 @@
                     </select>
                 </div>
 
-                <!-- 新增：是否包含广告 -->
                 <div class="option-item">
                     <div class="label-wrap">
                         <span class="option-label">是否包含广告?</span>
@@ -493,7 +491,6 @@
                     </select>
                 </div>
 
-                <!-- 新增：是否有原作者画面 -->
                 <div class="option-item">
                     <div class="label-wrap">
                         <span class="option-label">是否有原作者画面?</span>
@@ -553,6 +550,19 @@
                         <option value="10">不超过10个场景</option>
                     </select>
                 </div>
+
+                <div class="option-item">
+                    <div class="label-wrap">
+                        <span class="option-label">是否场景不能够改变顺序</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">锁定素材的时间线顺序，AI剪辑时将不会打乱片段前后关系。</span>
+                    </div>
+                    <select class="input-styled select-scene-order-fixed">
+                        <option value="auto" selected>智能判断</option>
+                        <option value="yes">是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
             </div>
         `;
         els.videoList.appendChild(card);
@@ -590,10 +600,11 @@
             if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
 
             const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
-
-            // 获取新增加的选项值
             const hasAdsVal = card.querySelector('.select-has-ads').value;
             const hasAuthorFaceVal = card.querySelector('.select-author-face').value;
+
+            // 获取新选项的值
+            const sceneOrderFixedVal = card.querySelector('.select-scene-order-fixed').value;
 
             vList.push({
                 url: url,
@@ -602,29 +613,27 @@
                 need_text: card.querySelector('.select-text').value === 'yes',
                 need_emoji: card.querySelector('.select-emoji').value === 'yes',
                 max_scenes: maxScenesVal,
-                // 新增字段
-                has_ads: hasAdsVal, // 'auto', 'yes', 'no'
-                has_author_face: hasAuthorFaceVal // 'auto', 'yes', 'no'
+                has_ads: hasAdsVal,
+                has_author_face: hasAuthorFaceVal,
+                // 新增字段加入提交数据
+                scene_order_fixed: sceneOrderFixedVal
             });
         });
 
         if(err) return alert(err);
         if(!vList.length) return alert('请至少添加一个有效的视频链接');
 
-        // --- 新增：限制逻辑开始 ---
         const isOriginalChecked = document.querySelector('input[name="isOriginal"]:checked').value === 'yes';
         const audioReplaceSelect = document.getElementById('audio-replace');
 
-        // 仅在开启原创处理且选择了AI音频替换为“是”时进行校验
         if (isOriginalChecked && audioReplaceSelect.value === 'yes') {
             const isAllNoVoice = vList.every(v => v.has_author_voice === false);
             if (isAllNoVoice) {
                 alert('⚠️ 设置冲突提醒：\n\n您开启了【AI 音频替换】，但素材列表中所有视频的【包含作者声音】均选择了【否】。\n\n逻辑说明：如果视频本身没有声音来源，系统无法执行音频替换。\n\n请修改：\n1. 将“AI 音频替换”改为“否”；\n2. 或者确保至少有一个素材“包含作者声音”为“是”。');
                 audioReplaceSelect.focus();
-                return; // 阻止提交
+                return;
             }
         }
-        // --- 新增：限制逻辑结束 ---
 
         const isOriginal = isOriginalChecked;
         const retentionVal = parseFloat(document.getElementById('retention-ratio').value);
