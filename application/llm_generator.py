@@ -17,7 +17,7 @@ from utils.gemini import get_llm_content_gemini_flash_video
 from utils.video_utils import probe_duration, get_scene
 
 
-def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes) -> tuple[bool, str]:
+def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames) -> tuple[bool, str]:
     """
      检查 logical_scene_info 的有效性，并在检查过程中将时间字符串转换为毫秒整数（in-place-modification）。
 
@@ -40,9 +40,18 @@ def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_sc
     ]
     deleted_scene = logical_scene_info.get('deleted_scene', [])
     new_scene_info = logical_scene_info.get('new_scene_info', [])
+
     # 检查 deleted_scene 中的场景数量，不能超过3个
     if len(deleted_scene) > 3:
         return False, "检查失败：deleted_scene 中的场景数量超过3个，可能存在误操作。"
+
+    if need_remove_frames == 'yes':
+        if len(deleted_scene) == 0:
+            return False, "需要删除场景但是没有检测出待删除的场景"
+
+    if need_remove_frames == 'no':
+        if len(deleted_scene) > 0:
+            return False, "不需要  删除场景但是检测出待删除的场景"
 
     # 检查 new_scene_info 中的场景数量，不能超过15个
     if len(new_scene_info) > max_scenes and max_scenes > 0:
@@ -212,6 +221,15 @@ def gen_logical_scene_llm(video_path, video_info):
     """
     生成新的视频方案
     """
+    has_ads = video_info.get('extra_info', {}).get('has_ads', 'auto')
+    has_author_face = video_info.get('extra_info', {}).get('has_author_face', 'auto')
+    if has_ads == 'auto' and has_author_face == 'auto':
+        need_remove_frames = 'auto'
+    elif has_ads == 'no' and has_author_face == 'no':
+        need_remove_frames = 'no'
+    else:
+        need_remove_frames = 'yes'
+
     base_prompt = gen_base_prompt(video_path, video_info)
     max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
     log_pre = f"{video_path} 逻辑性场景划分 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
@@ -224,7 +242,7 @@ def gen_logical_scene_llm(video_path, video_info):
 
     retry_delay = 10
     max_retries = 3
-    prompt_file_path = './prompt/视频场景逻辑切分只根据视频内容.txt'
+    prompt_file_path = './prompt/视频素材切分.txt'
     full_prompt = read_file_to_str(prompt_file_path)
     full_prompt += f'\n{base_prompt}'
     if max_scenes > 0:
@@ -238,7 +256,7 @@ def gen_logical_scene_llm(video_path, video_info):
             gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
             logical_scene_info = string_to_object(raw)
-            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes)
+            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes, need_remove_frames)
             if not check_result:
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
@@ -555,29 +573,25 @@ def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
 
     # --- 1. 内部辅助函数：处理一组场景并计算标签 ---
     def _process_segment(segment_scenes):
-        visual_descriptions = []
-        all_emotions = []
-        all_themes = []
+        scene_summaries = []
+        all_tags = []
 
         for scene in segment_scenes:
             # 提取 visual_description
-            v_desc = scene.get('visual_description')
+            v_desc = scene.get('scene_summary')
             if v_desc:
-                visual_descriptions.append(v_desc)
+                scene_summaries.append(v_desc)
 
             # 提取 tags
-            potential = scene.get('scene_potential', {})
-            all_emotions.extend(potential.get('emotion_tags', []))
-            all_themes.extend(potential.get('theme_tags', []))
+            tags = scene.get('tags', {})
+            all_tags.extend(tags)
 
         # 计数并取 Top K
-        top_emotions = [tag for tag, count in Counter(all_emotions).most_common(top_k)]
-        top_themes = [tag for tag, count in Counter(all_themes).most_common(top_k)]
+        top_all_tags = [tag for tag, count in Counter(all_tags).most_common(top_k)]
 
         return {
-            'visual_descriptions': visual_descriptions,
-            'emotion_tags': top_emotions,
-            'theme_tags': top_themes
+            'scene_summary': scene_summaries,
+            'tags': top_all_tags
         }
 
     # --- 2. 根据模式构建 Segments (列表的列表) ---
@@ -658,9 +672,11 @@ def build_prompt_data(task_info, video_info_dict):
 
         logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
         video_summary = logical_scene_info.get('video_summary', '')
+        tags = logical_scene_info.get('tags', '')
         video_summary_info[video_id] ={
                 "source_video_id": video_id,
-                "summary": video_summary
+                "summary": video_summary,
+                "tags":tags
             }
         new_scene_info = logical_scene_info.get('new_scene_info', [])
         # 获取new_scene_info每个元素的visual_description，放入一个列表中

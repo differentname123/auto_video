@@ -186,8 +186,8 @@ class VideoMaterialBuilder:
             'is_realtime_video': video_item.get('is_realtime'),
             'is_contains_creator_voice': video_item.get('has_author_voice'),
             'max_scenes': video_item.get('max_scenes'),
-            'has_ads ': video_item.get('has_ads '),
-            'has_author_face ': video_item.get('has_author_face '),
+            'has_ads ': video_item.get('has_ads'),
+            'has_author_face ': video_item.get('has_author_face'),
             'scene_order_fixed': video_item.get('scene_order_fixed'),
 
             'scene_timestamp_list': None,
@@ -268,8 +268,8 @@ class PublishTaskBuilder:
                 'is_needs_audio_replace': material['extra_info']['is_needs_audio_replace'],
                 'is_realtime_video': item.get('is_realtime'),
                 'max_scenes': item.get('max_scenes'),
-                'has_ads ': item.get('has_ads '),
-                'has_author_face ': item.get('has_author_face '),
+                'has_ads ': item.get('has_ads'),
+                'has_author_face ': item.get('has_author_face'),
                 'scene_order_fixed': item.get('scene_order_fixed')
             })
 
