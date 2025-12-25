@@ -431,7 +431,7 @@ def process_single_task(task_info, manager):
      # 最终更新任务状态为已完成
 
 
-    print(f"任务 {task_id} 全部处理完成，无错误。\n")
+    print(f"任务 {task_id} 全部处理完成。\n")
 
 
 if __name__ == '__main__':
