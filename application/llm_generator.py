@@ -561,7 +561,7 @@ def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
         top_k (int): 需要返回的高频标签数量。
         merge_mode (str): 合并模式，支持以下三种：
             - 'global': 全局合并，所有场景作为一个整体返回 1 个结果。
-            - 'smart' : 智能合并，根据 is_adjustable=True 进行切分，False 则合并到上一段。
+            - 'smart' : 智能合并，is_adjustable=True 的场景单独成组，False 的场景合并为一组。
             - 'none'  : 不合并，每个场景单独处理，返回 N 个结果。
 
     Returns:
@@ -607,21 +607,25 @@ def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
             segments.append([scene])
 
     elif merge_mode == 'smart':
-        # 模式 2: 根据 is_adjustable 智能分段
-        current_segment = [scene_list[0]]
+        # 模式 2: 智能分段 (修改版：True 必须单独)
+        buffer = []  # 用于临时存储连续的 False 场景
 
-        for scene in scene_list[1:]:
+        for scene in scene_list:
             is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
 
             if is_adjustable:
-                # True: 这是一个独立模块，断开上一段，开启新的一段
-                segments.append(current_segment)
-                current_segment = [scene]
-            else:
-                # False: 这是一个依附模块，合并到当前段
-                current_segment.append(scene)
+                if buffer:
+                    segments.append(buffer)
+                    buffer = []  # 清空 buffer
 
-        segments.append(current_segment)
+                # 2. 将当前这个 True 作为一个独立的段加入
+                segments.append([scene])
+            else:
+                buffer.append(scene)
+
+        # 循环结束，检查 buffer 里是否还有剩余的 False
+        if buffer:
+            segments.append(buffer)
 
     else:
         raise ValueError(f"Unsupported merge_mode: {merge_mode}. Use 'global', 'smart', or 'none'.")
