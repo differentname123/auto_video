@@ -552,29 +552,52 @@ def gen_hudong_by_llm(video_path, video_info):
             return error_info, None
 
 
-def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
+def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='global'):
     """
     分析场景列表。
-
-    Args:
-        scene_list (list): 包含场景字典的列表。
-        top_k (int): 需要返回的高频标签数量。
-        merge_mode (str): 合并模式，支持以下三种：
-            - 'global': 全局合并，所有场景作为一个整体返回 1 个结果。
-            - 'smart' : 智能合并，is_adjustable=True 的场景单独成组，False 的场景合并为一组。
-            - 'none'  : 不合并，每个场景单独处理，返回 N 个结果。
-
-    Returns:
-        list: 一个列表，其中每个元素都是一个字典。
     """
 
     if not scene_list:
         return []
 
-    # --- 1. 内部辅助函数：处理一组场景并计算标签 ---
+    # --- 1. 内部辅助函数：处理一组场景 ---
     def _process_segment(segment_scenes):
         scene_summaries = []
         all_tags = []
+
+        if not segment_scenes:
+            return {}
+
+        # 1. 确定当前场景段落的整体时间范围
+        segment_start = min(s['start'] for s in segment_scenes)
+        segment_end = max(s['end'] for s in segment_scenes)
+
+        original_script_list = []
+        narration_script_list = []
+
+        # 2. 遍历 ASR，使用中心点判定归属
+        if owner_asr_info:
+            for asr_item in owner_asr_info:
+                asr_start = asr_item.get('start', 0)
+                asr_end = asr_item.get('end', 0)
+
+                # --- 关键修改 Start ---
+                # 计算台词的时间中点
+                asr_mid = (asr_start + asr_end) / 2
+
+                # 判断中点是否落在当前段落范围内
+                # 使用 [start, end) 左闭右开区间，防止边界点重复
+                # 即：Scene A [0, 100), Scene B [100, 200)
+                # 如果中点正好是 100，它只属于 Scene B
+                if segment_start <= asr_mid < segment_end:
+                    text = asr_item.get('final_text', '')
+                    speaker = asr_item.get('speaker', '')
+
+                    if speaker == 'owner':
+                        narration_script_list.append(text)
+                    else:
+                        original_script_list.append(text)
+                # --- 关键修改 End ---
 
         for scene in segment_scenes:
             # 提取 visual_description
@@ -583,54 +606,47 @@ def analyze_scene_content(scene_list, top_k=3, merge_mode='global'):
                 scene_summaries.append(v_desc)
 
             # 提取 tags
-            tags = scene.get('tags', {})
-            all_tags.extend(tags)
+            tags = scene.get('tags', [])
+            if tags:
+                all_tags.extend(tags)
 
         # 计数并取 Top K
         top_all_tags = [tag for tag, count in Counter(all_tags).most_common(top_k)]
 
         return {
             'scene_summary': scene_summaries,
-            'tags': top_all_tags
+            'tags': top_all_tags,
+            'original_script_list': original_script_list,
+            'narration_script_list': narration_script_list
         }
 
-    # --- 2. 根据模式构建 Segments (列表的列表) ---
+    # --- 2. 根据模式构建 Segments ---
     segments = []
 
     if merge_mode == 'global':
-        # 模式 1: 全部作为一个整体
         segments.append(scene_list)
 
     elif merge_mode == 'none':
-        # 模式 3: 完全不合并，每个场景单独成为一组
         for scene in scene_list:
             segments.append([scene])
 
     elif merge_mode == 'smart':
-        # 模式 2: 智能分段 (修改版：True 必须单独)
-        buffer = []  # 用于临时存储连续的 False 场景
-
+        buffer = []
         for scene in scene_list:
             is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
-
             if is_adjustable:
                 if buffer:
                     segments.append(buffer)
-                    buffer = []  # 清空 buffer
-
-                # 2. 将当前这个 True 作为一个独立的段加入
+                    buffer = []
                 segments.append([scene])
             else:
                 buffer.append(scene)
-
-        # 循环结束，检查 buffer 里是否还有剩余的 False
         if buffer:
             segments.append(buffer)
-
     else:
-        raise ValueError(f"Unsupported merge_mode: {merge_mode}. Use 'global', 'smart', or 'none'.")
+        raise ValueError(f"Unsupported merge_mode: {merge_mode}")
 
-    # --- 3. 处理每个 Segment 并返回结果 ---
+    # --- 3. 处理结果 ---
     result_list = []
     for segment in segments:
         result_list.append(_process_segment(segment))
@@ -683,8 +699,9 @@ def build_prompt_data(task_info, video_info_dict):
                 "tags":tags
             }
         new_scene_info = logical_scene_info.get('new_scene_info', [])
+
         # 获取new_scene_info每个元素的visual_description，放入一个列表中
-        merged_scene_list = analyze_scene_content(new_scene_info, merge_mode=merge_mode)
+        merged_scene_list = analyze_scene_content(new_scene_info, owner_asr_info, merge_mode=merge_mode)
         counted_scene = 0
         for scene in merged_scene_list:
             counted_scene += 1
