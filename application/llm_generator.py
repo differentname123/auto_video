@@ -176,7 +176,6 @@ def fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1
         return logical_scene_info
 
     for i, scene in enumerate(logical_scene_info.get('new_scene_info', [])):
-        scene['origin_scene_id'] = i + 1
         for key in ('start', 'end'):
             orig_ts = scene.get(key)
             if orig_ts is None:
@@ -391,14 +390,15 @@ def check_owner_asr(owner_asr_info, video_duration):
     return True, error_info
 
 
-def check_video_script(video_script_info, final_info_list):
+def check_video_script(video_script_info, final_scene_info, allow_commentary, is_need_narration):
     """
     检查 video_script_info 列表中的每个方案是否符合预设的规则。
 
     Args:
         video_script_info (list): 包含一个或多个视频脚本方案的列表。
-        final_info_list (dict): 包含有效场景ID列表等信息的字典。
+        final_scene_info (dict): 包含有效场景ID列表等信息的字典。
                                 示例: {'all_scenes': [{'scene_id': 'id1'}, ...]}
+        allow_commentary (bool): 是否允许/包含解说词。如果为True，需要检查 transition_text。
 
     Returns:
         tuple: (bool, str)
@@ -406,15 +406,21 @@ def check_video_script(video_script_info, final_info_list):
                第二个元素为字符串，检查通过时为空字符串，失败时为具体的错误信息。
     """
     try:
+        all_scene_list = final_scene_info.get('all_scenes', [])
+        all_scene_dict = {}
+        for scene in all_scene_list:
+            scene_id = scene.get('scene_id')
+            all_scene_dict[scene_id] = scene
+
         # 0. 预处理和基本结构检查
         if not isinstance(video_script_info, list):
             return False, "输入的数据 'video_script_info' 不是一个列表。"
 
-        if 'all_scenes' not in final_info_list or not isinstance(final_info_list['all_scenes'], list):
+        if 'all_scenes' not in final_scene_info or not isinstance(final_scene_info['all_scenes'], list):
             return False, "输入的数据 'final_info_list' 格式错误，缺少 'all_scenes' 列表。"
 
         # 提取final_info_list中的所有scene_id，并放入set中以提高查询效率
-        valid_scene_ids = {scene['scene_id'] for scene in final_info_list['all_scenes']}
+        valid_scene_ids = {scene['scene_id'] for scene in final_scene_info['all_scenes']}
 
         # 遍历每个方案进行检查
         for i, solution in enumerate(video_script_info):
@@ -471,6 +477,21 @@ def check_video_script(video_script_info, final_info_list):
                 # 5. 检查 on_screen_text 字段是否存在。
                 if 'on_screen_text' not in scene:  # 检查key是否存在，允许其值为空字符串
                     return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text' 字段。"
+
+                # =================== 新增修改开始 ===================
+                # 6. 如果 allow_commentary 为 True，检查 transition_text 字段是否存在
+                if allow_commentary:
+                    if 'transition_text' not in scene:
+                        return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'transition_text' 字段 (因为 allow_commentary=True)。"
+
+                if is_need_narration:
+                    scene_info = all_scene_dict.get(scene_id, {})
+                    narration_script_list = scene_info.get('narration_script_list', [])
+                    new_narration_script_list = scene.get('new_narration_script', [])
+                    # 检查 narration_script_list 和 new_narration_script_list 的长度是否一致
+                    if len(narration_script_list) != len(new_narration_script_list):
+                        return False, f"方案 {solution_num} 的场景 {scene_num}  {scene_id} 中，narration_script_list 长度 ({len(narration_script_list)}) 与 new_narration_script 长度 ({len(new_narration_script_list)}) 不一致。"
+
 
                 # 更新检查状态
                 seen_scene_ids.add(scene_id)
@@ -654,8 +675,7 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
     def _process_segment(segment_scenes):
         scene_summaries = []
         all_tags = []
-        # 初始化一个新的列表来存储 origin_scene_id
-        origin_scene_id_list = []
+        scene_number_list = []
 
         if not segment_scenes:
             return {}
@@ -694,11 +714,11 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
                 all_tags.extend(tags)
 
             # --- 新增代码 Start ---
-            # 提取 origin_scene_id
+            # 提取 scene_number_list
             # 使用 .get() 方法以防该字段不存在
-            origin_id = scene.get('origin_scene_id')
+            origin_id = scene.get('scene_number')
             if origin_id is not None:  # 确保ID存在才添加
-                origin_scene_id_list.append(origin_id)
+                scene_number_list.append(origin_id)
             # --- 新增代码 End ---
 
         # 计数并取 Top K
@@ -707,7 +727,7 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         # 在返回的字典中增加 origin_scene_id_list 字段
         return {
             'scene_summary': scene_summaries,
-            'origin_scene_id_list': origin_scene_id_list,
+            'scene_number_list': scene_number_list,
             'tags': top_all_tags,
             'original_script_list': original_script_list,
             'narration_script_list': narration_script_list
@@ -788,7 +808,7 @@ def build_prompt_data(task_info, video_info_dict):
 
     for video_id, video_info in video_info_dict.items():
         max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
-        owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
+        owner_asr_info = video_info.get('owner_asr_info', {})
         if max_scenes == 1: # 如果不需要原创就应该全量保留而且不能够改变顺序
             merge_mode = 'global'
         else:
@@ -797,7 +817,7 @@ def build_prompt_data(task_info, video_info_dict):
             else:
                 merge_mode = 'smart'
 
-        logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
+        logical_scene_info = video_info.get('logical_scene_info')
         video_summary = logical_scene_info.get('video_summary', '')
         tags = logical_scene_info.get('tags', '')
         video_summary_info[video_id] ={
@@ -842,6 +862,8 @@ def gen_video_script_llm(task_info, video_info_dict):
             del scene['start']
         if 'end' in scene:
             del scene['end']
+        if 'scene_number_list' in scene:
+            del scene['scene_number_list']
 
     print("生成场景的最终数据成功")
 
@@ -878,7 +900,7 @@ def gen_video_script_llm(task_info, video_info_dict):
 
             # 解析和校验
             video_script_info = string_to_object(raw_response)
-            check_result, check_info = check_video_script(video_script_info, final_info_list)
+            check_result, check_info = check_video_script(video_script_info, final_info_list, allow_commentary, is_need_narration)
             if not check_result:
                 error_info = f"新视频脚本 检查未通过: {check_info} {raw_response} {log_pre}"
                 raise ValueError(error_info)

@@ -189,29 +189,42 @@ class MongoBase:
         """
         批量 Upsert（高性能）：
         """
-        if not data_list: return
+        if not data_list:
+            return
 
-        col = self.get_collection(collection_name)
+        collection = self.get_collection(collection_name)
         operations = []
 
         for item in data_list:
-            filter_q = {unique_key_field: item.get(unique_key_field)}
-            update_op = {"$set": item}
-            operations.append(UpdateOne(filter_q, update_op, upsert=True))
+            # 1. 复制数据，避免修改原始传入的列表
+            update_data = item.copy()
 
+            # 2. 提取用于查询的键值，并从更新数据中移除它
+            #    这样 $set 就不会尝试更新键本身了
+            key_value = update_data.pop(unique_key_field, None)
+            if key_value is None:
+                # 如果关键字段不存在，可以跳过或抛出异常
+                print(f"警告: 数据项 {item} 缺少关键字段 '{unique_key_field}'，已跳过。")
+                continue
+
+            # 3. 构建查询部分
+            query = {unique_key_field: key_value}
+
+            # 4. 构建更新部分，将所有待更新字段放入 $set
+            #    对于不存在的文档 (upsert=True)，MongoDB 会将 query 和 $set 的内容合并创建新文档
+            update_instruction = {"$set": update_data}
+
+            # 5. 创建一个 UpdateOne 操作，并设置 upsert=True
+            operations.append(UpdateOne(query, update_instruction, upsert=True))
+
+        # 6. 如果有操作，就执行批量写入
         if operations:
             try:
-                result = col.bulk_write(operations, ordered=False)
-                print(f"批量操作完成: 匹配 {result.matched_count}, 修改 {result.modified_count}, 插入 {result.upserted_count}")
-            except BulkWriteError as bwe:
-                # 捕获具体的 BulkWriteError
-                print(f"❌ 批量写入时发生验证错误: {bwe.details}")
-                # 将异常重新抛出，让上层处理！
-                raise bwe
-            except PyMongoError as e:
-                print(f"❌ 发生未知批量写入错误: {e}")
-                # 其他错误也重新抛出
-                raise e
+                result = collection.bulk_write(operations, ordered=False)
+                # print(f"批量 $set 更新完成: {result.bulk_api_result}")
+            except Exception as e:
+                print(f"批量 $set 更新时发生错误: {e}")
+                raise
 
     def create_index(self, collection_name, keys, unique=False):
         """

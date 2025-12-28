@@ -18,6 +18,8 @@ class TaskStatus:
     COMPLETED = '已完成'
     FAILED = '失败'
     DOWNLOADED = '已下载'
+    PLAN_GENERATED = '方案已生成'  # 新增：方案已生成
+
 
 
 class ERROR_STATUS:

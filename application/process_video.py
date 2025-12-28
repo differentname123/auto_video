@@ -130,13 +130,13 @@ def gen_extra_info(task_info, video_info_dict, manager):
             }
             continue
         path_info = build_video_paths(video_id)
-        logical_scene_info = video_info.get('extra_info', {}).get('logical_scene_info')
+        logical_scene_info = video_info.get('logical_scene_info')
         video_path = path_info['low_resolution_video_path']
         error_info = ""
         if not logical_scene_info:
             error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info)
             if not error_info:
-                video_info['extra_info']['logical_scene_info'] = logical_scene_info
+                video_info['logical_scene_info'] = logical_scene_info
             else:
                 failure_details[video_id] = {
                     "error_info": error_info,
@@ -152,11 +152,11 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
 
-        video_overlays_text_info = video_info.get('extra_info', {}).get('video_overlays_text_info', {})
+        video_overlays_text_info = video_info.get('video_overlays_text_info', {})
         if not video_overlays_text_info:
             error_info, video_overlays_text_info = gen_overlays_text_llm(video_path, video_info)
             if not error_info:
-                video_info['extra_info']['video_overlays_text_info'] = video_overlays_text_info
+                video_info['video_overlays_text_info'] = video_overlays_text_info
             else:
                 failure_details[video_id] = {
                     "error_info": error_info,
@@ -173,12 +173,12 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
 
-        owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
-        is_contains_author_voice = video_info.get('extra_info', {}).get('is_contains_author_voice', True)
+        owner_asr_info = video_info.get('owner_asr_info', {})
+        is_contains_author_voice = video_info.get('is_contains_author_voice', True)
         if is_contains_author_voice and not owner_asr_info:
             error_info, owner_asr_info = gen_owner_asr_by_llm(video_path, video_info)
             if not error_info:
-                video_info['extra_info']['owner_asr_info'] = owner_asr_info
+                video_info['owner_asr_info'] = owner_asr_info
             else:
                 failure_details[video_id] = {
                     "error_info": error_info,
@@ -192,12 +192,12 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
 
-        hudong_info = video_info.get('extra_info', {}).get('hudong_info', {})
+        hudong_info = video_info.get('hudong_info', {})
 
         if not hudong_info:
             error_info, hudong_info = gen_hudong_by_llm(video_path, video_info)
             if not error_info:
-                video_info['extra_info']['hudong_info'] = hudong_info
+                video_info['hudong_info'] = hudong_info
             else:
                 failure_details[video_id] = {
                     "error_info": error_info,
@@ -407,11 +407,12 @@ def process_single_task(task_info, manager):
 
     video_script_info = task_info.get('video_script_info', {})
     error_info = ""
-    if not video_script_info:
+    if video_script_info:
         error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
         if not error_info:
             task_info['video_script_info'] = video_script_info
             task_info['final_scene_info'] = final_scene_info
+            task_info['status'] = TaskStatus.PLAN_GENERATED
         else:
             failure_details[video_id] = {
                 "error_info": error_info,
@@ -424,7 +425,7 @@ def process_single_task(task_info, manager):
         return
     print(f"任务 {task_id} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
 
-    # gen_video_by_script(task_info, video_info_dict)
+    gen_video_by_script(task_info, video_info_dict)
 
     print(f"任务 {task_id} 全部处理完成。\n")
 
