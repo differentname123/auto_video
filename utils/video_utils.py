@@ -8,6 +8,10 @@
 :description:
     
 """
+import tempfile
+import uuid
+from typing import Union
+
 import json
 import os
 import shutil
@@ -614,3 +618,304 @@ def get_scene(video_path, min_final_scenes=20):
         kept_sorted)
 
     return kept_sorted
+
+def _format_time_for_ffmpeg(seconds: float) -> str:
+    # 辅助函数：将秒数格式化回 FFmpeg 需要的格式
+    return f"{seconds:.3f}"
+
+def _format_time(time_value: Union[str, int, float]) -> str:
+    """将时间值格式化为 ffmpeg 兼容的字符串。"""
+    if isinstance(time_value, str):
+        # 如果是字符串，直接返回，假设用户提供了正确的格式
+        return time_value
+    if isinstance(time_value, (int, float)):
+        # 如果是数字，我们假定单位是毫秒
+        # 将其转换为秒，并格式化为 SS.mmm
+        return f"{time_value / 1000:.3f}"
+    raise TypeError(
+        f"不支持的时间格式: {type(time_value)}。请输入字符串或代表毫秒的数字。"
+    )
+
+def clip_video_ms(
+        input_path: str,
+        start_time: Union[str, int, float],
+        end_time: Union[str, int, float],
+        output_path: str
+):
+    """
+    使用 ffmpeg 精确截取指定时间段的视频片段。
+
+    此函数通过重新编码视频来确保截取的起点绝对精确，从而避免
+    因关键帧问题导致的“有声无画”现象。
+
+    优点:
+    - 时间点精确到毫秒。
+    - 保证输出的视频文件能正常播放。
+
+    缺点:
+    - 处理速度比流复制慢，因为它需要CPU进行视频编码计算。
+
+    Args:
+        input_path (str): 输入视频文件的完整路径。
+        start_time (Union[str, int, float]):
+            截取片段的开始时间 (毫秒数或 "HH:MM:SS.mmm" 字符串)。
+        end_time (Union[str, int, float]):
+            截取片段的结束时间，格式同 start_time。
+        output_path (str): 输出视频文件的保存路径。
+
+    Returns:
+        bool: 如果截取成功返回 True，否则返回 False。
+        str: 返回 ffmpeg 的输出信息（成功时）或错误信息（失败时）。
+    """
+    current_time = time.time()
+    try:
+        start_formatted = _format_time(start_time)
+        end_formatted = _format_time(end_time)
+    except TypeError as e:
+        print(e)
+        return False, str(e)
+
+    # 【修改部分】构建 ffmpeg 命令列表，以避免 shell 解析特殊字符（如'#'）
+    command = [
+        'ffmpeg',
+        '-i', input_path,
+        '-ss', start_formatted,
+        '-to', end_formatted,
+        '-c:v', 'libx264',  # 或者使用 'libx265' 如果需要 HEVC 编码
+        '-crf', '23',  # 推荐值，可以调整
+        '-c:a', 'copy',  # 复制音频，避免处理和质量损失
+        '-preset', 'ultrafast',  # 编码速度和压缩率的平衡，'veryfast', 'fast', 'medium', 'slow'
+        '-y', output_path
+    ]
+
+    # print("模式: 精确重编码 (速度较慢)")
+    # print(f"正在执行命令: {' '.join(command)}") # 如果需要调试，可以用这种方式打印
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        # 【修改部分】执行命令并等待完成，移除 shell=True
+        result = subprocess.run(
+            command,
+            # shell=True,  <-- 已移除
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        success_message = f"视频截取完成：已保存至: {output_path} 截取时长: {float(end_formatted) - float(start_formatted)} 时间段为 {start_formatted} - {end_formatted} 耗时 {time.time() - current_time:.2f} 秒"
+        print(success_message)
+        # ffmpeg 正常运行时会将大量信息输出到 stderr
+        return True, result.stderr or success_message
+
+    except FileNotFoundError:
+        error_message = "错误：找不到 ffmpeg 命令。请确保 ffmpeg 已正确安装并已添加到系统环境变量 PATH 中。"
+        print(error_message)
+        return False, error_message
+
+    except subprocess.CalledProcessError as e:
+        # 如果 ffmpeg 返回非零退出码，说明出错了
+        error_message = f"ffmpeg 执行出错：\n{e.stderr}"
+        print(error_message)
+        return False, error_message
+
+    except Exception as e:
+        # 捕获其他可能的异常
+        error_message = f"发生未知错误: {e}"
+        print(error_message)
+        return False, error_message
+
+
+def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
+    """
+    使用 filter_complex 将一小批 video_paths 合并为 output_path。
+    probe_fn 是你现有的 probe_video_new，接受路径返回 (w,h,fps,sar)
+    """
+    if not video_paths:
+        raise ValueError("video_paths 不能为空")
+    for p in video_paths:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"未找到文件: {p}")
+
+    # 单文件直接复制（避免重新编码）
+    if len(video_paths) == 1:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video_paths[0], "-c", "copy", output_path]
+        print("[INFO] 单文件直接复制:", " ".join(cmd))
+        subprocess.run(cmd, check=True)
+        return
+
+    # 参考第一个视频参数
+    ref_w, ref_h, ref_fps, ref_sar = probe_fn(video_paths[0])
+    print(f"[INFO] 参考视频参数: {ref_w}×{ref_h}, fps={ref_fps:.2f}, SAR={ref_sar}")
+
+    inputs = []
+    vf_filters = []
+
+    for idx, path in enumerate(video_paths):
+        inputs += ["-i", path]
+
+        if idx == 0:
+            vf_filters.append(
+                f"[{idx}:v]"
+                f"setsar=1,"
+                f"format=yuv420p,"
+                f"setpts=PTS-STARTPTS[v{idx}]"
+            )
+        else:
+            vf_filters.append(
+                f"[{idx}:v]"
+                f"scale={ref_w}:{ref_h}:force_original_aspect_ratio=decrease"
+                f":in_color_matrix=auto:out_color_matrix=bt709"
+                f":in_range=auto:out_range=limited,"
+                f"pad={ref_w}:{ref_h}:(ow-iw)/2:(oh-ih)/2,"
+                f"setsar=1,"
+                f"format=yuv420p,"
+                f"setpts=PTS-STARTPTS[v{idx}]"
+            )
+
+        vf_filters.append(
+            f"[{idx}:a]"
+            f"volume=1,"
+            f"aresample=48000,"
+            f"aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"asetpts=PTS-STARTPTS[a{idx}]"
+        )
+
+    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(video_paths)))
+    vf_filters.append(f"{concat_inputs}concat=n={len(video_paths)}:v=1:a=1[outv][outa]")
+
+    filter_complex = "; ".join(vf_filters)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loglevel", "error",
+        *inputs,
+        "-filter_complex", filter_complex,
+        "-map", "[outv]",
+        "-map", "[outa]",
+        "-r", f"{ref_fps:.2f}",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
+        "-c:a", "aac", "-b:a", "128k",
+        output_path
+    ]
+
+    print("[INFO] 执行 ffmpeg 合并（小批次）:", " ".join(cmd))
+    start_time = time.time()
+    subprocess.run(cmd, check=True)
+    print(f" 耗时 {time.time() - start_time:.2f} 秒 [SUCCESS] 小批次合并完成：{output_path}")
+
+
+def _chunked(lst, n):
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+
+def _short_tempfile_name(temp_dir, prefix="ffmpeg_part_", suffix=".mp4"):
+    name = prefix + uuid.uuid4().hex[:8] + suffix
+    return os.path.join(temp_dir, name)
+
+def _safe_remove(path, retries=5, delay=0.5):
+    """尝试删除文件或目录，重试若干次；失败则抛出异常"""
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            if os.path.isdir(path) and not os.path.islink(path):
+                # 目录
+                shutil.rmtree(path)
+            else:
+                # 文件：先清除只读位
+                if os.path.exists(path):
+                    try:
+                        os.chmod(path, 0o666)
+                    except Exception:
+                        pass
+                    os.remove(path)
+            return
+        except FileNotFoundError:
+            return  # 已经不存在了，视作成功
+        except Exception as e:
+            last_exc = e
+            time.sleep(delay * attempt)  # 指数回退
+    # 多次尝试后仍未删除，抛出异常
+    raise RuntimeError(f"无法删除临时路径: {path}. 最后异常: {last_exc}")
+
+def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.mp4",
+                        batch_size=20, temp_dir=None, probe_fn=None,
+                        cleanup_temp=True, cleanup_retries=5, cleanup_delay=0.5):
+    """
+    分批合并并保证临时文件被清理（若无法删除则抛出异常，避免遗漏）。
+    cleanup_retries / cleanup_delay 控制删除重试策略。
+    """
+    if probe_fn is None:
+        probe_fn = globals().get("probe_video_new")
+        if probe_fn is None:
+            raise RuntimeError("必须提供 probe_fn（如 probe_video_new） 或 确保全局有 probe_video_new 函数")
+
+    if not video_paths:
+        raise ValueError("视频路径列表不能为空")
+    for p in video_paths:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"未找到文件: {p}")
+
+    if len(video_paths) == 1:
+        cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video_paths[0], "-c", "copy", output_path]
+        subprocess.run(cmd, check=True)
+        return
+
+    created_temp_dir = False
+    if temp_dir:
+        os.makedirs(temp_dir, exist_ok=True)
+        tmpdir = temp_dir
+    else:
+        tmpdir = tempfile.mkdtemp(prefix="ffmpeg_merge_")
+        created_temp_dir = True
+
+    temp_files = []  # 记录所有由本次调用创建的临时文件（绝对路径）
+
+    try:
+        if len(video_paths) <= batch_size:
+            _merge_chunk_ffmpeg(video_paths, output_path, probe_fn)
+            return
+
+        chunks = list(_chunked(video_paths, batch_size))
+        for i, chunk in enumerate(chunks):
+            tmp_out = _short_tempfile_name(tmpdir, prefix=f"batch{i}_")
+            # 记录：即便用户指定 temp_dir，也会删除我们创建的这些临时文件
+            temp_files.append(tmp_out)
+            _merge_chunk_ffmpeg(chunk, tmp_out, probe_fn)
+
+        # 递归合并临时文件（如果数量超出 batch_size 会继续分批）
+        merge_videos_ffmpeg(temp_files, output_path=output_path,
+                            batch_size=batch_size, temp_dir=tmpdir, probe_fn=probe_fn,
+                            cleanup_temp=False, cleanup_retries=cleanup_retries, cleanup_delay=cleanup_delay)
+
+    finally:
+        # ---------- 强化的清理逻辑 ----------
+        # 1) 始终尝试删除 temp_files 列表中记录的每个临时文件（这是我们创建的）
+        # 2) 如果本函数创建了 tmpdir（created_temp_dir），并且 cleanup_temp=True，则删除整个目录
+        # 3) 如果删除失败（重试后仍失败），抛出异常（避免静默遗漏）
+        errs = []
+        for p in temp_files:
+            try:
+                _safe_remove(p, retries=cleanup_retries, delay=cleanup_delay)
+            except Exception as e:
+                errs.append((p, str(e)))
+
+        if created_temp_dir and cleanup_temp:
+            try:
+                _safe_remove(tmpdir, retries=cleanup_retries, delay=cleanup_delay)
+            except Exception as e:
+                errs.append((tmpdir, str(e)))
+
+        if errs:
+            # 汇总错误并抛出，提醒调用方有未被删除的临时对象
+            msg_lines = ["清理临时文件/目录时出现错误："]
+            for p, e in errs:
+                msg_lines.append(f"  - {p} -> {e}")
+            # 将信息打印（方便 debug）并抛出异常
+            err_msg = "\n".join(msg_lines)
+            print(err_msg)
+            raise RuntimeError(err_msg)

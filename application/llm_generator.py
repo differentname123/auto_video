@@ -8,6 +8,7 @@
 :description:
     主要是调用大模型生成内容的业务代码
 """
+import copy
 import time
 from collections import Counter
 
@@ -396,6 +397,100 @@ def check_owner_asr(owner_asr_info, video_duration):
     return True, error_info
 
 
+def check_video_script(video_script_info, final_info_list):
+    """
+    检查 video_script_info 列表中的每个方案是否符合预设的规则。
+
+    Args:
+        video_script_info (list): 包含一个或多个视频脚本方案的列表。
+        final_info_list (dict): 包含有效场景ID列表等信息的字典。
+                                示例: {'all_scenes': [{'scene_id': 'id1'}, ...]}
+
+    Returns:
+        tuple: (bool, str)
+               第一个元素为布尔值，True表示检查通过，False表示检查失败。
+               第二个元素为字符串，检查通过时为空字符串，失败时为具体的错误信息。
+    """
+    try:
+        # 0. 预处理和基本结构检查
+        if not isinstance(video_script_info, list):
+            return False, "输入的数据 'video_script_info' 不是一个列表。"
+
+        if 'all_scenes' not in final_info_list or not isinstance(final_info_list['all_scenes'], list):
+            return False, "输入的数据 'final_info_list' 格式错误，缺少 'all_scenes' 列表。"
+
+        # 提取final_info_list中的所有scene_id，并放入set中以提高查询效率
+        valid_scene_ids = {scene['scene_id'] for scene in final_info_list['all_scenes']}
+
+        # 遍历每个方案进行检查
+        for i, solution in enumerate(video_script_info):
+            solution_num = i + 1  # 方案编号，从1开始
+
+            if not isinstance(solution, dict):
+                return False, f"方案 {solution_num} 的数据格式不是一个字典。"
+
+            # 1. 检查每个方案的 title, cover_text, video_abstract, 方案整体评分, 场景顺序与新文案 字段不能为空。
+            required_fields = ['title', 'cover_text', 'video_abstract', '方案整体评分', '场景顺序与新文案']
+            for field in required_fields:
+                value = solution.get(field)
+                if value is None:
+                    return False, f"方案 {solution_num} 缺少必要字段: '{field}'。"
+                # 检查字符串或列表是否为空
+                if isinstance(value, (str, list)) and not value:
+                    return False, f"方案 {solution_num} 的字段 '{field}' 的值不能为空。"
+
+            # 2. 检查 方案整体评分 字段必须是数字且在0到10之间。
+            score = solution.get('方案整体评分')
+            if not isinstance(score, (int, float)):
+                return False, f"方案 {solution_num} 的 '方案整体评分' ({score}) 不是数字类型。"
+            if not (0 <= score <= 10):
+                return False, f"方案 {solution_num} 的 '方案整体评分' ({score}) 不在 0 到 10 的范围内。"
+
+            # 开始检查 '场景顺序与新文案' 内部的细节
+            scenes = solution.get('场景顺序与新文案', [])
+            if not isinstance(scenes, list):
+                return False, f"方案 {solution_num} 的 '场景顺序与新文案' 不是一个列表。"
+
+            seen_scene_ids = set()
+            expected_scene_number = 1
+
+            for j, scene in enumerate(scenes):
+                scene_num = j + 1  # 场景编号，从1开始
+
+                if not isinstance(scene, dict):
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 的数据格式不是一个字典。"
+
+                # 4. 检查 new_scene_number 是否从1开始连续增长。
+                current_scene_number = scene.get('new_scene_number')
+                if current_scene_number != expected_scene_number:
+                    return False, f"方案 {solution_num} 的 'new_scene_number' 不连续。在场景 {scene_num} 期望值为 {expected_scene_number}，实际值为 {current_scene_number}。"
+
+                # 3. 检查 scene_id 是否有效且无重复。
+                scene_id = scene.get('scene_id')
+                if not scene_id:
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'scene_id' 或其值为空。"
+                if scene_id not in valid_scene_ids:
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 中，scene_id '{scene_id}' 是无效的，不存在于 valid_scene_ids 列表中。"
+                if scene_id in seen_scene_ids:
+                    return False, f"方案 {solution_num} 中存在重复的 scene_id: '{scene_id}'。"
+
+                # 5. 检查 on_screen_text 字段是否存在。
+                if 'on_screen_text' not in scene:  # 检查key是否存在，允许其值为空字符串
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text' 字段。"
+
+                # 更新检查状态
+                seen_scene_ids.add(scene_id)
+                expected_scene_number += 1
+
+        # 如果所有检查都通过
+        return True, ""
+
+    except (KeyError, TypeError, AttributeError) as e:
+        # 捕获可能的数据结构错误，确保程序不崩溃
+        error_info = f"处理数据时发生结构性错误，请检查输入格式是否正确。错误详情: {type(e).__name__}: {e}"
+        return False, error_info
+
+
 def gen_owner_asr_by_llm(video_path, video_info):
     """
     通过大模型生成带说话人识别的ASR文本。
@@ -561,6 +656,7 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         return []
 
     # --- 1. 内部辅助函数：处理一组场景 ---
+    # 这部分函数保持不变
     def _process_segment(segment_scenes):
         scene_summaries = []
         all_tags = []
@@ -581,14 +677,11 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
                 asr_start = asr_item.get('start', 0)
                 asr_end = asr_item.get('end', 0)
 
-                # --- 关键修改 Start ---
                 # 计算台词的时间中点
                 asr_mid = (asr_start + asr_end) / 2
 
                 # 判断中点是否落在当前段落范围内
                 # 使用 [start, end) 左闭右开区间，防止边界点重复
-                # 即：Scene A [0, 100), Scene B [100, 200)
-                # 如果中点正好是 100，它只属于 Scene B
                 if segment_start <= asr_mid < segment_end:
                     text = asr_item.get('final_text', '')
                     speaker = asr_item.get('speaker', '')
@@ -597,7 +690,6 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
                         narration_script_list.append(text)
                     else:
                         original_script_list.append(text)
-                # --- 关键修改 End ---
 
         for scene in segment_scenes:
             # 提取 visual_description
@@ -614,6 +706,8 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         top_all_tags = [tag for tag, count in Counter(all_tags).most_common(top_k)]
 
         return {
+            'start': segment_start,
+            'end': segment_end,
             'scene_summary': scene_summaries,
             'tags': top_all_tags,
             'original_script_list': original_script_list,
@@ -630,19 +724,43 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         for scene in scene_list:
             segments.append([scene])
 
+    # --- 关键修改 Start ---
     elif merge_mode == 'smart':
+        if not scene_list:  # 处理空列表的边界情况
+            return []
+
         buffer = []
         for scene in scene_list:
-            is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
-            if is_adjustable:
-                if buffer:
-                    segments.append(buffer)
-                    buffer = []
-                segments.append([scene])
-            else:
+            # 如果 buffer 为空，说明是第一个场景，直接加入
+            if not buffer:
                 buffer.append(scene)
+                continue
+
+            # 获取前一个场景
+            last_scene = buffer[-1]
+
+            # 检查当前场景是否是可调整的镜头
+            is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
+
+            # 新增逻辑：检查时间是否连续
+            # 如果上一个场景的 end 不等于当前场景的 start，则认为不连续
+            is_discontinuous = last_scene.get('end') != scene.get('start')
+
+            # 如果场景是可调整的，或者时间上不连续，则需要断开合并
+            if is_adjustable or is_discontinuous:
+                # 将之前的 buffer 作为一个 segment 添加到结果中
+                segments.append(buffer)
+                # 用当前场景开始一个新的 buffer
+                buffer = [scene]
+            else:
+                # 否则，继续合并，将当前场景加入 buffer
+                buffer.append(scene)
+
+        # 循环结束后，不要忘记将最后一个 buffer 加入 segments
         if buffer:
             segments.append(buffer)
+    # --- 关键修改 End ---
+
     else:
         raise ValueError(f"Unsupported merge_mode: {merge_mode}")
 
@@ -652,6 +770,8 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         result_list.append(_process_segment(segment))
 
     return result_list
+
+
 
 def is_contain_owner_speaker(owner_asr_info):
     """
@@ -673,6 +793,8 @@ def build_prompt_data(task_info, video_info_dict):
     :return:
     """
     creation_guidance_info = task_info.get('creation_guidance_info', {})
+    creative_guidance = creation_guidance_info.get('creative_guidance', '')
+    material_usage_mode = creation_guidance_info.get('retain_ratio', 'free')
     is_need_original = creation_guidance_info.get('is_need_original', True)
     is_need_narration = creation_guidance_info.get('is_need_narration', False)
     video_summary_info = {}
@@ -710,6 +832,8 @@ def build_prompt_data(task_info, video_info_dict):
         all_scene_info_list.extend(merged_scene_list)
 
     final_info = {
+        "creative_guidance": creative_guidance,
+        "material_usage_mode": material_usage_mode,
         "video_summaries": video_summary_info,
         "all_scenes": all_scene_info_list
 
@@ -717,7 +841,7 @@ def build_prompt_data(task_info, video_info_dict):
     return final_info
 
 
-def gen_video_script_llm(task_info, video_info_dict, manager):
+def gen_video_script_llm(task_info, video_info_dict):
     """
     生成新的脚本
     :param task_info:
@@ -727,6 +851,63 @@ def gen_video_script_llm(task_info, video_info_dict, manager):
     creation_guidance_info = task_info.get('creation_guidance_info', {})
     is_need_original = creation_guidance_info.get('is_need_original', True)
     final_info_list = build_prompt_data(task_info, video_info_dict)
+    origin_final_scene_info = copy.deepcopy(final_info_list)
+    # 剔除all_scenes中的start和end字段
+    for scene in final_info_list.get('all_scenes', []):
+        if 'start' in scene:
+            del scene['start']
+        if 'end' in scene:
+            del scene['end']
+
+    print("生成场景的最终数据成功")
+
+    prompt_path = './prompt/多素材视频生成不加过度.txt'
+    allow_commentary = creation_guidance_info.get('creation_guidance_info', {}).get('creation_guidance_info', False)
+    is_need_narration = creation_guidance_info.get('is_need_narration', False)
+
+    if allow_commentary == True and is_need_narration == True:
+        prompt_path = './prompt/多素材视频生成.txt'
+
+    if allow_commentary == True and is_need_narration == False:
+        prompt_path = './prompt/多素材视频生成非替换语音.txt'
+
+    if allow_commentary == False and is_need_narration == False:
+        prompt_path = './prompt/多素材视频生成非替换语音不加过度.txt'
+
+    if allow_commentary == False and is_need_narration == True:
+        prompt_path = './prompt/多素材视频生成不加过度.txt'
+
+    full_prompt = read_file_to_str(prompt_path)
+
+    full_prompt = f"{full_prompt}\n下面是相应的视频场景数据：\n{final_info_list}"
+    max_retries = 3
+    log_pre = f"多素材视频生成脚本 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    print("生成脚本的最终prompt成功")
+    retry_delay = 10
+    for attempt in range(1, max_retries + 1):
+        print(f"尝试生成新视频脚本信息... (第 {attempt}/{max_retries} 次) {log_pre}")
+        raw_response = ""
+        error_info = ""
+        try:
+            gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
+
+
+            # 解析和校验
+            video_script_info = string_to_object(raw_response)
+            check_result, check_info = check_video_script(video_script_info, final_info_list)
+            if not check_result:
+                error_info = f"新视频脚本 检查未通过: {check_info} {raw_response} {log_pre}"
+                raise ValueError(error_info)
+            return error_info, video_script_info, origin_final_scene_info
+        except Exception as e:
+            error_str = f"{error_info} {str(e)} {gen_error_info}"
+            print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
+            if attempt < max_retries:
+                print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
+                time.sleep(retry_delay)  # 等待一段时间后再重试
+            else:
+                print(f"达到最大重试次数，失败. {log_pre}")
+                return error_str, None, None  # 达到最大重试次数后返回 None
 
 
 
@@ -734,18 +915,9 @@ def gen_video_script_llm(task_info, video_info_dict, manager):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
+if __name__ == '__main__':
+    video_path = r"W:\project\python_project\auto_video\videos\material\7586639820693179690\7586639820693179690_static_cut.mp4"
+    merged_timestamps = get_scene(video_path)
 
 
 

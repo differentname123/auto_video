@@ -17,6 +17,7 @@ import time
 
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
     gen_hudong_by_llm, gen_video_script_llm
+from application.video_process import gen_video_by_script
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
@@ -426,10 +427,27 @@ def process_single_task(task_info, manager):
     if check_failure_details(failure_details):
         return
 
-    gen_video_script_llm(task_info, video_info_dict, manager)
 
-     # 最终更新任务状态为已完成
+    video_script_info = task_info.get('video_script_info', {})
+    error_info = ""
+    if not video_script_info:
+        error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
+        if not error_info:
+            task_info['video_script_info'] = video_script_info
+            task_info['final_scene_info'] = final_scene_info
+        else:
+            failure_details[video_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            task_info["script_error"] = error_info
+        manager.upsert_tasks([task_info])
 
+    if check_failure_details(failure_details):
+        return
+    print(f"任务 {task_id} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+
+    gen_video_by_script(task_info, video_info_dict)
 
     print(f"任务 {task_id} 全部处理完成。\n")
 

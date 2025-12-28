@@ -306,12 +306,14 @@
                         <div class="label-wrap">
                             <label class="option-label">素材保留比例</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">• 无要求(0): 优先逻辑去重<br>• 全量保留(1): 几乎不删减<br>• 较多保留(0.6): 仅删冗余</span>
+                            <!-- 修改了提示文本以匹配新的值 -->
+                            <span class="tooltip-text">• 无要求(free): 优先逻辑去重<br>• 全量保留(full): 几乎不删减<br>• 较多保留(major): 仅删冗余</span>
                         </div>
                         <select id="retention-ratio" class="input-styled">
-                            <option value="0" selected>无要求 (智能推荐)</option>
-                            <option value="1">全量保留</option>
-                            <option value="0.6">较多保留</option>
+                            <!-- 修改了 value 值 -->
+                            <option value="free" selected>无要求 (智能推荐)</option>
+                            <option value="full">全量保留</option>
+                            <option value="major">较多保留</option>
                         </select>
                     </div>
 
@@ -636,14 +638,16 @@
         }
 
         const isOriginal = isOriginalChecked;
-        const retentionVal = parseFloat(document.getElementById('retention-ratio').value);
+        // 修改点：直接获取值，不再解析为浮点数
+        const retentionVal = document.getElementById('retention-ratio').value;
 
         const payload = {
             userName: APP.currentUser,
             global_settings: {
                 is_original: isOriginal,
                 video_type: document.getElementById('video-type').value,
-                retention_ratio: isOriginal ? retentionVal : 0,
+                // 修改点：如果是原创处理，传新值，否则传 'free' (字符串)
+                retention_ratio: isOriginal ? retentionVal : 'free',
                 audio_replace: isOriginal ? (document.getElementById('audio-replace').value === 'yes') : false,
                 scene_title: isOriginal ? (document.getElementById('scene-title').value === 'yes') : false,
                 allow_commentary: isOriginal ? (document.getElementById('allow-commentary').value === 'yes') : false,

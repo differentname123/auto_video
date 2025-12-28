@@ -231,6 +231,8 @@ class PublishTaskBuilder:
             'failed_count': 0,
             'original_url_info_list': original_url_info_list,
             'creation_guidance_info': {
+                'creative_guidance': global_settings.get('creative_guidance'),
+                'allow_commentary': global_settings.get('allow_commentary'),
                 'retain_ratio': global_settings.get('retention_ratio'),
                 'is_need_original': global_settings.get('is_original'),
                 'is_need_narration': global_settings.get('allow_commentary'),
