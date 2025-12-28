@@ -20,7 +20,7 @@ from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_l
 from application.video_process import gen_video_by_script
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
-    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS
+    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths
 
 _configure_third_party_paths()
 
@@ -54,26 +54,6 @@ def query_need_process_tasks():
             tasks_to_process.append(task)
 
     return tasks_to_process
-
-
-def build_video_paths(video_id):
-    """
-    生成一个视频id的所有相关地址dict
-
-    :param video_id:
-    :return:
-    """
-    origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
-    static_cut_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                         f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
-    low_resolution_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                             f"{video_id}/{video_id}_low_resolution.mp4")  # 这个是静态剪辑后视频再进行降低分辨率和降低帧率后的数据，用于和大模型交互
-    return {
-        'origin_video_path': origin_video_path,
-        'static_cut_video_path': static_cut_video_path,
-        'low_resolution_video_path': low_resolution_video_path
-    }
-
 
 def run():
     """
@@ -130,10 +110,6 @@ def gen_extra_info(task_info, video_info_dict, manager):
     :return:
     """
     failure_details = {}
-    is_need_original = task_info.get('creation_guidance_info', {}).get('is_need_original', False)
-    if not is_need_original:
-        print(f"{task_info} 任务不需要原始视频，跳过生成额外信息步骤。")
-        return failure_details
     original_url_info_list = task_info.get('original_url_info_list', [])
 
     for original_url_info in original_url_info_list:
@@ -198,8 +174,8 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
         owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
-        is_contains_creator_voice = video_info.get('extra_info', {}).get('has_author_voice', True)
-        if is_contains_creator_voice and not owner_asr_info:
+        is_contains_author_voice = video_info.get('extra_info', {}).get('is_contains_author_voice', True)
+        if is_contains_author_voice and not owner_asr_info:
             error_info, owner_asr_info = gen_owner_asr_by_llm(video_path, video_info)
             if not error_info:
                 video_info['extra_info']['owner_asr_info'] = owner_asr_info
@@ -244,6 +220,7 @@ def check_failure_details(failure_details):
     """
     for video_id, detail in failure_details.items():
         if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
+            print(f"检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
             return True
     return False
 
@@ -447,7 +424,7 @@ def process_single_task(task_info, manager):
         return
     print(f"任务 {task_id} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
 
-    gen_video_by_script(task_info, video_info_dict)
+    # gen_video_by_script(task_info, video_info_dict)
 
     print(f"任务 {task_id} 全部处理完成。\n")
 

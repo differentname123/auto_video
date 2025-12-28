@@ -128,7 +128,6 @@ class VideoMaterialBuilder:
     @staticmethod
     def build(
             video_item: dict,
-            global_settings: dict,
             meta_data: dict,
             video_id: str
     ) -> dict:
@@ -149,7 +148,7 @@ class VideoMaterialBuilder:
             'status': TaskStatus.PROCESSING,
             'error_info': None,
             'base_info': VideoMaterialBuilder._build_base_info(video_item, meta_data),
-            'extra_info': VideoMaterialBuilder._build_extra_info(video_item, global_settings)
+            'extra_info': video_item
         }
 
     @staticmethod
@@ -165,7 +164,7 @@ class VideoMaterialBuilder:
             'tags': meta_data.get('text_extra', []),
             'height': meta_data.get('height'),
             'width': meta_data.get('width'),
-            'original_url': video_item.get('url'),
+            'original_url': video_item.get('original_url'),
             'download_url': meta_data.get('downloads'),
             'dynamic_cover': meta_data.get('dynamic_cover'),
             'static_cover': meta_data.get('static_cover'),
@@ -176,25 +175,6 @@ class VideoMaterialBuilder:
             'share_count': meta_data.get('share_count')
         }
 
-    @staticmethod
-    def _build_extra_info(video_item: dict, global_settings: dict) -> dict:
-        """构建视频扩展信息"""
-        return {
-            'is_requires_text': video_item.get('need_text'),
-            'is_needs_stickers': video_item.get('need_emoji'),
-            'is_needs_audio_replace': global_settings.get('audio_replace'),
-            'is_realtime_video': video_item.get('is_realtime'),
-            'is_contains_creator_voice': video_item.get('has_author_voice'),
-            'max_scenes': video_item.get('max_scenes'),
-            'has_ads ': video_item.get('has_ads'),
-            'has_author_face ': video_item.get('has_author_face'),
-            'scene_order_fixed': video_item.get('scene_order_fixed'),
-
-            'scene_timestamp_list': None,
-            'logical_scene_info': None,
-            'owner_asr_info': None,
-            'owner_subtitle_box_info': None
-        }
 
 
 class PublishTaskBuilder:
@@ -230,16 +210,8 @@ class PublishTaskBuilder:
             'status': TaskStatus.PROCESSING,
             'failed_count': 0,
             'original_url_info_list': original_url_info_list,
-            'creation_guidance_info': {
-                'creative_guidance': global_settings.get('creative_guidance'),
-                'allow_commentary': global_settings.get('allow_commentary'),
-                'retain_ratio': global_settings.get('retention_ratio'),
-                'is_need_original': global_settings.get('is_original'),
-                'is_need_narration': global_settings.get('allow_commentary'),
-                'is_need_scene_title_and_summary': global_settings.get('scene_title')
-            },
+            'creation_guidance_info': global_settings,
             'new_video_script_info': None,
-            'expected_publish_time': global_settings.get('schedule_date'),
             'upload_info': None
         }
 
@@ -250,7 +222,7 @@ class PublishTaskBuilder:
         url_info_list = []
 
         for item in video_list:
-            item_url = item.get('url')
+            item_url = item.get('original_url')
             if item_url not in successful_urls:
                 continue
 
@@ -260,20 +232,8 @@ class PublishTaskBuilder:
             )
             if not material:
                 continue
-
-            url_info_list.append({
-                'origin_url': item_url,
-                'video_id': material['video_id'],
-                'is_contains_creator_voice': item.get('has_author_voice'),
-                'is_requires_text': item.get('need_text'),
-                'is_needs_stickers': item.get('need_emoji'),
-                'is_needs_audio_replace': material['extra_info']['is_needs_audio_replace'],
-                'is_realtime_video': item.get('is_realtime'),
-                'max_scenes': item.get('max_scenes'),
-                'has_ads ': item.get('has_ads'),
-                'has_author_face ': item.get('has_author_face'),
-                'scene_order_fixed': item.get('scene_order_fixed')
-            })
+            item['video_id'] = material['video_id']
+            url_info_list.append(item)
 
         return url_info_list
 
@@ -311,9 +271,10 @@ class OneClickGenerateService:
         print(f"收到请求 | 用户: {user_name} | 视频数: {len(video_list)}")
 
         # 解析视频
-        materials, errors = self._parse_videos(video_list, global_settings)
+        materials, errors = self._parse_videos(video_list)
 
         if errors:
+            print(f"解析过程中出现错误: {errors}")
             return self._error_response(
                 ErrorMessage.PARTIAL_PARSE_FAILURE,
                 errors=errors
@@ -345,7 +306,6 @@ class OneClickGenerateService:
     def _parse_videos(
             self,
             video_list: list,
-            global_settings: dict
     ) -> tuple[list, list]:
         """
         批量解析视频。
@@ -357,7 +317,7 @@ class OneClickGenerateService:
         errors = []
 
         for index, video_item in enumerate(video_list, start=1):
-            video_url = video_item.get('url', '').strip()
+            video_url = video_item.get('original_url', '').strip()
 
             if not video_url:
                 errors.append(f"第 {index} 条视频链接为空。")
@@ -382,7 +342,7 @@ class OneClickGenerateService:
                 continue
 
             material = VideoMaterialBuilder.build(
-                video_item, global_settings, result.meta_data, video_id
+                video_item, result.meta_data, video_id
             )
             materials.append(material)
 

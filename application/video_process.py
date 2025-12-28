@@ -12,47 +12,12 @@
 """
 import os
 
-from application.video_common_config import VIDEO_MATERIAL_BASE_PATH, VIDEO_TASK_BASE_PATH
+from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths
 from utils.common_utils import is_valid_target_file_simple
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg
 
 
-def find_best_solution(video_script_info: list):
-    """
-    从视频脚本方案列表中，根据“方案整体评分”找出并返回得分最高的方案。
 
-    Args:
-        video_script_info (list): 包含多个方案的列表，每个方案是一个字典。
-                                  每个字典必须包含一个名为 '方案整体评分' 的键。
-
-    Returns:
-        dict: 列表中“方案整体评分”最高的那个方案字典。
-              如果输入列表为空，则返回 None。
-    """
-    # 检查输入列表是否为空，避免对空列表调用max()时出错
-    if not video_script_info:
-        return None
-    best_solution = max(video_script_info, key=lambda solution: solution['方案整体评分'])
-
-    return best_solution
-
-def build_video_paths(video_id):
-    """
-    生成一个视频id的所有相关地址dict
-
-    :param video_id:
-    :return:
-    """
-    origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
-    static_cut_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                         f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
-    low_resolution_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
-                                             f"{video_id}/{video_id}_low_resolution.mp4")  # 这个是静态剪辑后视频再进行降低分辨率和降低帧率后的数据，用于和大模型交互
-    return {
-        'origin_video_path': origin_video_path,
-        'static_cut_video_path': static_cut_video_path,
-        'low_resolution_video_path': low_resolution_video_path
-    }
 
 
 

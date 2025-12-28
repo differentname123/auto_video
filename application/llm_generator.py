@@ -176,6 +176,7 @@ def fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1
         return logical_scene_info
 
     for i, scene in enumerate(logical_scene_info.get('new_scene_info', [])):
+        scene['origin_scene_id'] = i + 1
         for key in ('start', 'end'):
             orig_ts = scene.get(key)
             if orig_ts is None:
@@ -222,14 +223,7 @@ def gen_logical_scene_llm(video_path, video_info):
     """
     生成新的视频方案
     """
-    has_ads = video_info.get('extra_info', {}).get('has_ads', 'auto')
-    has_author_face = video_info.get('extra_info', {}).get('has_author_face', 'auto')
-    if has_ads == 'auto' and has_author_face == 'auto':
-        need_remove_frames = 'auto'
-    elif has_ads == 'no' and has_author_face == 'no':
-        need_remove_frames = 'no'
-    else:
-        need_remove_frames = 'yes'
+    need_remove_frames = video_info.get('extra_info', {}).get('has_ad_or_face', 'auto')
 
     base_prompt = gen_base_prompt(video_path, video_info)
     max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
@@ -656,10 +650,12 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         return []
 
     # --- 1. 内部辅助函数：处理一组场景 ---
-    # 这部分函数保持不变
+    # 这部分函数是修改的重点
     def _process_segment(segment_scenes):
         scene_summaries = []
         all_tags = []
+        # 初始化一个新的列表来存储 origin_scene_id
+        origin_scene_id_list = []
 
         if not segment_scenes:
             return {}
@@ -676,21 +672,16 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
             for asr_item in owner_asr_info:
                 asr_start = asr_item.get('start', 0)
                 asr_end = asr_item.get('end', 0)
-
-                # 计算台词的时间中点
                 asr_mid = (asr_start + asr_end) / 2
-
-                # 判断中点是否落在当前段落范围内
-                # 使用 [start, end) 左闭右开区间，防止边界点重复
                 if segment_start <= asr_mid < segment_end:
                     text = asr_item.get('final_text', '')
                     speaker = asr_item.get('speaker', '')
-
                     if speaker == 'owner':
                         narration_script_list.append(text)
                     else:
                         original_script_list.append(text)
 
+        # 遍历 segment_scenes 来提取所需信息
         for scene in segment_scenes:
             # 提取 visual_description
             v_desc = scene.get('scene_summary')
@@ -702,19 +693,28 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
             if tags:
                 all_tags.extend(tags)
 
+            # --- 新增代码 Start ---
+            # 提取 origin_scene_id
+            # 使用 .get() 方法以防该字段不存在
+            origin_id = scene.get('origin_scene_id')
+            if origin_id is not None:  # 确保ID存在才添加
+                origin_scene_id_list.append(origin_id)
+            # --- 新增代码 End ---
+
         # 计数并取 Top K
         top_all_tags = [tag for tag, count in Counter(all_tags).most_common(top_k)]
 
+        # 在返回的字典中增加 origin_scene_id_list 字段
         return {
-            'start': segment_start,
-            'end': segment_end,
             'scene_summary': scene_summaries,
+            'origin_scene_id_list': origin_scene_id_list,
             'tags': top_all_tags,
             'original_script_list': original_script_list,
             'narration_script_list': narration_script_list
         }
 
     # --- 2. 根据模式构建 Segments ---
+    # 这部分逻辑保持不变
     segments = []
 
     if merge_mode == 'global':
@@ -724,47 +724,32 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
         for scene in scene_list:
             segments.append([scene])
 
-    # --- 关键修改 Start ---
     elif merge_mode == 'smart':
-        if not scene_list:  # 处理空列表的边界情况
+        if not scene_list:
             return []
 
         buffer = []
         for scene in scene_list:
-            # 如果 buffer 为空，说明是第一个场景，直接加入
             if not buffer:
                 buffer.append(scene)
                 continue
 
-            # 获取前一个场景
-            last_scene = buffer[-1]
-
-            # 检查当前场景是否是可调整的镜头
             is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
 
-            # 新增逻辑：检查时间是否连续
-            # 如果上一个场景的 end 不等于当前场景的 start，则认为不连续
-            is_discontinuous = last_scene.get('end') != scene.get('start')
-
-            # 如果场景是可调整的，或者时间上不连续，则需要断开合并
-            if is_adjustable or is_discontinuous:
-                # 将之前的 buffer 作为一个 segment 添加到结果中
+            if is_adjustable:
                 segments.append(buffer)
-                # 用当前场景开始一个新的 buffer
                 buffer = [scene]
             else:
-                # 否则，继续合并，将当前场景加入 buffer
                 buffer.append(scene)
 
-        # 循环结束后，不要忘记将最后一个 buffer 加入 segments
         if buffer:
             segments.append(buffer)
-    # --- 关键修改 End ---
 
     else:
         raise ValueError(f"Unsupported merge_mode: {merge_mode}")
 
     # --- 3. 处理结果 ---
+    # 这部分逻辑保持不变
     result_list = []
     for segment in segments:
         result_list.append(_process_segment(segment))
@@ -794,17 +779,17 @@ def build_prompt_data(task_info, video_info_dict):
     """
     creation_guidance_info = task_info.get('creation_guidance_info', {})
     creative_guidance = creation_guidance_info.get('creative_guidance', '')
-    material_usage_mode = creation_guidance_info.get('retain_ratio', 'free')
-    is_need_original = creation_guidance_info.get('is_need_original', True)
-    is_need_narration = creation_guidance_info.get('is_need_narration', False)
+    material_usage_mode = creation_guidance_info.get('retention_ratio', 'free')
+    is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
     video_summary_info = {}
     all_scene_info_list = []
 
 
 
     for video_id, video_info in video_info_dict.items():
+        max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
         owner_asr_info = video_info.get('extra_info', {}).get('owner_asr_info', {})
-        if not is_need_original: # 如果不需要原创就应该全量保留而且不能够改变顺序
+        if max_scenes == 1: # 如果不需要原创就应该全量保留而且不能够改变顺序
             merge_mode = 'global'
         else:
             if is_need_narration and is_contain_owner_speaker(owner_asr_info):
@@ -849,7 +834,6 @@ def gen_video_script_llm(task_info, video_info_dict):
     :return:
     """
     creation_guidance_info = task_info.get('creation_guidance_info', {})
-    is_need_original = creation_guidance_info.get('is_need_original', True)
     final_info_list = build_prompt_data(task_info, video_info_dict)
     origin_final_scene_info = copy.deepcopy(final_info_list)
     # 剔除all_scenes中的start和end字段
@@ -862,8 +846,8 @@ def gen_video_script_llm(task_info, video_info_dict):
     print("生成场景的最终数据成功")
 
     prompt_path = './prompt/多素材视频生成不加过度.txt'
-    allow_commentary = creation_guidance_info.get('creation_guidance_info', {}).get('creation_guidance_info', False)
-    is_need_narration = creation_guidance_info.get('is_need_narration', False)
+    allow_commentary = creation_guidance_info.get('creation_guidance_info', {}).get('is_need_commentary', False)
+    is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
 
     if allow_commentary == True and is_need_narration == True:
         prompt_path = './prompt/多素材视频生成.txt'

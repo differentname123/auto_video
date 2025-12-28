@@ -266,7 +266,7 @@ def main_download():
     演示如何调用封装好的 *同步* 下载函数。
     【演示性修改】: 修改此函数以展示如何处理新的返回值。
     """
-    douyin_video_url = "https://www.douyin.com/video/7515150135140306215"
+    douyin_video_url = "https://www.douyin.com/video/7586268571870612795"
     print(f"开始下载视频: {douyin_video_url}")
 
     # 接收返回的元组

@@ -156,27 +156,17 @@
             background: #fff;
         }
 
-        .master-switch-row {
-            background: linear-gradient(to right, #e6f7ff, #f0f9ff);
-            padding: 18px 24px;
-            display: flex; justify-content: space-between; align-items: center;
-            border-top-left-radius: 12px; border-top-right-radius: 12px;
-            border-bottom: 1px solid #bae7ff;
-        }
-        .master-switch-label { font-size: 1.1rem; font-weight: 700; color: #003a8c; display: flex; align-items: center; gap: 8px; }
-
-        .toggle-group { display: flex; background: #fff; padding: 4px; border-radius: 8px; border: 1px solid #bae7ff; }
-        .toggle-label {
-            padding: 6px 24px; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem;
-            color: var(--primary-color); transition: all 0.2s; border: none;
-        }
-        .toggle-input { display: none; }
-        .toggle-input:checked + .toggle-label {
-            background: var(--primary-color); color: white;
-            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.3);
-        }
-
         .advanced-options { padding: 24px; }
+
+        .settings-header {
+            padding: 0 0 15px 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: #003a8c;
+        }
+
         .form-row {
             display: grid; grid-template-columns: 140px 1fr;
             align-items: center; margin-bottom: 18px;
@@ -266,27 +256,9 @@
             </div>
 
             <div class="global-settings-box">
-                <div class="master-switch-row">
-                    <div class="master-switch-label">
-                        是否进行原创处理？
-                        <div class="label-wrap">
-                            <i class="info-icon">?</i>
-                            <span class="tooltip-text">开启后，AI将对视频进行去重、剪辑、配音等深度处理。关闭则为直接搬运。</span>
-                        </div>
-                    </div>
-                    <div class="toggle-group">
-                        <label>
-                            <input type="radio" name="isOriginal" value="yes" class="toggle-input" checked>
-                            <span class="toggle-label">开启</span>
-                        </label>
-                        <label>
-                            <input type="radio" name="isOriginal" value="no" class="toggle-input">
-                            <span class="toggle-label">关闭</span>
-                        </label>
-                    </div>
-                </div>
-
+                <!-- 原创处理开关已移除，现在直接显示高级选项 -->
                 <div id="advanced-options" class="advanced-options">
+                    <div class="settings-header">🛠️ 创作参数设置</div>
 
                     <div class="form-row">
                         <div class="label-wrap">
@@ -306,11 +278,9 @@
                         <div class="label-wrap">
                             <label class="option-label">素材保留比例</label>
                             <i class="info-icon">?</i>
-                            <!-- 修改了提示文本以匹配新的值 -->
                             <span class="tooltip-text">• 无要求(free): 优先逻辑去重<br>• 全量保留(full): 几乎不删减<br>• 较多保留(major): 仅删冗余</span>
                         </div>
                         <select id="retention-ratio" class="input-styled">
-                            <!-- 修改了 value 值 -->
                             <option value="free" selected>无要求 (智能推荐)</option>
                             <option value="full">全量保留</option>
                             <option value="major">较多保留</option>
@@ -353,7 +323,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">允许增加解说</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">AI自动看图说话，生成解说词。</span>
+                                <span class="tooltip-text">AI自动理解素材，生成解说词。</span>
                             </div>
                             <select id="allow-commentary" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -393,7 +363,7 @@
         videoList: document.getElementById('video-list-container'),
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
-        globalOriginalRadios: document.getElementsByName('isOriginal'),
+        // globalOriginalRadios 已移除
         advancedOptions: document.getElementById('advanced-options'),
         dateSelect: document.getElementById('schedule-date'),
         stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
@@ -462,7 +432,6 @@
         const delBtn = document.querySelectorAll('.video-item-card').length > 0
             ? `<button type="button" class="btn-remove-card" onclick="removeCard(${id})" title="删除此素材">×</button>` : '';
 
-        // --- 注意：此处已添加了"是否场景不能够改变顺序"的选项 ---
         card.innerHTML = `
             ${delBtn}
             <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
@@ -482,24 +451,11 @@
 
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">是否包含广告?</span>
+                        <span class="option-label">是否包含广告或原作者画面?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入，便于AI剪辑时剔除。</span>
+                        <span class="tooltip-text">标识视频中是否有硬广或植入，以及是否包含真人出镜，便于AI剪辑时剔除并用于去重处理。</span>
                     </div>
-                    <select class="input-styled select-has-ads">
-                        <option value="auto" selected>自动检测</option>
-                        <option value="yes">是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">是否有原作者画面?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频是否包含真人出镜，用于去重处理。</span>
-                    </div>
-                    <select class="input-styled select-author-face">
+                    <select class="input-styled select-ad-face">
                         <option value="auto" selected>自动检测</option>
                         <option value="yes">是</option>
                         <option value="no">否</option>
@@ -573,14 +529,7 @@
     els.addVideoBtn.addEventListener('click', addVideoCard);
     window.removeCard = (id) => document.getElementById(`video-card-${id}`)?.remove();
 
-    Array.from(els.globalOriginalRadios).forEach(r => {
-        r.addEventListener('change', (e) => {
-            if(e.target.value === 'no') {
-                if(confirm('⚠️ 风险警告：\n关闭原创处理将导致视频直接搬运，极易被平台判定重复。\n\n确定要继续吗？')) els.advancedOptions.classList.add('hidden');
-                else document.querySelector('input[name="isOriginal"][value="yes"]').checked = true;
-            } else els.advancedOptions.classList.remove('hidden');
-        });
-    });
+    // 移除了 原创处理单选框 的事件监听代码
 
     els.submitBtn.addEventListener('click', async () => {
         const cards = document.querySelectorAll('.video-item-card');
@@ -602,22 +551,19 @@
             if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
 
             const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
-            const hasAdsVal = card.querySelector('.select-has-ads').value;
-            const hasAuthorFaceVal = card.querySelector('.select-author-face').value;
+            const adFaceVal = card.querySelector('.select-ad-face').value;
 
             // 获取新选项的值
             const sceneOrderFixedVal = card.querySelector('.select-scene-order-fixed').value;
 
             vList.push({
-                url: url,
-                has_author_voice: voice === 'yes',
-                is_realtime: card.querySelector('.select-realtime').value === 'yes',
-                need_text: card.querySelector('.select-text').value === 'yes',
-                need_emoji: card.querySelector('.select-emoji').value === 'yes',
+                original_url: url,
+                is_contains_author_voice: voice === 'yes',
+                is_realtime_video: card.querySelector('.select-realtime').value === 'yes',
+                is_requires_text: card.querySelector('.select-text').value === 'yes',
+                is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
                 max_scenes: maxScenesVal,
-                has_ads: hasAdsVal,
-                has_author_face: hasAuthorFaceVal,
-                // 新增字段加入提交数据
+                has_ad_or_face: adFaceVal,
                 scene_order_fixed: sceneOrderFixedVal
             });
         });
@@ -625,10 +571,11 @@
         if(err) return alert(err);
         if(!vList.length) return alert('请至少添加一个有效的视频链接');
 
-        const isOriginalChecked = document.querySelector('input[name="isOriginal"]:checked').value === 'yes';
+        // 默认强制开启原创处理
+        const isOriginal = true;
         const audioReplaceSelect = document.getElementById('audio-replace');
 
-        if (isOriginalChecked && audioReplaceSelect.value === 'yes') {
+        if (isOriginal && audioReplaceSelect.value === 'yes') {
             const isAllNoVoice = vList.every(v => v.has_author_voice === false);
             if (isAllNoVoice) {
                 alert('⚠️ 设置冲突提醒：\n\n您开启了【AI 音频替换】，但素材列表中所有视频的【包含作者声音】均选择了【否】。\n\n逻辑说明：如果视频本身没有声音来源，系统无法执行音频替换。\n\n请修改：\n1. 将“AI 音频替换”改为“否”；\n2. 或者确保至少有一个素材“包含作者声音”为“是”。');
@@ -637,20 +584,16 @@
             }
         }
 
-        const isOriginal = isOriginalChecked;
-        // 修改点：直接获取值，不再解析为浮点数
         const retentionVal = document.getElementById('retention-ratio').value;
 
         const payload = {
             userName: APP.currentUser,
             global_settings: {
-                is_original: isOriginal,
                 video_type: document.getElementById('video-type').value,
-                // 修改点：如果是原创处理，传新值，否则传 'free' (字符串)
-                retention_ratio: isOriginal ? retentionVal : 'free',
-                audio_replace: isOriginal ? (document.getElementById('audio-replace').value === 'yes') : false,
-                scene_title: isOriginal ? (document.getElementById('scene-title').value === 'yes') : false,
-                allow_commentary: isOriginal ? (document.getElementById('allow-commentary').value === 'yes') : false,
+                retention_ratio: retentionVal, // 直接使用该值，因为现在默认为原创模式
+                is_need_audio_replace: (document.getElementById('audio-replace').value === 'yes'),
+                is_need_scene_title: (document.getElementById('scene-title').value === 'yes'),
+                is_need_commentary: (document.getElementById('allow-commentary').value === 'yes'),
                 schedule_date: document.getElementById('schedule-date').value,
                 creative_guidance: document.getElementById('creative-guidance').value.trim()
             },
