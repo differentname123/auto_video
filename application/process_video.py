@@ -407,7 +407,7 @@ def process_single_task(task_info, manager):
 
     video_script_info = task_info.get('video_script_info', {})
     error_info = ""
-    if video_script_info:
+    if not video_script_info:
         error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
         if not error_info:
             task_info['video_script_info'] = video_script_info
