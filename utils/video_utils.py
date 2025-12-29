@@ -10,7 +10,7 @@
 """
 import tempfile
 import uuid
-from typing import Union
+from typing import Union, List
 
 import json
 import os
@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
 
 import cv2
 import numpy as np
@@ -919,3 +920,297 @@ def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.m
             err_msg = "\n".join(msg_lines)
             print(err_msg)
             raise RuntimeError(err_msg)
+
+def probe_video(path: str) -> dict:
+    """
+    使用 ffprobe 获取视频的详细信息（宽、高、帧率、SAR、时长）。
+    """
+    if not shutil.which("ffprobe"):
+        raise FileNotFoundError("ffprobe command not found. Please install FFmpeg.")
+
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,r_frame_rate,sample_aspect_ratio,duration",
+        "-of", "json",
+        path
+    ]
+    try:
+        proc = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+        info = json.loads(proc.stdout)["streams"][0]
+
+        # 解析帧率 "30000/1001" -> float
+        num, den = map(int, info["r_frame_rate"].split("/"))
+        fps = num / den if den != 0 else 0
+
+        return {
+            "width": int(info["width"]),
+            "height": int(info["height"]),
+            "fps": fps,
+            "sar": info.get("sample_aspect_ratio", "1:1"),
+            "duration": float(info.get("duration", "0"))
+        }
+    except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError, KeyError) as e:
+        raise RuntimeError(f"Failed to probe video file: {path}. Error: {e}")
+
+
+
+def _build_enable_expr(time_ranges) -> str:
+    """
+    构建 FFmpeg 的 enable 表达式，支持多个时间段。
+    返回格式: ":enable='between(t,s1,e1)+between(t,s2,e2)+...'"
+    如果 time_ranges 为 None 或空，则返回空字符串（全程生效）
+    """
+    if not time_ranges:
+        return ""
+
+    conditions = []
+    for start, end in time_ranges:
+        # 确保 start <= end
+        if start >= end:
+            continue  # 跳过无效区间
+        conditions.append(f"between(t,{start},{end})")
+
+    if not conditions:
+        return ""  # 没有有效区间，全程不遮挡？但通常不会这样用
+
+    expr = "+".join(conditions)
+    return f":enable='{expr}'"
+
+
+def cover_video_area_blur_super_robust(
+        video_path: str,
+        output_path: str,
+        top_left,
+        bottom_right,
+        time_ranges=None,
+        blur_strength: int = 15,
+        crf: int = 23,
+        preset: str = "ultrafast"
+):
+    """
+    为一个视频的指定区域应用模糊，并进行大量的预检查和参数修正以确保成功。
+    """
+    # --- 步骤 1: 检查环境依赖 ---
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError("ffmpeg command not found. Please install FFmpeg.")
+
+    # --- 步骤 2: 获取视频元数据 ---
+    try:
+        video_info = probe_video(video_path)
+        video_w, video_h = video_info["width"], video_info["height"]
+        print(f"Probed video: {video_w}x{video_h}, duration: {video_info['duration']:.2f}s")
+    except RuntimeError as e:
+        # 如果探测失败，直接中止
+        raise RuntimeError(f"Could not process video, probing failed. Reason: {e}")
+
+    # --- 步骤 3: 验证和修正坐标 ---
+    x1_orig, y1_orig = top_left
+    x2_orig, y2_orig = bottom_right
+
+    # 将坐标钳位在 [0, video_dimension] 范围内
+    x1 = max(0, x1_orig)
+    y1 = max(0, y1_orig)
+    x2 = min(video_w, x2_orig)
+    y2 = min(video_h, y2_orig)
+
+    if (x1, y1, x2, y2) != (x1_orig, y1_orig, x2_orig, y2_orig):
+        print(f"[INFO] Original coordinates ({x1_orig},{y1_orig})-({x2_orig},{y2_orig}) were out of bounds.")
+        print(f"[INFO] Clamped to valid area: ({x1},{y1})-({x2},{y2})")
+
+    # --- 步骤 4: 计算和修正裁剪尺寸 ---
+    w, h = x2 - x1, y2 - y1
+
+    # 确保宽高为偶数，这是很多编码器（特别是yuv420p）的要求
+    if w % 2 != 0:
+        w -= 1
+        print(f"[INFO] Adjusted width to be even: {w + 1} -> {w}")
+    if h % 2 != 0:
+        h -= 1
+        print(f"[INFO] Adjusted height to be even: {h + 1} -> {h}")
+
+    # --- 步骤 5: 最终有效性检查 ---
+    if w <= 0 or h <= 0:
+        raise ValueError(
+            f"The specified or corrected area has non-positive dimensions (w={w}, h={h}). "
+            "This can happen if the requested area is completely outside the video frame. Aborting."
+        )
+
+    # --- 步骤 6: 构建滤镜图，并安全地处理 boxblur 参数 ---
+    enable_expr = _build_enable_expr(time_ranges)
+
+    # **核心修复：解决 boxblur 的参数问题**
+    # luma_radius (亮度模糊) 可以是 blur_strength
+    # chroma_radius (色度模糊) 必须被限制在一个较小的范围内
+    luma_radius = blur_strength
+    chroma_radius = min(blur_strength, 9)  # 9 是一个非常安全的值
+    power = 2  # 模糊迭代次数，2通常效果不错
+    boxblur_params = f"{luma_radius}:{power}:{chroma_radius}:{power}"
+
+    # 也可以考虑直接换成 gblur，它没有这个问题，参数更简单
+    # gblur_params = f"gblur=sigma={blur_strength}"
+
+    vf = (
+        f"[0:v]split=2[orig][crop];"
+        f"[crop]crop={w}:{h}:{x1}:{y1},boxblur={boxblur_params}[blurred];"
+        f"[orig][blurred]overlay={x1}:{y1}{enable_expr}"
+    )
+
+    print(f"Final crop area: x={x1}, y={y1}, w={w}, h={h}")
+    print(f"Using boxblur with params: {boxblur_params}")
+
+    # --- 步骤 7: 执行 FFmpeg 命令 ---
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", video_path,
+        "-filter_complex", vf,
+        "-c:a", "copy",
+        "-c:v", "libx264",
+        "-preset", preset,
+        "-crf", str(crf),
+        "-pix_fmt", "yuv420p",
+        output_path
+    ]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+    if proc.returncode != 0:
+        error_message = (
+            f"FFmpeg failed with return code {proc.returncode}\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"Stderr:\n{proc.stderr}\n"
+        )
+        raise RuntimeError(error_message)
+
+    print(f"[SUCCESS] Output saved to {output_path}")
+
+
+def cover_video_area_simple(
+    video_path: str,
+    output_path: str,
+    top_left,
+    bottom_right,
+    time_ranges = None,
+    color: str = "black@1.0"
+):
+    x1, y1 = top_left
+    x2, y2 = bottom_right
+    w, h = x2 - x1, y2 - y1
+
+    enable_expr = _build_enable_expr(time_ranges)
+    vf = f"drawbox=x={x1}:y={y1}:w={w}:h={h}:color={color}:t=fill{enable_expr}"
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", video_path,
+        "-vf", vf,
+        "-c:a", "copy",
+        output_path
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg failed:\n{proc.stderr}")
+    print(f"[SUCCESS] Output saved to {output_path}")
+
+
+def cover_subtitle(
+    video_path: str,
+    output_path: str,
+    top_left,
+    bottom_right,
+    time_ranges=None
+):
+    """
+    覆盖视频中的字幕区域（支持多个时间段）
+    :param time_ranges: 多个 (start_sec, end_sec) 元组列表，例如 [(5,10), (20,25)]
+                        若为 None 或空列表，则全程遮挡
+    """
+    start_time = time.time()
+    try:
+        cover_video_area_blur_super_robust(
+            video_path=video_path,
+            output_path=output_path,
+            top_left=top_left,
+            bottom_right=bottom_right,
+            time_ranges=time_ranges
+        )
+    except Exception as e:
+        print(f"覆盖字幕区域失败: {e} 尝试使用备用方法...")
+        cover_video_area_simple(
+            video_path=video_path,
+            output_path=output_path,
+            top_left=top_left,
+            bottom_right=bottom_right,
+            time_ranges=time_ranges
+        )
+        return
+    print(f"覆盖字幕区域完成，输出文件: {output_path} 耗时: {time.time() - start_time:.2f} 秒")
+
+
+def save_frames_around_timestamp(
+        video_path: str,
+        timestamp,
+        num_frames: int,
+        output_dir: str
+) -> List[str]:
+    """
+    从视频中在给定时间戳前后各截取 num_frames 帧并保存为图片。
+    输出文件命名格式：frame_{timestamp_ms}.png
+    返回：保存的图片路径列表
+    """
+
+    # 将输入的时间戳转换为秒（用于定位目标位置）
+    # 注意：需确保外部有 time_to_ms 函数，或者传入的 timestamp 已经是 int/float
+    ts_sec = time_to_ms(timestamp) / 1000
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise FileNotFoundError(f"无法打开视频文件: {video_path}")
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    if fps <= 0 or total_frames <= 0:
+        cap.release()
+        raise ValueError("无法获取视频帧率或总帧数")
+
+    # 目标帧序号
+    target_idx = int(round(ts_sec * fps))
+    # 计算要截取的帧索引区间
+    start_idx = max(0, target_idx - num_frames)
+    end_idx = min(total_frames - 1, target_idx + num_frames)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    saved_paths = []  # 用于存储图片路径的列表
+
+    print(f"FPS: {fps}, 目标时间: {ts_sec}s, 截取范围: {start_idx} - {end_idx}")
+
+    for idx in range(start_idx, end_idx + 1):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            print(f"警告：读取帧 {idx} 失败，跳过")
+            continue
+
+        # --- 修改：计算当前帧的毫秒时间戳 ---
+        current_sec = idx / fps
+        current_ms = int(current_sec * 1000)
+
+        # 命名格式变为 frame_ + 毫秒时间戳
+        filename = f"frame_{current_ms}.png"
+        out_path = os.path.join(output_dir, filename)
+        # -----------------------------
+
+        # BGR 转 RGB 并保存
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame_rgb)
+
+        img.save(out_path)
+
+        # 将路径加入列表
+        saved_paths.append(out_path)
+        print(f"已保存: {filename} (时间戳: {current_ms}ms)")
+
+    cap.release()
+
+    # 返回图片地址列表
+    return saved_paths

@@ -94,8 +94,16 @@ def build_video_paths(video_id):
                                          f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
     low_resolution_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
                                              f"{video_id}/{video_id}_low_resolution.mp4")  # 这个是静态剪辑后视频再进行降低分辨率和降低帧率后的数据，用于和大模型交互
+
+    subtitle_box_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
+                                         f"{video_id}/frame/subtitle_box.json")  # 作者字幕遮挡区域的json文件
+
+    cover_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
+                                         f"{video_id}/{video_id}_cover.mp4")  # 封面视频地址
     return {
         'origin_video_path': origin_video_path,
         'static_cut_video_path': static_cut_video_path,
-        'low_resolution_video_path': low_resolution_video_path
+        'low_resolution_video_path': low_resolution_video_path,
+        'subtitle_box_path':subtitle_box_path,
+        'cover_video_path':cover_video_path
     }

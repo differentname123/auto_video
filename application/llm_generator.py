@@ -9,13 +9,18 @@
     主要是调用大模型生成内容的业务代码
 """
 import copy
+import os
+import re
 import time
 from collections import Counter
+
+import numpy as np
 
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
 from utils.gemini import get_llm_content_gemini_flash_video
-from utils.video_utils import probe_duration, get_scene
+from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
+from utils.video_utils import probe_duration, get_scene, save_frames_around_timestamp
 
 
 def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames) -> tuple[bool, str]:
@@ -153,20 +158,148 @@ def gen_base_prompt(video_path, video_info):
     return base_prompt
 
 
-def fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1000):
+def is_box_valid(sub_box, final_box_coords):
+    """
+    判断字幕框的中心点是否在 final_box 范围内
+    """
+    # 计算字幕框中心点
+    cx = sum(p[0] for p in sub_box) / 4
+    cy = sum(p[1] for p in sub_box) / 4
+
+    min_x, max_x, min_y, max_y = final_box_coords
+
+    # 稍微放宽一点边界容错 (可选)
+    margin = 5
+    return (min_x - margin <= cx <= max_x + margin) and \
+        (min_y - margin <= cy <= max_y + margin)
+
+
+def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
+    """
+    通过字幕生成更精确的场景时间戳
+    :param video_path: 视频路径
+    :param timestamp: 初始时间戳 (单位: ms)
+    :return: 精确后的时间戳 (单位: ms)
+    """
+    dir_path = os.path.dirname(video_path)
+    output_dir = os.path.join(dir_path, "temp_scene_timestamp_frames")
+
+    # 1. 保存关键帧 (假设这个函数现在使用 ms 单位保存文件名)
+    image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 5, output_dir)
+
+    # 2. 运行OCR
+    ocr = SubtitleOCR(use_gpu=True)
+    result_json = ocr.run_batch(image_path_list)
+
+    # 提取所有原始框用于计算范围
+    detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]
+
+    if not detected_boxes:
+        print("未找到任何字幕框。")
+        return None
+
+    # --- 阶段 3: 分析并计算最终包围框 ---
+    print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
+    good_boxes = analyze_and_filter_boxes(detected_boxes)
+    if not good_boxes:
+        print("\n[结果] 所有检测到的框都被过滤为异常值。")
+        return None
+
+    all_points = np.array([point for box in good_boxes for point in box])
+
+    # 计算最终包围盒的极值
+    min_x, min_y = np.min(all_points[:, 0]), np.min(all_points[:, 1])
+    max_x, max_y = np.max(all_points[:, 0]), np.max(all_points[:, 1])
+
+    final_box_coords = (min_x, max_x, min_y, max_y)
+
+    # 可视化打印一下 final_box (min_x, min_y, max_x, max_y)
+    print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
+
+    # --- 阶段 4: 数据清洗与字典构建 ---
+    print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
+
+    timestamp_text_map = {}
+
+    for item in result_json.get('data', []):
+        file_path = item.get('file_path', '')
+
+        # 正则解析文件名中的时间戳 (frame_33.png -> 33)
+        match = re.search(r'frame_(\d+)\.png', file_path)
+        if not match:
+            continue
+
+        current_ms = int(match.group(1))  # 直接作为毫秒时间戳
+
+        # 筛选落在 final_box 内的字幕
+        valid_texts = []
+        for sub in item.get('subtitles', []):
+            if is_box_valid(sub['box'], final_box_coords):
+                valid_texts.append(sub['text'])
+
+        # 存入字典
+        if valid_texts:
+            timestamp_text_map[current_ms] = "".join(valid_texts)
+        else:
+            timestamp_text_map[current_ms] = ""  # 该时刻指定区域无字幕
+
+    # 按时间戳排序
+    sorted_timestamps = sorted(timestamp_text_map.keys())
+    if not sorted_timestamps:
+        print("警告：在指定区域内未提取到有效文本。")
+        return timestamp
+
+    print(f"解析到的时间序列 (ms): {sorted_timestamps}")
+    # print(f"内容映射: {timestamp_text_map}")
+
+    # --- 阶段 5: 前后寻找文本变化点 ---
+
+    # 找到距离用户输入 timestamp 最近的那个时间点作为锚点
+    closest_ms = min(sorted_timestamps, key=lambda x: abs(x - timestamp))
+    anchor_text = timestamp_text_map[closest_ms]
+
+    print(f"锚点时间: {closest_ms}ms, 锚点文本: '{anchor_text}'")
+
+    if not anchor_text:
+        print("警告：中心时间点附近无字幕文本，无法进行精确定位，返回原始时间。")
+        return timestamp
+
+    # 向前倒推：寻找这段文本最早出现的时间
+    start_ms = closest_ms
+    idx = sorted_timestamps.index(closest_ms)
+
+    for i in range(idx, -1, -1):
+        curr_ms = sorted_timestamps[i]
+        text = timestamp_text_map[curr_ms]
+
+        # 判断文本是否一致 (包含或相等)
+        if text == anchor_text or (len(text) > 0 and text in anchor_text):
+            start_ms = curr_ms
+        else:
+            # 文本变了（变成空，或者变成了上一句话），停止
+            break
+
+    print(f"定位到字幕开始时间: {start_ms}ms")
+
+    # 如果需要还可以做一个简单的向后查找(find end)，这里只按需求找了“更精确的时间戳(通常指开始)”
+
+    return start_ms
+
+
+
+
+def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
     """
      将 logical_scene_info 中的每个 scene 的 start/end 对齐到 camera shot。
      对齐原则：
      1. 寻找 max_delta_ms 毫秒容差范围内的所有 camera shot。
-     2. 在这些候选中，选择出现次数最多的那个。
-     3. 如果出现次数相同，则选择与原始时间戳差值最小（最近）的那个。
-     打印每个时间戳调整前后的对比。返回修改后的 logical_scene_info。
+     2. 筛选出最佳匹配（优先高频次，其次近距离）。
+     3. 如果最佳匹配的 camera shot 次数 (count) < 2，则强制调用 gen_precise_scene_timestamp_by_subtitle 进行字幕对齐。
+     4. 否则使用 camera shot 的时间。
 
      Args:
-         video_path (str): 视频文件路径。
-         scenes (list of list): camera shot 信息，每个元素是 [timestamp_ms, count]。
+         merged_timestamps (list): camera shot 信息，每个元素是 [timestamp_ms, count]。
          logical_scene_info (dict): 包含 'new_scene_info' 的逻辑场景信息。
-         output_dir (str): 输出目录，用于保存调试帧。
          max_delta_ms (int): 查找候选 camera shot 的最大时间差（毫秒）。
      """
 
@@ -191,30 +324,29 @@ def fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1
             if not candidates:
                 print(f"[Scene {i}] {key}: 保持不变 {orig_ts} (在 {max_delta_ms}ms 范围内无候选 camera shot)")
             else:
-                # 步骤 2: 使用 min() 和一个计算分数的 key 来找到最佳匹配
-                # key 返回一个元组，min() 会依次比较元组中的元素
-                # 1. 主要比较分数: (差值 / 次数)
-                # 2. 次要比较（分数相同时）: 差值本身，确保选择更近的
+                # 步骤 2: 找到最佳匹配的 camera shot
                 def calculate_key(shot):
                     diff = abs(shot[0] - orig_ts)
                     count = shot[1]
-                    # 安全起见，虽然前面过滤了，但这里处理 count=0 的情况
                     score = diff / count if count > 0 else float('inf')
                     return (score, diff)
 
                 best_shot = min(candidates, key=calculate_key)
-
-                new_ts = int(best_shot[0])
                 count = best_shot[1]
-                diff = abs(new_ts - orig_ts)
-                score = diff / count if count > 0 else float('inf')
+
+                # 步骤 3: 决策逻辑
+                if count < 10:
+                    # 如果 camera shot 置信度低，使用字幕对齐
+                    new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
+                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (CameraShot count={count}<2, 已通过字幕修正)")
+                else:
+                    # 否则使用 camera shot 对齐
+                    new_ts = int(best_shot[0])
+                    diff = abs(new_ts - orig_ts)
+                    score = diff / count if count > 0 else float('inf')
+                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已通过视觉修正)")
 
                 scene[key] = new_ts
-                print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已调整)")
-
-                # 如果需要调试，可以取消下面的注释
-                # save_frames_around_timestamp(video_path, ms_to_time(orig_ts), 5, str(os.path.join(output_dir, 'orig', str(orig_ts))))
-                # save_frames_around_timestamp(video_path, ms_to_time(new_ts), 5, str(os.path.join(output_dir,'closest', str(new_ts))))
 
     return logical_scene_info
 
@@ -256,7 +388,7 @@ def gen_logical_scene_llm(video_path, video_info):
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
 
             merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes)
-            logical_scene_info = fix_logical_scene_info(merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
 
             return None, logical_scene_info
         except Exception as e:

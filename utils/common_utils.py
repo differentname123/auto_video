@@ -288,3 +288,41 @@ def ms_to_time(ms: int) -> str:
     h, m = divmod(m, 60)
     # --- 修改点：将逗号改为点 ---
     return f"{h:02d}:{m:02d}:{s:02d}.{ms_rem:03d}"
+
+
+def merge_intervals(intervals):
+    """
+    合并相邻或重叠的时间段
+
+    Args:
+        intervals: 时间段列表，每个元素为 (start, end) 的元组
+
+    Returns:
+        合并后的时间段列表
+    """
+    # 处理空列表的情况
+    if not intervals:
+        return []
+
+    # 按开始时间排序
+    sorted_intervals = sorted(intervals, key=lambda x: x[0])
+
+    # 初始化结果列表，第一个时间段作为起点
+    merged = [sorted_intervals[0]]
+
+    # 遍历剩余的时间段
+    for current in sorted_intervals[1:]:
+        # 获取当前合并结果中的最后一个时间段
+        last = merged[-1]
+
+        # 如果当前时间段与最后一个时间段相邻或重叠
+        # 相邻的条件是：current[0] <= last[1]
+        # （因为如果 current[0] == last[1]，它们是连续的，应该合并）
+        if current[0] <= last[1]:
+            # 合并时间段，结束时间取两者中的最大值
+            merged[-1] = (last[0], max(last[1], current[1]))
+        else:
+            # 不相邻，直接添加到结果中
+            merged.append(current)
+
+    return merged
