@@ -566,7 +566,7 @@ def get_scene(video_path, min_final_scenes=20):
 
     for attempt in range(max_attempts):
         print(f"--- 第 {attempt + 1}/{max_attempts} 次尝试 ---")
-        print(f"当前使用的阈值列表: {thresholds}")
+        print(f"当前使用的阈值列表: {thresholds} {video_path}")
 
         # 你的核心逻辑基本不变，只是把固定的 [30, 50, 70] 换成了可变的 thresholds
         for high_threshold in thresholds:
@@ -1153,12 +1153,13 @@ def save_frames_around_timestamp(
 ) -> List[str]:
     """
     从视频中在给定时间戳前后各截取 num_frames 帧并保存为图片。
+    如果图片已存在，则跳过保存步骤，直接返回路径。
     输出文件命名格式：frame_{timestamp_ms}.png
     返回：保存的图片路径列表
     """
 
-    # 将输入的时间戳转换为秒（用于定位目标位置）
-    # 注意：需确保外部有 time_to_ms 函数，或者传入的 timestamp 已经是 int/float
+    # 假设外部有 time_to_ms 函数，或者传入的 timestamp 已经是 int/float
+    # 如果没有 time_to_ms，请确保传入的是秒或毫秒并自行转换
     ts_sec = time_to_ms(timestamp) / 1000
 
     cap = cv2.VideoCapture(video_path)
@@ -1180,25 +1181,30 @@ def save_frames_around_timestamp(
 
     os.makedirs(output_dir, exist_ok=True)
 
-    saved_paths = []  # 用于存储图片路径的列表
+    saved_paths = []
 
     print(f"FPS: {fps}, 目标时间: {ts_sec}s, 截取范围: {start_idx} - {end_idx}")
 
     for idx in range(start_idx, end_idx + 1):
+        # --- 修改重点 1：先计算路径，不进行任何视频读取操作 ---
+        current_sec = idx / fps
+        current_ms = int(current_sec * 1000)
+
+        filename = f"frame_{current_ms}.png"
+        out_path = os.path.join(output_dir, filename)
+
+        # --- 修改重点 2：检查文件是否存在 ---
+        if os.path.exists(out_path):
+            # print(f"跳过已存在: {filename}") # 可选：打印日志
+            saved_paths.append(out_path)
+            continue  # 直接进入下一次循环，不执行下面的 cap.set 和 cap.read
+
+        # --- 如果文件不存在，才执行耗时的视频操作 ---
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, frame = cap.read()
         if not ret:
             print(f"警告：读取帧 {idx} 失败，跳过")
             continue
-
-        # --- 修改：计算当前帧的毫秒时间戳 ---
-        current_sec = idx / fps
-        current_ms = int(current_sec * 1000)
-
-        # 命名格式变为 frame_ + 毫秒时间戳
-        filename = f"frame_{current_ms}.png"
-        out_path = os.path.join(output_dir, filename)
-        # -----------------------------
 
         # BGR 转 RGB 并保存
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -1208,9 +1214,8 @@ def save_frames_around_timestamp(
 
         # 将路径加入列表
         saved_paths.append(out_path)
-        # print(f"已保存: {filename} (时间戳: {current_ms}ms)")
+        # print(f"已保存: {filename}")
 
     cap.release()
 
-    # 返回图片地址列表
     return saved_paths

@@ -338,28 +338,21 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         return timestamp
 
 
-
-
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
     """
-     将 logical_scene_info 中的每个 scene 的 start/end 对齐到 camera shot。
-     对齐原则：
-     1. 寻找 max_delta_ms 毫秒容差范围内的所有 camera shot。
-     2. 筛选出最佳匹配（优先高频次，其次近距离）。
-     3. 如果最佳匹配的 camera shot 次数 (count) < 2，则强制调用 gen_precise_scene_timestamp_by_subtitle 进行字幕对齐。
-     4. 否则使用 camera shot 的时间。
-
-     Args:
-         merged_timestamps (list): camera shot 信息，每个元素是 [timestamp_ms, count]。
-         logical_scene_info (dict): 包含 'new_scene_info' 的逻辑场景信息。
-         max_delta_ms (int): 查找候选 camera shot 的最大时间差（毫秒）。
-     """
+    将 logical_scene_info 中的每个 scene 的 start/end 对齐。
+    对齐策略：
+    1. 优先寻找高置信度 (count >= 2) 的 camera shot 进行视觉对齐。
+    2. 如果找不到 camera shot，或者找到的 camera shot 置信度低 (count < 2)，则统一使用字幕对齐。
+    """
     time_map = {}
 
+    # 预处理有效镜头
     camera_shots_with_counts = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
+
+    # 注意：即使没有 camera_shots，现在也应该继续执行，以便尝试字幕对齐
     if not camera_shots_with_counts:
-        print("⚠️ 无有效 camera_shot 时间戳，跳过调整。")
-        return logical_scene_info
+        print("⚠️ 无有效 camera_shot 时间戳，后续将全部依赖字幕对齐逻辑。")
 
     for i, scene in enumerate(logical_scene_info.get('new_scene_info', [])):
         for key in ('start', 'end'):
@@ -368,48 +361,66 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
                 print(f"[Scene {i}] {key}: 无法解析原始时间 ({orig_ts})，跳过。")
                 continue
 
-            # 步骤 1: 筛选候选者
+            # 0. 缓存检查：如果该时间戳已经处理过，直接使用缓存结果
+            if orig_ts in time_map:
+                scene[key] = time_map[orig_ts]
+                continue
+
+            # 1. 筛选候选者
             candidates = [
                 shot for shot in camera_shots_with_counts
                 if abs(shot[0] - orig_ts) <= max_delta_ms
             ]
 
-            if not candidates:
-                print(f"[Scene {i}] {key}: 保持不变 {orig_ts} (在 {max_delta_ms}ms 范围内无候选 camera shot)")
-            else:
-                # 步骤 2: 找到最佳匹配的 camera shot
+            # 2. 尝试找到最佳匹配的 camera shot
+            best_shot = None
+            if candidates:
                 def calculate_key(shot):
                     diff = abs(shot[0] - orig_ts)
                     count = shot[1]
+                    # 评分逻辑：差值越小越好，次数越多越好 (这里 score 越小越好)
                     score = diff / count if count > 0 else float('inf')
                     return (score, diff)
 
                 best_shot = min(candidates, key=calculate_key)
+
+            # 3. 统一决策逻辑
+            # 情况 A: 找到了 Camera Shot 且 置信度足够高 (count >= 2) -> 使用视觉对齐
+            if best_shot and best_shot[1] >= 2:
+                new_ts = int(best_shot[0])
                 count = best_shot[1]
-                if orig_ts not in time_map:
-                    # 步骤 3: 决策逻辑
-                    if count < 2:
-                        # 如果 camera shot 置信度低，使用字幕对齐
-                        new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
-                        print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (CameraShot count={count}<2, 已通过字幕修正)")
-                    else:
-                        # 否则使用 camera shot 对齐
-                        new_ts = int(best_shot[0])
-                        diff = abs(new_ts - orig_ts)
-                        score = diff / count if count > 0 else float('inf')
-                        print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已通过视觉修正)")
-                    time_map[orig_ts] = new_ts
-                new_ts = time_map[orig_ts]
-                scene[key] = new_ts
+                diff = abs(new_ts - orig_ts)
+                score = diff / count if count > 0 else 0
+                print(
+                    f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (✅ 视觉修正: count={count}, diff={diff}ms, score={score:.2f})")
+
+            # 情况 B: 没找到候选 OR 找到了但置信度低 -> 统一使用字幕对齐
+            else:
+                # 生成日志原因
+                reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot[1]}<2)"
+
+                # 调用字幕对齐函数
+                new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
+
+                # 如果字幕函数返回 None 或者出错，保持原值（根据 gen_precise... 的实现，这里假设它返回数字）
+                if new_ts is None:
+                    new_ts = orig_ts
+                    print(f"[Scene {i}] {key}: {orig_ts} (保持不变, 字幕对齐失败, 原因: {reason})")
+                else:
+                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (🛠️ 字幕修正: {reason})")
+
+            # 4. 更新并缓存
+            time_map[orig_ts] = new_ts
+            scene[key] = new_ts
 
     return logical_scene_info
 
-def gen_logical_scene_llm(video_path, video_info):
+def gen_logical_scene_llm(video_path, video_info, all_path_info):
     """
     生成新的视频方案
     """
     need_remove_frames = video_info.get('extra_info', {}).get('has_ad_or_face', 'auto')
-
+    static_cut_video_path = all_path_info.get('static_cut_video_path', '')
     base_prompt = gen_base_prompt(video_path, video_info)
     max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
     log_pre = f"{video_path} 逻辑性场景划分 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
@@ -441,8 +452,8 @@ def gen_logical_scene_llm(video_path, video_info):
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
 
-            merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes)
-            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            merged_timestamps = get_scene(static_cut_video_path, min_final_scenes=max_scenes*2)
+            logical_scene_info = fix_logical_scene_info(static_cut_video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
 
             return None, logical_scene_info
         except Exception as e:

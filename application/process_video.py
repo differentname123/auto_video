@@ -114,6 +114,7 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
     for original_url_info in original_url_info_list:
         video_id = original_url_info.get('video_id')
+        all_path_info = build_video_paths(video_id)
         if not video_id:
             error_info = "Missing video_id in original_url_info"
             failure_details[video_id] = {
@@ -134,7 +135,7 @@ def gen_extra_info(task_info, video_info_dict, manager):
         video_path = path_info['low_resolution_video_path']
         error_info = ""
         if not logical_scene_info:
-            error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info)
+            error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info, all_path_info)
             if not error_info:
                 video_info['logical_scene_info'] = logical_scene_info
             else:
