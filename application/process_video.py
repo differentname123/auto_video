@@ -432,4 +432,8 @@ def process_single_task(task_info, manager):
 
 
 if __name__ == '__main__':
-    run()
+    for i in range(3):
+        try:
+            run()
+        except Exception as e:
+            print(f"主运行函数发生严重异常: {e}")
