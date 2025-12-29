@@ -1208,7 +1208,7 @@ def save_frames_around_timestamp(
 
         # 将路径加入列表
         saved_paths.append(out_path)
-        print(f"已保存: {filename} (时间戳: {current_ms}ms)")
+        # print(f"已保存: {filename} (时间戳: {current_ms}ms)")
 
     cap.release()
 

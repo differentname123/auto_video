@@ -158,20 +158,101 @@ def gen_base_prompt(video_path, video_info):
     return base_prompt
 
 
-def is_box_valid(sub_box, final_box_coords):
+def get_best_valid_text(subtitles, final_box_coords, margin=5):
     """
-    判断字幕框的中心点是否在 final_box 范围内
+    从字幕列表中找出唯一一个最符合条件（在范围内且离中心最近）的字幕文本。
+    如果没有符合条件的，返回 None。
     """
-    # 计算字幕框中心点
-    cx = sum(p[0] for p in sub_box) / 4
-    cy = sum(p[1] for p in sub_box) / 4
+    if not subtitles:
+        return None
 
     min_x, max_x, min_y, max_y = final_box_coords
 
-    # 稍微放宽一点边界容错 (可选)
-    margin = 5
-    return (min_x - margin <= cx <= max_x + margin) and \
-        (min_y - margin <= cy <= max_y + margin)
+    # 1. 计算 final_box 的几何中心
+    target_cx = (min_x + max_x) / 2
+    target_cy = (min_y + max_y) / 2
+
+    best_text = None
+    min_dist_sq = float('inf')  # 初始化最小距离平方为无穷大
+
+    for sub in subtitles:
+        sub_box = sub['box']
+        # 计算字幕框中心点
+        cx = sum(p[0] for p in sub_box) / 4
+        cy = sum(p[1] for p in sub_box) / 4
+
+        # 2. 判断是否 valid (在范围内)
+        if (min_x - margin <= cx <= max_x + margin) and \
+                (min_y - margin <= cy <= max_y + margin):
+
+            # 3. 计算离中心点的距离平方
+            dist_sq = (cx - target_cx) ** 2 + (cy - target_cy) ** 2
+
+            # 4. 擂台法：保留距离最小的那个
+            if dist_sq < min_dist_sq:
+                min_dist_sq = dist_sq
+                best_text = sub['text']
+
+    return best_text
+
+
+def calculate_closest_cut_point(timestamp_text_map, anchor_timestamp):
+    """
+    根据字幕内容图，修复缺失数据，并找到距离 anchor_timestamp 最近的字幕跳变点。
+    跳变点定义为：内容发生变化的上一个时间戳。
+    """
+    sorted_timestamps = sorted(timestamp_text_map.keys())
+    if not sorted_timestamps:
+        return anchor_timestamp
+
+    # --- 步骤 1: 修复遗漏掉的文字 (逻辑 3) ---
+    # 我们创建一个副本以免影响原始数据（如果需要保留原始数据的话）
+    # 这里直接在逻辑中处理，生成一个 cleaned_map
+    cleaned_map = timestamp_text_map.copy()
+
+    # 遍历列表（排除首尾，因为需要前后对比）
+    for i in range(1, len(sorted_timestamps) - 1):
+        prev_t = sorted_timestamps[i - 1]
+        curr_t = sorted_timestamps[i]
+        next_t = sorted_timestamps[i + 1]
+
+        prev_text = cleaned_map[prev_t]
+        curr_text = cleaned_map[curr_t]
+        next_text = cleaned_map[next_t]
+
+        # 如果当前为空，但前后一致且不为空，则修复
+        if curr_text == "" and prev_text == next_text and prev_text != "":
+            cleaned_map[curr_t] = prev_text
+
+    # --- 步骤 2: 寻找所有的跳变点 (逻辑 4) ---
+    # 跳变点 candidates 列表
+    jump_candidates = []
+
+    # 遍历直到倒数第二个，比较 i 和 i+1
+    for i in range(len(sorted_timestamps) - 1):
+        curr_t = sorted_timestamps[i]
+        next_t = sorted_timestamps[i + 1]
+
+        curr_text = cleaned_map[curr_t]
+        next_text = cleaned_map[next_t]
+
+        # 简单的文本不相等判断，也可以根据需要加 fuzzy matching
+        if curr_text != next_text:
+            # 记录跳变的上一个时间点
+            jump_candidates.append(curr_t)
+
+    # 如果没有发现任何跳变（全程文字一样），返回 anchor 或 序列起点
+    if not jump_candidates:
+        print("未检测到字幕内容变化，返回原始锚点。")
+        return anchor_timestamp
+
+    # --- 步骤 3: 找到距离锚点最近的跳变点 (逻辑 1 & 2) ---
+    # 使用 min 函数，key 为与 anchor_timestamp 的绝对距离
+    closest_point = min(jump_candidates, key=lambda t: abs(t - anchor_timestamp))
+
+    print(f"锚点: {anchor_timestamp}, 检测到的跳变候选: {jump_candidates}, 最终选择: {closest_point}")
+
+    return closest_point
 
 
 def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
@@ -181,109 +262,80 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
     :param timestamp: 初始时间戳 (单位: ms)
     :return: 精确后的时间戳 (单位: ms)
     """
-    dir_path = os.path.dirname(video_path)
-    output_dir = os.path.join(dir_path, "temp_scene_timestamp_frames")
+    # 【修改点 1】在函数最外层加入 try 块，包裹所有逻辑
+    try:
+        dir_path = os.path.dirname(video_path)
+        output_dir = os.path.join(dir_path, "temp_scene_timestamp_frames")
 
-    # 1. 保存关键帧 (假设这个函数现在使用 ms 单位保存文件名)
-    image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 5, output_dir)
+        # 1. 保存关键帧 (涉及IO，易报错)
+        image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 30, output_dir)
 
-    # 2. 运行OCR
-    ocr = SubtitleOCR(use_gpu=True)
-    result_json = ocr.run_batch(image_path_list)
+        # 2. 运行OCR (涉及显存/模型，易报错)
+        ocr = SubtitleOCR(use_gpu=True)
+        result_json = ocr.run_batch(image_path_list)
 
-    # 提取所有原始框用于计算范围
-    detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]
+        # 提取所有原始框用于计算范围
+        detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in
+                          item.get("subtitles", [])]
 
-    if not detected_boxes:
-        print("未找到任何字幕框。")
-        return None
+        if not detected_boxes:
+            print("未找到任何字幕框。")
+            return timestamp
 
-    # --- 阶段 3: 分析并计算最终包围框 ---
-    print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
-    good_boxes = analyze_and_filter_boxes(detected_boxes)
-    if not good_boxes:
-        print("\n[结果] 所有检测到的框都被过滤为异常值。")
-        return None
+        # --- 阶段 3: 分析并计算最终包围框 ---
+        print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
+        good_boxes = analyze_and_filter_boxes(detected_boxes)
+        if not good_boxes:
+            print("\n[结果] 所有检测到的框都被过滤为异常值。")
+            return timestamp
 
-    all_points = np.array([point for box in good_boxes for point in box])
+        all_points = np.array([point for box in good_boxes for point in box])
+        min_x, min_y = np.min(all_points[:, 0]), np.min(all_points[:, 1])
+        max_x, max_y = np.max(all_points[:, 0]), np.max(all_points[:, 1])
+        final_box_coords = (min_x, max_x, min_y, max_y)
 
-    # 计算最终包围盒的极值
-    min_x, min_y = np.min(all_points[:, 0]), np.min(all_points[:, 1])
-    max_x, max_y = np.max(all_points[:, 0]), np.max(all_points[:, 1])
+        print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
 
-    final_box_coords = (min_x, max_x, min_y, max_y)
+        # --- 阶段 4: 生成 {时间戳: 文本} 映射 ---
+        print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
+        timestamp_text_map = {}
 
-    # 可视化打印一下 final_box (min_x, min_y, max_x, max_y)
-    print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
+        for item in result_json.get('data', []):
+            file_path = item.get('file_path', '')
+            match = re.search(r'frame_(\d+)\.png', file_path)
+            if not match:
+                continue
+            current_ms = int(match.group(1))
 
-    # --- 阶段 4: 数据清洗与字典构建 ---
-    print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
+            best_text = get_best_valid_text(item.get('subtitles', []), final_box_coords)
+            # 构造 valid_texts 列表：如果有结果就是 [text]，没有就是 []
+            valid_texts = [best_text] if best_text else []
 
-    timestamp_text_map = {}
+            # 去除首尾空格，避免 OCR 带来的微小差异影响比对
+            text_content = "".join(valid_texts).strip()
+            timestamp_text_map[current_ms] = text_content
 
-    for item in result_json.get('data', []):
-        file_path = item.get('file_path', '')
+        if not timestamp_text_map:
+            print("警告：在指定区域内未提取到有效文本。")
+            return timestamp
 
-        # 正则解析文件名中的时间戳 (frame_33.png -> 33)
-        match = re.search(r'frame_(\d+)\.png', file_path)
-        if not match:
-            continue
+        # --- 阶段 5: 调用独立函数计算最终时间点 ---
+        print(f"\n[阶段 5] 计算最近的字幕切分点...字幕长度为：{len(timestamp_text_map)}")
 
-        current_ms = int(match.group(1))  # 直接作为毫秒时间戳
+        # 计算逻辑也可能出错，放在 try 块中很安全
+        final_timestamp = calculate_closest_cut_point(timestamp_text_map, timestamp)
 
-        # 筛选落在 final_box 内的字幕
-        valid_texts = []
-        for sub in item.get('subtitles', []):
-            if is_box_valid(sub['box'], final_box_coords):
-                valid_texts.append(sub['text'])
+        print(f"初始时间: {timestamp}ms -> 精确时间: {final_timestamp}ms")
 
-        # 存入字典
-        if valid_texts:
-            timestamp_text_map[current_ms] = "".join(valid_texts)
-        else:
-            timestamp_text_map[current_ms] = ""  # 该时刻指定区域无字幕
+        return final_timestamp
 
-    # 按时间戳排序
-    sorted_timestamps = sorted(timestamp_text_map.keys())
-    if not sorted_timestamps:
-        print("警告：在指定区域内未提取到有效文本。")
+    # 【修改点 2】捕获所有异常，打印日志并强制返回原始 timestamp
+    except Exception as e:
+        print(f"[Error] gen_precise_scene_timestamp_by_subtitle 发生错误: {e}")
+        # 建议打印堆栈信息以便后续排查，但不影响流程继续
+        import traceback
+        traceback.print_exc()
         return timestamp
-
-    print(f"解析到的时间序列 (ms): {sorted_timestamps}")
-    # print(f"内容映射: {timestamp_text_map}")
-
-    # --- 阶段 5: 前后寻找文本变化点 ---
-
-    # 找到距离用户输入 timestamp 最近的那个时间点作为锚点
-    closest_ms = min(sorted_timestamps, key=lambda x: abs(x - timestamp))
-    anchor_text = timestamp_text_map[closest_ms]
-
-    print(f"锚点时间: {closest_ms}ms, 锚点文本: '{anchor_text}'")
-
-    if not anchor_text:
-        print("警告：中心时间点附近无字幕文本，无法进行精确定位，返回原始时间。")
-        return timestamp
-
-    # 向前倒推：寻找这段文本最早出现的时间
-    start_ms = closest_ms
-    idx = sorted_timestamps.index(closest_ms)
-
-    for i in range(idx, -1, -1):
-        curr_ms = sorted_timestamps[i]
-        text = timestamp_text_map[curr_ms]
-
-        # 判断文本是否一致 (包含或相等)
-        if text == anchor_text or (len(text) > 0 and text in anchor_text):
-            start_ms = curr_ms
-        else:
-            # 文本变了（变成空，或者变成了上一句话），停止
-            break
-
-    print(f"定位到字幕开始时间: {start_ms}ms")
-
-    # 如果需要还可以做一个简单的向后查找(find end)，这里只按需求找了“更精确的时间戳(通常指开始)”
-
-    return start_ms
 
 
 
@@ -302,6 +354,7 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
          logical_scene_info (dict): 包含 'new_scene_info' 的逻辑场景信息。
          max_delta_ms (int): 查找候选 camera shot 的最大时间差（毫秒）。
      """
+    time_map = {}
 
     camera_shots_with_counts = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
     if not camera_shots_with_counts:
@@ -333,19 +386,20 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
 
                 best_shot = min(candidates, key=calculate_key)
                 count = best_shot[1]
-
-                # 步骤 3: 决策逻辑
-                if count < 10:
-                    # 如果 camera shot 置信度低，使用字幕对齐
-                    new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
-                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (CameraShot count={count}<2, 已通过字幕修正)")
-                else:
-                    # 否则使用 camera shot 对齐
-                    new_ts = int(best_shot[0])
-                    diff = abs(new_ts - orig_ts)
-                    score = diff / count if count > 0 else float('inf')
-                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已通过视觉修正)")
-
+                if orig_ts not in time_map:
+                    # 步骤 3: 决策逻辑
+                    if count < 2:
+                        # 如果 camera shot 置信度低，使用字幕对齐
+                        new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
+                        print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (CameraShot count={count}<2, 已通过字幕修正)")
+                    else:
+                        # 否则使用 camera shot 对齐
+                        new_ts = int(best_shot[0])
+                        diff = abs(new_ts - orig_ts)
+                        score = diff / count if count > 0 else float('inf')
+                        print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (最佳分={score:.2f}, 次数={count}, 差值={diff}ms, 已通过视觉修正)")
+                    time_map[orig_ts] = new_ts
+                new_ts = time_map[orig_ts]
                 scene[key] = new_ts
 
     return logical_scene_info

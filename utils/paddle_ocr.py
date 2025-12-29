@@ -81,23 +81,147 @@ class SubtitleOCR:
         print("Resetting OCR Engine instance due to internal error...")
         SubtitleOCR._engine_instance = None
 
+    def _select_best_subtitle_strict(
+            self,
+            raw_ocr_lines: list,
+            img_h: int,
+            img_w: int,
+            bottom_ratio_in_crop: float = 0.0,  # 注意：因为run_batch已经裁剪了画面底部，这里的ratio是相对于裁剪后图片的
+            rect_ang_thresh: float = 10.0,
+            rect_ratio_thresh: float = 0.8,
+            aspect_ratio_thresh: float = 2.0,
+            width_ratio_thresh: float = 0.1
+    ):
+        """
+        严格筛选逻辑，复刻了 find_subtitle 的核心算法。
+        输入:
+            raw_ocr_lines: list of [box(np.array), text(str), score(float)]
+            img_h, img_w: 裁剪后的图片高宽
+        返回:
+            最佳的一个结果 dict 或 None
+        """
+        if not raw_ocr_lines:
+            return None
+
+        # 1. 底部候选筛选 (相对于传入的图片区域)
+        # 注意：box结构通常为 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        min_y_limit = img_h * bottom_ratio_in_crop
+
+        candidates = []
+        for line in raw_ocr_lines:
+            box = np.array(line[0], dtype=np.float32)
+            # 检查是否位于(裁剪图的)指定底部区域
+            if np.min(box[:, 1]) >= min_y_limit:
+                candidates.append({
+                    "box": box,
+                    "text": line[1],
+                    "score": line[2]
+                })
+
+        if not candidates:
+            return None
+
+        # 如果只有一个候选且不做后续形状强校验，可以直接返回，
+        # 但为了严格符合"剔除不合理框"的要求，我们继续往下走。
+
+        # 2. 形状 & 大小 & 中心线跨越 筛选
+        filtered = []
+        min_width = img_w * width_ratio_thresh
+        center_x = img_w / 2.0
+
+        for item in candidates:
+            box = item["box"]
+
+            # 必须是四边形 (RapidOCR/PaddleOCR 一般输出就是4点，但在做 minAreaRect 前最好确认)
+            if box.shape[0] != 4:
+                continue
+
+            xs = box[:, 0]
+            width = xs.max() - xs.min()
+
+            # A. 宽度剔除
+            if width < min_width:
+                continue
+
+            # B. **关键**：水平投影必须跨过中心线
+            if not (xs.min() < center_x < xs.max()):
+                continue
+
+            # 计算最小外接矩形相关属性
+            rect = cv2.minAreaRect(box)  # rect: (center(x,y), (w,h), angle)
+
+            # C. 角度剔除
+            angle = abs(rect[2])
+            # minAreaRect 的角度范围通常是 [-90, 0) 或 [0, 90]，计算偏差
+            # 这里逻辑保持与参考代码一致：effective_angle = min(angle, 90 - angle)
+            effective_angle = min(angle, 90.0 - angle)
+            if effective_angle > rect_ang_thresh:
+                continue
+
+            # D. 矩形度剔除
+            area_poly = cv2.contourArea(box)
+            box_w, box_h = rect[1]
+            area_rect = box_w * box_h
+
+            if area_rect <= 0:
+                continue
+
+            if (area_poly / area_rect) < rect_ratio_thresh:
+                continue
+
+            # E. 宽高比剔除 (可选)
+            if aspect_ratio_thresh is not None:
+                # 宽高比取 长边/短边
+                ar = max(box_w, box_h) / (min(box_w, box_h) + 1e-6)
+                if ar < aspect_ratio_thresh:
+                    continue
+
+            filtered.append(item)
+
+        if not filtered:
+            return None
+
+        # 如果只剩一个，直接返回
+        if len(filtered) == 1:
+            return filtered[0]
+
+        # 3. 打分选最佳
+        # 逻辑：越靠下(Y大)越好，越居中(X差值小)越好
+        Y_WEIGHT = 1.0
+        X_WEIGHT = 10.0
+
+        def calculate_score(item):
+            box = item["box"]
+            # Y score: 归一化的中心Y坐标
+            cy = np.mean(box[:, 1])
+            y_score = (cy / img_h) * Y_WEIGHT
+
+            # X penalty: 归一化的偏离中心距离
+            cx = np.mean(box[:, 0])
+            x_pen = (abs(cx - center_x) / img_w) * X_WEIGHT
+
+            return y_score - x_pen
+
+        best = max(filtered, key=calculate_score)
+        return best
+
     def run_batch(self, image_path_list: list, crop_ratio: float = 0.3, confidence: float = 0.8) -> dict:
         """
         执行批量识别。
         保证不抛出异常，返回标准 JSON 结构。
+        集成了严格的 find_subtitle 几何筛选逻辑。
         """
         # 整体结果容器
         response = {
-            "code": 0,  # 0 成功, -1 失败
+            "code": 0,
             "message": "success",
             "total_count": len(image_path_list),
             "success_count": 0,
             "failed_count": 0,
-            "data": [],  # 存放每张图的结果
-            "perf_stats": {}  # 性能统计
+            "data": [],
+            "perf_stats": {}
         }
 
-        # 用于收集前20个结果用于打印，不放入response
         all_recognized_texts = []
 
         if not image_path_list:
@@ -106,14 +230,13 @@ class SubtitleOCR:
 
         t_start = time.time()
 
-        # 获取引擎 (第一次尝试)
+        # 获取引擎
         engine = self._get_engine()
         if engine is None:
             response["code"] = -1
-            response["message"] = "Failed to load OCR models. Check model paths."
+            response["message"] = "Failed to load OCR models."
             return response
 
-        # --- 开始循环处理 (串行处理以保证内存安全) ---
         for img_path in image_path_list:
             item_result = {
                 "file_path": img_path,
@@ -129,11 +252,11 @@ class SubtitleOCR:
                 continue
 
             try:
-                # 1. 图像预处理 (Lazy loading, 用完即丢，防止内存积压)
+                # 1. 图像预处理
                 img = Image.open(img_path)
                 width, height = img.size
 
-                # 裁剪
+                # 裁剪逻辑
                 y_offset = 0
                 if 0 < crop_ratio < 1.0:
                     y_offset = int(height * (1 - crop_ratio))
@@ -143,64 +266,81 @@ class SubtitleOCR:
                     img_crop = img
 
                 img_numpy = np.array(img_crop)
+                # 获取裁剪后的尺寸，用于几何筛选
+                crop_h, crop_w = img_numpy.shape[:2]
 
-                # 2. 推理 (包含重试机制)
+                # 2. 推理
+                ocr_result = []
                 try:
-                    ocr_result, _ = engine(img_numpy)
+                    # rapidocr/paddleocr返回结构通常是 [dt_boxes, rec_res] 或 直接 list
+                    # 这里假设返回的是标准的 list of [box, text, score] 结构
+                    result_raw, _ = engine(img_numpy)
+                    ocr_result = result_raw if result_raw else []
                 except Exception as e_engine:
-                    # !!! 关键点：如果推理报错，可能是引擎坏了，尝试重置一次 !!!
                     print(f"Inference error on {os.path.basename(img_path)}, retrying...")
                     self._reset_engine()
-                    engine = self._get_engine()  # 重新获取
+                    engine = self._get_engine()
                     if engine:
-                        ocr_result, _ = engine(img_numpy)  # 再次尝试
+                        ocr_result, _ = engine(img_numpy)
                     else:
                         raise Exception("Engine reload failed")
 
-                # 3. 格式化结果
+                # 3. 结果筛选与格式化
                 if ocr_result:
-                    valid_subs = []
-                    for line in ocr_result:
-                        if line and len(line) == 3 and line[2] > confidence:
-                            box, text, score = line[0], line[1], line[2]
+                    # A. 初步过滤置信度 (这也是一种筛选)
+                    high_conf_lines = [
+                        line for line in ocr_result
+                        if line and len(line) == 3 and line[2] > confidence
+                    ]
 
-                            # 坐标还原 + 类型转换 (防止 JSON 报错)
-                            final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
+                    # B. **执行严格的几何筛选**
+                    # 注意：这里传入的是相对于 crop 图片的坐标和尺寸
+                    best_sub = self._select_best_subtitle_strict(
+                        high_conf_lines,
+                        crop_h,
+                        crop_w,
+                        bottom_ratio_in_crop=0.0,  # 因为已经裁剪了，这里设为0，表示在裁剪区域内不再次切分底部
+                        rect_ang_thresh=10.0,
+                        rect_ratio_thresh=0.8,
+                        aspect_ratio_thresh=2.0,
+                        width_ratio_thresh=0.1
+                    )
 
-                            valid_subs.append({
-                                "text": text,
-                                "box": final_box,
-                                "score": float(score)
-                            })
+                    if best_sub:
+                        text = best_sub["text"]
+                        box = best_sub["box"]
+                        score = best_sub["score"]
 
-                            # 收集识别到的文本，用于最后的打印 summary
-                            all_recognized_texts.append(text)
+                        # C. 坐标还原 (Crop -> Full Image)
+                        # 将 numpy array 转换为 list，并加上 y_offset
+                        final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
 
-                    item_result["subtitles"] = valid_subs
+                        item_result["subtitles"].append({
+                            "text": text,
+                            "box": final_box,
+                            "score": float(score)
+                        })
+
+                        all_recognized_texts.append(text)
 
                 item_result["status"] = "success"
                 response["success_count"] += 1
 
             except Exception as e:
-                # 捕获单张图片的任何异常（如图片损坏、分辨率过大导致的问题）
                 item_result["error_msg"] = str(e)
                 item_result["status"] = "error"
                 response["failed_count"] += 1
-                # 打印堆栈以便调试，但不中断程序
-                # traceback.print_exc()
 
             response["data"].append(item_result)
 
-        # --- 统计结束 ---
+        # --- 统计 ---
         t_end = time.time()
         total_time = t_end - t_start
-
         response["perf_stats"] = {
             "total_time_sec": float(f"{total_time:.4f}"),
             "avg_time_per_img_sec": float(f"{total_time / len(image_path_list):.4f}") if image_path_list else 0
         }
 
-        # 2. 不使用 logger，直接 print 关键信息
         print("=" * 40)
         print(f"处理图片的数量: {response['total_count']}")
         print(f"耗时: {total_time:.4f} 秒")
