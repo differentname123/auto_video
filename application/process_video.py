@@ -175,7 +175,7 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
         owner_asr_info = video_info.get('owner_asr_info', {})
-        is_contains_author_voice = video_info.get('is_contains_author_voice', True)
+        is_contains_author_voice = video_info.get('extra_info', {}).get('is_contains_author_voice', True)
         if is_contains_author_voice and not owner_asr_info:
             error_info, owner_asr_info = gen_owner_asr_by_llm(video_path, video_info)
             if not error_info:
