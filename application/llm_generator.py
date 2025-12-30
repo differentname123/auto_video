@@ -594,8 +594,9 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
     Args:
         video_script_info (list): 包含一个或多个视频脚本方案的列表。
         final_scene_info (dict): 包含有效场景ID列表等信息的字典。
-                                示例: {'all_scenes': [{'scene_id': 'id1'}, ...]}
+                                示例: {'all_scenes': [{'scene_id': 'id1'}, ...], 'material_usage_mode': 'full'}
         allow_commentary (bool): 是否允许/包含解说词。如果为True，需要检查 transition_text。
+        is_need_narration (bool): 是否需要旁白检查。
 
     Returns:
         tuple: (bool, str)
@@ -604,6 +605,7 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
     """
     try:
         all_scene_list = final_scene_info.get('all_scenes', [])
+        material_usage_mode = final_scene_info.get('material_usage_mode', 'free')
         all_scene_dict = {}
         for scene in all_scene_list:
             scene_id = scene.get('scene_id')
@@ -618,6 +620,10 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
 
         # 提取final_info_list中的所有scene_id，并放入set中以提高查询效率
         valid_scene_ids = {scene['scene_id'] for scene in final_scene_info['all_scenes']}
+        valid_source_video_ids = {scene['source_video_id'] for scene in final_scene_info['all_scenes']}
+
+        # 标记是否至少有一个方案使用了>=2个素材源 (用于规则2检查)
+        has_multi_source_solution = False
 
         # 遍历每个方案进行检查
         for i, solution in enumerate(video_script_info):
@@ -649,6 +655,7 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                 return False, f"方案 {solution_num} 的 '场景顺序与新文案' 不是一个列表。"
 
             seen_scene_ids = set()
+            source_video_ids_in_solution = set()
             expected_scene_number = 1
 
             for j, scene in enumerate(scenes):
@@ -675,7 +682,6 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                 if 'on_screen_text' not in scene:  # 检查key是否存在，允许其值为空字符串
                     return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text' 字段。"
 
-                # =================== 新增修改开始 ===================
                 # 6. 如果 allow_commentary 为 True，检查 transition_text 字段是否存在
                 if allow_commentary:
                     if 'transition_text' not in scene:
@@ -689,10 +695,30 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                     if len(narration_script_list) != len(new_narration_script_list):
                         return False, f"方案 {solution_num} 的场景 {scene_num}  {scene_id} 中，narration_script_list 长度 ({len(narration_script_list)}) 与 new_narration_script 长度 ({len(new_narration_script_list)}) 不一致。"
 
-
                 # 更新检查状态
                 seen_scene_ids.add(scene_id)
+                # 记录该场景所属的 source_video_id
+                source_video_ids_in_solution.add(all_scene_dict[scene_id].get('source_video_id'))
                 expected_scene_number += 1
+
+            # =================== 新增规则检查 1：素材使用模式检查 (在单个方案遍历结束后) ===================
+            if material_usage_mode == 'full':
+                if len(seen_scene_ids) != len(valid_scene_ids):
+                    return False, f"方案 {solution_num} 违反 'full' 模式规则：必须使用所有场景。实际使用了 {len(seen_scene_ids)} 个，总共有 {len(valid_scene_ids)} 个。"
+            elif material_usage_mode == 'major':
+                # 注意：这里使用 >=，一半如果不是整数，按数学值比较即可
+                if len(seen_scene_ids) < (len(valid_scene_ids) / 2):
+                    return False, f"方案 {solution_num} 违反 'major' 模式规则：使用场景数量 ({len(seen_scene_ids)}) 必须大于等于总数 ({len(valid_scene_ids)}) 的一半。"
+
+            # 更新多素材源方案的标记
+            if len(source_video_ids_in_solution) >= 2:
+                has_multi_source_solution = True
+
+        # =================== 新增规则检查 2：多视频源混合检查 (在所有方案遍历结束后) ===================
+        # 如果总的有效视频源 >= 2，必须至少有一个方案是混合了 >= 2 个视频源的
+        if len(valid_source_video_ids) >= 2:
+            if not has_multi_source_solution:
+                return False, "违反多样性规则：当有效素材视频源数量大于等于2时，不能所有方案都只使用单一视频源的素材，至少需要有一个方案混合使用了2个或以上的视频源。"
 
         # 如果所有检查都通过
         return True, ""

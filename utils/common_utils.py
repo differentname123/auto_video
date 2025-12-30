@@ -326,3 +326,12 @@ def merge_intervals(intervals):
             merged.append(current)
 
     return merged
+
+def first_greater(target_num, num_list):
+    """
+    返回 num_list 中第一个严格大于 target_num 的元素；找不到时返回 None。
+    """
+    for x in num_list:
+        if x > target_num:
+            return x
+    return None

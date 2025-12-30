@@ -8,6 +8,8 @@
 :description:
     
 """
+import random
+import shlex
 import tempfile
 import uuid
 from typing import Union, List
@@ -19,7 +21,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 import cv2
 import numpy as np
@@ -1222,3 +1224,285 @@ def save_frames_around_timestamp(
     cap.release()
 
     return saved_paths
+
+
+def create_variety_text(text: str, font_size: int, output_image_path: str, text_type: str = "正式"):
+    """
+    一个为不同场景优化的、自动化的风格化文字生成函数。
+
+    你只需要关心：【文字内容、字体大小、输出路径、文字类型】。
+    颜色会根据类型从内置颜色池随机选择，描边宽度会根据字体大小和类型自动适配。
+
+    Args:
+        text (str): 要生成的文字内容。
+        font_size (int): 字体大小。
+        output_image_path (str): 生成图片的保存路径。
+        text_type (str, optional): 文字类型，可选值为 "综艺" 或 "正式"。默认为 "综艺"。
+    """
+    DEFAULT_FONT_PATH = r'C:\Users\zxh\AppData\Local\Microsoft\Windows\Fonts\AaFengKuangYuanShiRen-2.ttf'
+
+    # --- 1. 样式配置库 ---
+    # 将不同类型的配置集中管理，方便扩展
+    STYLE_CONFIG = {
+        "综艺": {
+            "colors": [
+                (255, 204, 0),    # 醒目柠檬黄 (经典高对比色)
+                (0, 230, 230),    # 能量青色 (科技感、未来感)
+                (255, 87, 34),    # 活力亮橙 (温暖、引人注目)
+                (236, 64, 122),   # 魅力洋红 (时尚、大胆)
+                (124, 252, 0),    # 荧光绿 (赛博朋克、年轻)
+                (173, 216, 230),  # 天空浅蓝 (清新、宁静)
+                (255, 218, 185),  # 蜜桃粉橙 (温柔、有亲和力)
+                (181, 230, 194),  # 薄荷绿 (自然、舒适)
+                (220, 190, 240),  # 薰衣草紫 (优雅、梦幻)
+                (226, 192, 112),  # 高光香槟金 (比之前的金色更亮，质感更好)
+                (205, 127, 50),  # 古铜色 (沉稳、有历史感)
+                (255, 225, 1),  # 亮黄色
+                (255, 120, 177),  # 甜粉色
+                (0, 225, 233),  # 天青色
+                (138, 88, 255),  # 潮紫色
+                (255, 108, 0),  # 活力橙
+                (124, 252, 0),  # 荧光绿
+                (173, 216, 230),  # 浅天蓝
+                (255, 20, 147),  # 深粉色
+                (255, 140, 0),  # 深橙色
+                (34, 139, 34),  # 森林绿
+                (75, 0, 130),  # 靛蓝色
+                (199, 21, 133),  # 深洋红色
+                (255, 215, 0),  # 金色
+                (255, 225, 1),  # 亮黄色
+                (255, 120, 177),  # 甜粉色
+                (0, 225, 233),  # 天青色
+                (138, 88, 255),  # 潮紫色
+                (255, 108, 0),  # 活力橙
+                (124, 252, 0),  # 荧光绿
+            ],
+            "inner_stroke_ratio": 0.12,  # 内层白色描边，占字号的12%，较粗
+            "outer_stroke_ratio": 0.05,  # 最外层深色描边，占字号的5%，较粗
+            'font_path': r'C:\Users\zxh\AppData\Local\Microsoft\Windows\Fonts\AaFengKuangYuanShiRen-2.ttf'
+
+        },
+        "正式": {
+            "colors": [
+                (19, 41, 75),  # 深海军蓝
+                (218, 165, 32),  # 高级金色
+                (139, 0, 0),  # 暗红色
+                (0, 100, 0),  # 深绿色
+                (255, 204, 0),  # 醒目柠檬黄 (经典高对比色)
+                (0, 230, 230),  # 能量青色 (科技感、未来感)
+                (255, 87, 34),  # 活力亮橙 (温暖、引人注目)
+                (236, 64, 122),  # 魅力洋红 (时尚、大胆)
+                (124, 252, 0),  # 荧光绿 (赛博朋克、年轻)
+                (173, 216, 230),  # 天空浅蓝 (清新、宁静)
+                (255, 218, 185),  # 蜜桃粉橙 (温柔、有亲和力)
+                (181, 230, 194),  # 薄荷绿 (自然、舒适)
+                (220, 190, 240),  # 薰衣草紫 (优雅、梦幻)
+                (226, 192, 112),  # 高光香槟金 (比之前的金色更亮，质感更好)
+                (205, 127, 50),  # 古铜色 (沉稳、有历史感)
+                (255, 225, 1),  # 亮黄色
+                (255, 120, 177),  # 甜粉色
+                (0, 225, 233),  # 天青色
+                (138, 88, 255),  # 潮紫色
+                (255, 108, 0),  # 活力橙
+                (124, 252, 0),  # 荧光绿
+                (173, 216, 230),  # 浅天蓝
+                (255, 20, 147),  # 深粉色
+                (255, 140, 0),  # 深橙色
+                (34, 139, 34),  # 森林绿
+                (75, 0, 130),  # 靛蓝色
+                (199, 21, 133),  # 深洋红色
+                (255, 215, 0),  # 金色
+                (255, 225, 1),  # 亮黄色
+                (255, 120, 177),  # 甜粉色
+                (0, 225, 233),  # 天青色
+                (138, 88, 255),  # 潮紫色
+                (255, 108, 0),  # 活力橙
+                (124, 252, 0),  # 荧光绿
+            ],
+            "inner_stroke_ratio": 0.06,  # 内层白色描边，占字号的6%，更精致
+            "outer_stroke_ratio": 0.03,  # 最外层深色描边，占字号的3%，更纤细
+            'font_path': 'C:/Windows/Fonts/msyhbd.ttc'
+        }
+    }
+
+    # --- 2. 自动化参数计算 ---
+    # 检查传入的 text_type 是否有效，无效则报错
+    if text_type not in STYLE_CONFIG:
+        print(f"错误：无效的文字类型 '{text_type}'。可用类型为: {list(STYLE_CONFIG.keys())}")
+        return False
+
+    # 根据类型选择配置
+    config = STYLE_CONFIG[text_type]
+    color_pool = config["colors"]
+    font_path = config.get('font_path', DEFAULT_FONT_PATH)
+    inner_stroke_ratio = config["inner_stroke_ratio"]
+    outer_stroke_ratio = config["outer_stroke_ratio"]
+
+    # 根据字体大小和选择的比例，自动计算描边的最佳宽度
+    stroke_width = max(1, int(font_size * inner_stroke_ratio))
+    outer_stroke_width = max(1, int(font_size * outer_stroke_ratio))
+
+    # 自动选择颜色
+    fill_color = random.choice(color_pool)
+    stroke_color = (255, 255, 255)  # 内描边固定为白色
+    outer_stroke_color = (40, 40, 40)  # 外描边固定为深灰色/黑色
+
+    # --- 3. 加载字体并准备画布 ---
+    try:
+        font = ImageFont.truetype(font_path, font_size)
+    except IOError:
+        print(f"错误：无法加载字体 -> {font_path}")
+        print("请检查函数中的 DEFAULT_FONT_PATH 变量是否设置正确！")
+        return False
+
+    # 计算画布大小，需要给描边留出足够的“扩张”空间
+    padding = (stroke_width + outer_stroke_width) * 2
+    # 使用 getbbox 来精确计算文字边界
+    text_bbox = font.getbbox(text)
+    text_width = text_bbox[2] - text_bbox[0]
+    text_height = text_bbox[3] - text_bbox[1]
+
+    canvas_width = text_width + padding
+    canvas_height = text_height + padding
+
+    # --- 4. 绘制、扩张、合成图层 (核心逻辑) ---
+
+    # [底层] 绘制最顶层的文字，用于提取形状
+    text_layer = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_layer)
+    # text_bbox[1] 是文字顶部的偏移量，减去它来让文字从画布的(padding/2, 0)位置开始绘制
+    draw.text((padding // 2, padding // 2 - text_bbox[1]), text, font=font, fill=fill_color)
+
+    # 提取文字形状的Alpha通道作为蒙版
+    alpha_mask = text_layer.getchannel('A')
+
+    # [中层] 创建白色描边
+    white_stroke_mask = alpha_mask.filter(ImageFilter.MaxFilter(stroke_width * 2 + 1))
+    white_stroke_layer = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+    white_stroke_layer.paste(Image.new('RGB', (canvas_width, canvas_height), stroke_color), mask=white_stroke_mask)
+
+    # [顶层] 创建深色外框
+    black_stroke_mask = white_stroke_mask.filter(ImageFilter.MaxFilter(outer_stroke_width * 2 + 1))
+    black_stroke_layer = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+    black_stroke_layer.paste(Image.new('RGB', (canvas_width, canvas_height), outer_stroke_color),
+                             mask=black_stroke_mask)
+
+    # 从后往前，完美地合成所有图层 (背景 -> 外描边 -> 内描边 -> 文字)
+    final_image = Image.alpha_composite(black_stroke_layer, white_stroke_layer)
+    final_image = Image.alpha_composite(final_image, text_layer)
+
+    # --- 5. 裁剪并保存 ---
+    bbox = final_image.getbbox()
+    if bbox:
+        final_image = final_image.crop(bbox)
+
+    final_image.save(output_image_path)
+    # print(f"-> 类型 '{text_type}' 的文字已生成：{output_image_path} (颜色: {fill_color})")
+    return True
+
+
+
+def add_text_overlays_to_video(
+        video_path: str,
+        text_info_list: list,
+        output_video_path: str,
+        image_dir_path: str,
+        is_fun=False
+):
+    """
+    为视频叠加多个综艺花字图片，并将生成的图片保存到指定目录。
+
+    Args:
+        video_path (str): 输入视频的路径。
+        text_info_list (list): 花字信息列表。
+        output_video_path (str): 输出视频的路径。
+        image_dir_path (str): 用于存放生成的所有花字图片的目录路径。
+    """
+    print("开始处理视频...")
+
+    # --- 步骤 1: 获取视频信息 ---
+    try:
+        video_w, video_h, _, _ = probe_video_new(video_path)
+        print(f"视频分辨率: {video_w}x{video_h}")
+    except (TypeError, FileNotFoundError) as e:
+        print(f"无法继续处理，因为获取视频信息失败: {e}")
+        return
+
+    min_video_size = min(video_w, video_h)
+    auto_font_size = int(min_video_size / 15)
+    margin = int(min_video_size * 0.15)
+    print(f"自动计算字体大小为: {auto_font_size}px, 边距为: {margin}px")
+
+    # --- 步骤 2: 创建指定目录并生成所有花字图片 ---
+    # 【改动】确保指定的图片输出目录存在
+    os.makedirs(image_dir_path, exist_ok=True)
+    print(f"花字图片将保存到目录: {image_dir_path}")
+
+    generated_images = []
+    # 【改动】为图片文件名添加视频文件名前缀，避免混淆
+    video_basename = os.path.splitext(os.path.basename(video_path))[0]
+
+    for i, info in enumerate(text_info_list):
+        # 【改动】使用指定的目录和新的命名规则
+        image_filename = f"{video_basename}_text_{i}.png"
+        image_path = os.path.join(image_dir_path, image_filename)
+        text_type = "综艺" if is_fun else "正式"
+        # print(f"正在生成图片: {image_filename} ...")
+        success = create_variety_text(
+            text=info['text'],
+            font_size=auto_font_size,
+            output_image_path=image_path,
+            text_type=text_type
+        )
+        # if is_valid_target_file_simple(image_path):
+        #     success = True
+        if success:
+            generated_images.append({**info, 'path': image_path})
+        else:
+            print(f"警告: 生成文字 '{info['text']}' 的图片失败，将跳过。")
+
+    if not generated_images:
+        print("没有成功生成任何花字图片，处理终止。")
+        return
+
+    # --- 步骤 3: 构建并执行 FFmpeg 命令 (逻辑无变化) ---
+    position_map = {
+        'TL': f"x={margin}:y={margin}", 'TC': f"x=(W-overlay_w)/2:y={margin}",
+        'TR': f"x=W-overlay_w-{margin}:y={margin}",
+        'ML': f"x={margin}:y=(H-overlay_h)/2", 'MC': f"x=(W-overlay_w)/2:y=(H-overlay_h)/2",
+        'MR': f"x=W-overlay_w-{margin}:y=(H-overlay_h)/2",
+        'BL': f"x={margin}:y=H-overlay_h-{margin}", 'BC': f"x=(W-overlay_w)/2:y=H-overlay_h-{margin}",
+        'BR': f"x=W-overlay_w-{margin}:y=H-overlay_h-{margin}",
+    }
+    base_cmd = ['ffmpeg', '-y', '-i', video_path]
+    for img_info in generated_images:
+        base_cmd.extend(['-i', img_info['path']])
+
+    filter_complex = []
+    last_video_stream = "[0:v]"
+
+    for i, img_info in enumerate(generated_images):
+        image_stream = f"[{i + 1}:v]"
+        output_stream = f"[v{i + 1}]"
+        start, end = img_info['start'], img_info['start'] + img_info['duration']
+        position = img_info['position'].upper()
+        overlay_coords = position_map.get(position, position_map['MC'])
+        filter_str = f"{last_video_stream}{image_stream}overlay={overlay_coords}:enable='between(t,{start},{end})'{output_stream}"
+        filter_complex.append(filter_str)
+        last_video_stream = output_stream
+
+    full_cmd = base_cmd + [
+        '-filter_complex', ";".join(filter_complex),
+        '-map', last_video_stream, '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'aac',
+        output_video_path
+    ]
+
+    print("\n即将执行 FFmpeg 命令:")
+    print(shlex.join(full_cmd))
+
+    try:
+        subprocess.run(full_cmd, check=True, capture_output=True, text=True)
+        print(f"\n✅ 视频处理成功！输出文件: {output_video_path}")
+    except subprocess.CalledProcessError as e:
+        print("\n❌ FFmpeg 执行失败! 错误信息:\n", e.stderr)

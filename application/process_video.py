@@ -86,7 +86,8 @@ def run():
                 task_info['failed_count'] = failed_count + 1
                 task_info['status'] = TaskStatus.FAILED
             else:
-                task_info['status'] = TaskStatus.COMPLETED
+                # task_info['status'] = TaskStatus.COMPLETED
+                pass
 
             task_info['failure_details'] = failure_details
             manager.upsert_tasks([task_info])

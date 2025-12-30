@@ -101,13 +101,17 @@ def build_video_paths(video_id):
 
     cover_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
                                          f"{video_id}/{video_id}_cover.mp4")  # 封面视频地址
+
+    image_text_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
+                                         f"{video_id}/{video_id}_image_text.mp4")  # 图片文字表情包等添加后的视频地址
     return {
         'origin_video_path': origin_video_path,
         'low_origin_video_path': low_origin_video_path,
         'static_cut_video_path': static_cut_video_path,
         'low_resolution_video_path': low_resolution_video_path,
         'subtitle_box_path':subtitle_box_path,
-        'cover_video_path':cover_video_path
+        'cover_video_path':cover_video_path,
+        'image_text_video_path':image_text_video_path
     }
 
 

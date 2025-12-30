@@ -11,14 +11,17 @@
         1.查询需要处理的任务
 """
 import os
+import random
 import shutil
 import time
 
 from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths, ERROR_STATUS, \
     check_failure_details
-from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json
+from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json, \
+    time_to_ms, first_greater
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
-from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle
+from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
+    add_text_overlays_to_video
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -165,6 +168,81 @@ def gen_subtitle_box_and_cover_subtitle(video_info_dict):
     return failure_details
 
 
+def add_image_text_to_video(video_path, video_info, optimized_video_plan_info, output_path, output_dir):
+    """
+    为视频添加图片文字
+    """
+    try:
+        is_fun = random.choice([True, False])
+        all_scene_timestamp_list = []
+        overlays = optimized_video_plan_info.get('overlays', [])
+        logical_scene_info = video_info.get('logical_scene_info', {})
+        new_scene_info_list = logical_scene_info.get('new_scene_info', [])
+        for scene in new_scene_info_list:
+            start = scene.get('start')
+            end = scene.get('end')
+            all_scene_timestamp_list.append(start)
+            all_scene_timestamp_list.append(end)
+
+        all_scene_timestamp_list = sorted(set(all_scene_timestamp_list))
+        # 遍历overlays，找到每个时间段内的场景
+        texts_list = []
+        for overlay in overlays:
+            text = overlay.get('text', '').strip()
+            start = overlay.get('start')
+            position = overlay.get('position', 'TC')
+            start_ms = time_to_ms(start)
+            next_timestamp = first_greater(start_ms, all_scene_timestamp_list)
+            if not next_timestamp:
+                continue
+            duration = next_timestamp - start_ms
+            duration = min(duration, 5000)
+            texts_list.append({
+                'text': text,
+                'start': start_ms / 1000.0,
+                'duration': duration / 1000.0,
+                'position': position})
+
+        if not texts_list:
+            print(f"{video_path} 没有找到任何需要添加的标题文案。")
+            return True
+        print(f"准备添加 {len(texts_list)} 条文案图片到视频中。is_fun {is_fun} {video_path}")
+
+        add_text_overlays_to_video(video_path, texts_list, output_path, output_dir, is_fun)
+    except Exception as e:
+        error_info = f"为视频添加文案图片失败: {e}"
+        print(error_info)
+
+
+
+def add_image_to_video(video_info_dict):
+    """
+    在视频上增加图片，目前主要是图片文字以及表情包(待实现)
+    :return:
+    """
+    failure_details = {}
+    for video_id, video_info in video_info_dict.items():
+        all_path_info = build_video_paths(video_id)
+        video_path = all_path_info.get('cover_video_path')
+        output_dir = os.path.dirname(video_path)
+        video_size = os.path.getsize(video_path)
+
+        is_requires_text = video_info.get('extra_info', {}).get('is_requires_text', True)
+        if is_requires_text:
+            video_overlays_text_info_list = video_info.get('video_overlays_text_info', [])
+            image_text_video_path = all_path_info.get('image_text_video_path')
+            if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
+                add_image_text_to_video(video_path, video_info, video_overlays_text_info_list, image_text_video_path, output_dir)
+
+            if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
+                error_info = f"添加图片文字后的视频文件大小异常，生成失败。"
+                failure_details[video_id] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.WARNING
+                }
+    return failure_details
+
+
 
 def gen_video_by_script(task_info, video_info_dict):
     """
@@ -178,7 +256,11 @@ def gen_video_by_script(task_info, video_info_dict):
     failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
     if check_failure_details(failure_details):
         return failure_details
-    return failure_details
+
+    # 生成有了图片文字的视频
+    failure_details = add_image_to_video(video_info_dict)
+    if check_failure_details(failure_details):
+        return failure_details
 
     #
     #
@@ -256,3 +338,5 @@ def gen_video_by_script(task_info, video_info_dict):
     # merge_videos_ffmpeg(need_merge_video_file_list, output_path=final_output_path)
     #
     #
+    return failure_details
+
