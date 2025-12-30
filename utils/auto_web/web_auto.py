@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import time
 import argparse
 import sys
@@ -13,7 +14,8 @@ import datetime
 import sys
 import csv
 import os
-import traceback # 用于捕获更详细的异常信息
+import traceback  # 用于捕获更详细的异常信息
+
 # ==============================================================================
 # 配置区域
 # ==============================================================================
@@ -22,9 +24,106 @@ import traceback # 用于捕获更详细的异常信息
 USER_DATA_DIR = r"W:\temp\xianyu1"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
+
 # ==============================================================================
 # 核心功能函数
 # ==============================================================================
+
+def _get_dir_size(start_path='.'):
+    """计算目录总大小 (返回字节数)"""
+    total_size = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(start_path):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                # 跳过链接文件，避免重复计算
+                if not os.path.islink(fp):
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return total_size
+
+
+def _format_size(size):
+    """将字节转换为易读的格式 (MB, GB)"""
+    power = 1024
+    n = size
+    power_labels = {0: '', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    count = 0
+    while n > power:
+        n /= power
+        count += 1
+    return f"{n:.2f} {power_labels.get(count, 'B')}"
+
+
+def clean_browser_cache(user_data_dir: str):
+    """
+    深度清理 Chromium 用户目录缓存，并显示清理前后的体积变化。
+    保留 Cookies, LocalStorage 以维持登录状态。
+    """
+    if not os.path.exists(user_data_dir):
+        print(f"[-] 目录不存在，无需清理: {user_data_dir}")
+        return
+
+    print("=" * 40)
+    print("🚀 正在执行浏览器数据瘦身...")
+
+    # 1. 计算清理前大小
+    size_before = _get_dir_size(user_data_dir)
+    print(f"[*] 清理前占用空间: {_format_size(size_before)}")
+
+    # 2. 定义垃圾目录清单 (这些目录删除后不会影响登录状态)
+    # 这些目录可能直接在 user_data_dir 下，也可能在 Default 子目录下
+    garbage_targets = [
+        "Cache",  # 网页缓存 (图片/CSS/JS)
+        "Code Cache",  # 编译后的JS代码缓存
+        "GPUCache",  # GPU渲染缓存
+        "ShaderCache",  # 着色器缓存
+        "GrShaderCache",  # 图形资源缓存
+        "Service Worker",  # 服务工作线程 (Google系网页这块特别大)
+        "CacheStorage",  # 离线缓存
+        "ScriptCache",  # 脚本缓存
+        "Crashpad",  # 崩溃转储日志 (Dumps)
+        "BrowserMetrics",  # 浏览器指标数据
+        "Safe Browsing",  # 安全浏览数据库
+        "blob_storage",  # Blob数据
+        "OptimizationGuidePredictionModels",  # 预测模型缓存
+    ]
+
+    # 扫描根目录和 Default 子目录
+    scan_paths = [user_data_dir, os.path.join(user_data_dir, "Default")]
+
+    deleted_count = 0
+
+    for base_path in scan_paths:
+        if not os.path.exists(base_path):
+            continue
+
+        for target in garbage_targets:
+            target_full_path = os.path.join(base_path, target)
+
+            if os.path.exists(target_full_path):
+                try:
+                    # 如果是文件夹则递归删除，如果是文件则直接删除
+                    if os.path.isdir(target_full_path):
+                        shutil.rmtree(target_full_path, ignore_errors=True)
+                    else:
+                        os.remove(target_full_path)
+                    deleted_count += 1
+                except Exception as e:
+                    # 遇到文件占用(PermissionError)直接跳过，不打印骚扰信息
+                    pass
+
+    # 3. 计算清理后大小
+    size_after = _get_dir_size(user_data_dir)
+    freed_size = size_before - size_after
+
+    print(f"[*] 清理后占用空间: {_format_size(size_after)}")
+    print(f"[+] 成功释放空间:   {_format_size(freed_size)} (清理了 {deleted_count} 个项目)")
+    print("=" * 40)
 
 
 class PageCrashedException(Exception):
@@ -65,13 +164,17 @@ def login_and_save_session(model_name: str = "gemini-2.5-pro"):
     """
     print("--- 启动浏览器进行手动登录 ---")
     print(f"会话信息将保存在: {USER_DATA_DIR}")
-
+    clean_browser_cache(USER_DATA_DIR)
     with sync_playwright() as p:
         # 使用自带的 chromium，并启动持久化上下文
         context = p.chromium.launch_persistent_context(
             user_data_dir=USER_DATA_DIR,
             headless=False,  # 必须为 False 以便用户可以看到和操作浏览器
-            args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
+            args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu',
+                  '--disk-cache-size=1',
+                  '--media-cache-size=1',
+                  '--disable-application-cache',
+                  '--disable-component-update', ],
             ignore_default_args=["--enable-automation"]
         )
 
@@ -79,10 +182,10 @@ def login_and_save_session(model_name: str = "gemini-2.5-pro"):
         target_url = f"{TARGET_URL_BASE}?model={model_name}"
         page.goto(target_url)
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("浏览器已打开。请在浏览器窗口中手动完成登录操作。")
         print("登录成功并进入AI Studio主界面后，请回到本命令行窗口，然后按 Enter 键继续...")
-        print("="*60)
+        print("=" * 60)
 
         # 阻塞程序，等待用户在命令行按 Enter
         input()
@@ -122,7 +225,8 @@ def click_acknowledge_if_present(page: Page):
         print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
 
 
-def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR, model_name: str = "gemini-2.5-pro") -> Tuple[Optional[str], Optional[str]]:
+def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR,
+                           model_name: str = "gemini-2.5-pro") -> Tuple[Optional[str], Optional[str]]:
     """
     使用已保存的登录会话启动浏览器，上传文件（可选），提交Prompt，并等待返回结果。
 
@@ -137,7 +241,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
         - response_text: 如果成功，返回模型回答；否则为 None。
     """
     # 检查登录会话是否存在
-    if not os.path.isdir(user_data_dir): # <-- 使用传入的参数
+    if not os.path.isdir(user_data_dir):  # <-- 使用传入的参数
         error_msg = f"用户数据目录不存在: {user_data_dir}\n请先运行 'python {os.path.basename(__file__)} login --user-data-dir <你的目录>' 命令进行登录。"
         return error_msg, None
 
@@ -145,7 +249,8 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
     response_text = None
     context = None
 
-    print(f"--- 开始任务: Prompt='{prompt[:20]}...', File='{file_path}' --- 当前时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"--- 开始任务: Prompt='{prompt[:20]}...', File='{file_path}' --- 当前时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
         # 1. 检查文件路径（如果有）
@@ -156,12 +261,39 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
         with sync_playwright() as p:
             try:
                 # 启动持久化上下文，它会自动加载 user_data_dir 中的登录信息
+
                 context = p.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir, # <-- 使用传入的参数
-                    headless=False,  # 调试时建议开启 False，稳定后可改为 True
-                    args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu'],
+                    user_data_dir=user_data_dir,
+                    headless=False,  # 必须保持 False 以通过反爬检测
+
+                    # 显式指定视口大小，替代 start-maximized
+                    # 因为移到屏幕外后，最大化可能失效或导致渲染布局异常
+                    viewport={'width': 1920, 'height': 1080},
+
+                    args=[
+                        '--disable-blink-features=AutomationControlled',
+                        '--disable-gpu',
+
+                        # 【核心修改点】: 将窗口位置移动到屏幕显示范围之外
+                        '--window-position=-10000,-10000',
+
+                        # 移除 '--start-maximized'，因为我们要手动控制视口大小且移出屏幕
+                        # '--start-maximized',
+
+                        '--no-sandbox',
+                        '--disable-dev-shm-usage'
+                    ],
                     ignore_default_args=["--enable-automation"]
                 )
+
+                # # 下面这个是能够看到窗口的模式
+                # context = p.chromium.launch_persistent_context(
+                #     user_data_dir=user_data_dir, # <-- 使用传入的参数
+                #     headless=False,  # 调试时建议开启 False，稳定后可改为 True
+                #     args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu',    '--window-position=0,0'],
+                #     ignore_default_args=["--enable-automation"]
+                # )
+
             except Exception as e:
                 raise Exception(f"启动浏览器失败，请检查或确认浏览器是否已关闭: {e}")
 
@@ -171,6 +303,10 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
             # 3. 访问页面
             print("[*] 正在加载页面...")
             target_url = f"{TARGET_URL_BASE}?model={model_name}"
+            # target_url = f"{TARGET_URL_BASE}?model=gemini-3-pro-preview"
+            # target_url = f"{TARGET_URL_BASE}?model=gemini-2.5-pro"
+
+
             page.goto(target_url)
             # time.sleep(1000)
             # [修改] 页面加载后立即检查崩溃
@@ -214,7 +350,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 
     except Exception as e:
         error_info = str(e)
-        print(f"[!] 执行过程中发生错误: {error_info} {file_path}")
+        print(f"[!] 执行过程中发生错误: {error_info[:1000]} {file_path}")
         # 可选：出错时截图
         if context and context.pages:
             try:
@@ -235,7 +371,6 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
                 pass
 
     return error_info, response_text
-
 
 
 # ==============================================================================
@@ -341,7 +476,7 @@ def _scroll_page_to_bottom(page: Page, steps: int = 20, step_px: int = 1500, del
         try:
             # 将鼠标移到视口中央
             vp = page.viewport_size or {"width": 1280, "height": 720}
-            page.mouse.move(vp["width"]/2, vp["height"]/2)
+            page.mouse.move(vp["width"] / 2, vp["height"] / 2)
             # 滑轮往下滑
             page.mouse.wheel(0, step_px)
         except:
@@ -352,6 +487,7 @@ def _scroll_page_to_bottom(page: Page, steps: int = 20, step_px: int = 1500, del
         page.keyboard.press("End")
     except:
         pass
+
 
 def _wait_and_get_response(page: Page) -> str:
     """(内部调用) 等待流式输出结束并提取文本"""
@@ -372,13 +508,13 @@ def _wait_and_get_response(page: Page) -> str:
 # 程序主入口和使用示例
 # ==============================================================================
 if __name__ == '__main__':
-    # login_and_save_session()
+    login_and_save_session()
 
     # 测试文件路径
     test_file = r"W:\project\python_project\watermark_remove\common_utils\video_scene\test.jpg"
     test_prompt = "请详细描述这张图片的内容。"
 
-    # 调用封装好的函数
+    # 调用封装好的函数12
     err, response = query_google_ai_studio(prompt=test_prompt, file_path=test_file)
 
     if err:

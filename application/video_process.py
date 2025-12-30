@@ -174,9 +174,11 @@ def gen_video_by_script(task_info, video_info_dict):
     :return:
     """
 
+    # 生成字幕遮挡视频
     failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
     if check_failure_details(failure_details):
         return failure_details
+    return failure_details
 
     #
     #

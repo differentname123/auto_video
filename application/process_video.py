@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import time
+import traceback
 
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
     gen_hudong_by_llm, gen_video_script_llm
@@ -71,6 +72,7 @@ def run():
         try:
             failure_details, video_info_dict = process_single_task(task_info, manager)
         except Exception as e:
+            traceback.print_exc()
             error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
             print(error_info)
             failure_details[task_info.get('_id', 'N/A')] = {
@@ -425,8 +427,5 @@ def process_single_task(task_info, manager):
 
 
 if __name__ == '__main__':
-    for i in range(3):
-        try:
-            run()
-        except Exception as e:
-            print(f"主运行函数发生严重异常: {e}")
+    run()
+

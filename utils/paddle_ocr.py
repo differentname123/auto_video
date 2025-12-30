@@ -390,8 +390,8 @@ def analyze_and_filter_boxes(
         if abs(heights[i] - median_height) <= height_diff_threshold:
             height_filtered_boxes.append(box)
         else:
-            print(f"  - 剔除高度异常框: 高度为 {heights[i]}, 与中位数差异过大。")
-
+            # print(f"  - 剔除高度异常框: 高度为 {heights[i]}, 与中位数差异过大。")
+            pass
     print(f"[过滤-阶段1: 高度] 完成，剩余 {len(height_filtered_boxes)} 个框进入下一阶段。")
     if len(height_filtered_boxes) < 3:
         return height_filtered_boxes
@@ -439,8 +439,8 @@ def analyze_and_filter_boxes(
         if height_z < z_score_threshold and center_y_z < z_score_threshold:
             final_good_boxes.append(box)
         else:
-            print(f"  - 剔除Z-score异常框 (高度Z: {height_z:.2f}, 中心Y Z: {center_y_z:.2f})")
-
+            # print(f"  - 剔除Z-score异常框 (高度Z: {height_z:.2f}, 中心Y Z: {center_y_z:.2f})")
+            pass
     print(f"[过滤] 所有流程完成，最终保留 {len(final_good_boxes)} 个高质量字幕框。")
     return final_good_boxes
 
