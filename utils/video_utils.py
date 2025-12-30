@@ -1149,7 +1149,8 @@ def save_frames_around_timestamp(
         video_path: str,
         timestamp,
         num_frames: int,
-        output_dir: str
+        output_dir: str,
+        time_duration_s=None
 ) -> List[str]:
     """
     从视频中在给定时间戳前后各截取 num_frames 帧并保存为图片。
@@ -1172,6 +1173,8 @@ def save_frames_around_timestamp(
     if fps <= 0 or total_frames <= 0:
         cap.release()
         raise ValueError("无法获取视频帧率或总帧数")
+    if time_duration_s:
+        num_frames = int(fps * time_duration_s)
 
     # 目标帧序号
     target_idx = int(round(ts_sec * fps))

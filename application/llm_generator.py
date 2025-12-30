@@ -268,7 +268,7 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         output_dir = os.path.join(dir_path, "temp_scene_timestamp_frames")
 
         # 1. 保存关键帧 (涉及IO，易报错)
-        image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 30, output_dir)
+        image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
         # 2. 运行OCR (涉及显存/模型，易报错)
         ocr = SubtitleOCR(use_gpu=True)
