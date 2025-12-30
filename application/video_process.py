@@ -584,8 +584,10 @@ def gen_new_video(task_info, video_info_dict):
         video_path = all_path_info.get('cover_video_path')
         subtitle_box_path = all_path_info.get('subtitle_box_path')
         subtitle_box = read_json(subtitle_box_path)
-        top_left, bottom_right, vid_w, vid_h = adjust_subtitle_box(video_path, subtitle_box)
-        real_subtitle_box = [top_left, bottom_right]
+        real_subtitle_box = None
+        if subtitle_box:
+            top_left, bottom_right, vid_w, vid_h = adjust_subtitle_box(video_path, subtitle_box)
+            real_subtitle_box = [top_left, bottom_right]
         if is_valid_target_file_simple(all_path_info.get('image_text_video_path')):
             video_path = all_path_info.get('image_text_video_path')
         scene_number_list = scene_info.get('scene_number_list')
