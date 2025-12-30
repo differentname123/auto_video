@@ -67,11 +67,28 @@ def run():
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     for task_info in tasks_to_process:
+        failure_details = {}
         try:
-            failure_details = process_single_task(task_info, manager)
+            failure_details, video_info_dict = process_single_task(task_info, manager)
         except Exception as e:
-            print(f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {e}")
+            error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
+            print(error_info)
+            failure_details[task_info.get('_id', 'N/A')] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.CRITICAL
+            }
             continue
+        finally:
+            if check_failure_details(failure_details):
+                failed_count = task_info.get('failed_count', 0)
+                task_info['failed_count'] = failed_count + 1
+                task_info['status'] = TaskStatus.FAILED
+            else:
+                task_info['status'] = TaskStatus.COMPLETED
+
+            task_info['failure_details'] = failure_details
+            manager.upsert_tasks([task_info])
+
 
 def process_origin_video(video_id):
     """
@@ -81,64 +98,52 @@ def process_origin_video(video_id):
     """
     video_path_info = build_video_paths(video_id)
     origin_video_path = video_path_info['origin_video_path']
+    low_origin_video_path = video_path_info['low_origin_video_path']
     static_cut_video_path = video_path_info['static_cut_video_path']
     low_resolution_video_path = video_path_info['low_resolution_video_path']
 
     if not is_valid_target_file_simple(origin_video_path):
         raise FileNotFoundError(f"原始视频文件不存在: {origin_video_path}")
 
+    if not is_valid_target_file_simple(low_origin_video_path):
+        shutil.copy2(origin_video_path, low_origin_video_path)
+
+
     if not is_valid_target_file_simple(static_cut_video_path):
-        # 第一步先进行降低分辨率和帧率
+        # 第一步先进行降低分辨率和帧率(初步)
         params = {
             'crf': 23,
             'target_width': 2560,
             'target_fps': 30
             }
-        reduce_and_replace_video(origin_video_path, **params)
+        reduce_and_replace_video(low_origin_video_path, **params)
 
         # 第二步进行静态背景去除
-        crop_result, crop_path = remove_static_background_video(origin_video_path)
+        crop_result, crop_path = remove_static_background_video(low_origin_video_path)
         shutil.copy2(crop_path, static_cut_video_path)
 
     if not is_valid_target_file_simple(low_resolution_video_path):
-        # 第三步进行降低分辨率和帧率
+        # 第三步进行降低分辨率和帧率（超级压缩）
         shutil.copy2(static_cut_video_path, low_resolution_video_path)
         reduce_and_replace_video(low_resolution_video_path)
     print(f"视频 {video_id} 的原始视频处理完成。")
 
 
-def gen_extra_info(task_info, video_info_dict, manager):
+
+def gen_extra_info(video_info_dict, manager):
     """
     为每个视频生成额外信息 逻辑场景划分 覆盖文字识别 作者语音识别
-    :param task_info:
     :param video_info_dict:
     :return:
     """
     failure_details = {}
-    original_url_info_list = task_info.get('original_url_info_list', [])
 
-    for original_url_info in original_url_info_list:
-        video_id = original_url_info.get('video_id')
+    for video_id, video_info in video_info_dict.items():
         all_path_info = build_video_paths(video_id)
-        if not video_id:
-            error_info = "Missing video_id in original_url_info"
-            failure_details[video_id] = {
-                "error_info": error_info,
-                "error_level": ERROR_STATUS.ERROR
-            }
-            continue
-        video_info = video_info_dict.get(video_id)
-        if not video_info:
-            error_info = "Video info not found in database"
-            failure_details[video_id] = {
-                "error_info": error_info,
-                "error_level": ERROR_STATUS.ERROR
-            }
-            continue
-        path_info = build_video_paths(video_id)
+
+        # 生成逻辑性的场景划分
         logical_scene_info = video_info.get('logical_scene_info')
-        video_path = path_info['low_resolution_video_path']
-        error_info = ""
+        video_path = all_path_info['low_resolution_video_path']
         if not logical_scene_info:
             error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info, all_path_info)
             if not error_info:
@@ -148,16 +153,14 @@ def gen_extra_info(task_info, video_info_dict, manager):
                     "error_info": error_info,
                     "error_level": ERROR_STATUS.ERROR
                 }
-                video_info["logical_error"] = error_info
-
-            manager.upsert_materials([video_info])
-            if error_info:
-                continue
-        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+            update_video_info(video_info_dict, manager, failure_details, error_key='logical_error')
+        if check_failure_details(failure_details):
+            return failure_details
+        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 
-
+        # 生气情绪性花字
         video_overlays_text_info = video_info.get('video_overlays_text_info', {})
         if not video_overlays_text_info:
             error_info, video_overlays_text_info = gen_overlays_text_llm(video_path, video_info)
@@ -169,16 +172,16 @@ def gen_extra_info(task_info, video_info_dict, manager):
                     "error_level": ERROR_STATUS.WARNING
                 }
                 video_info["overlays_text_error"] = error_info
+            update_video_info(video_info_dict, manager, failure_details, error_key='overlays_text_error')
 
-            manager.upsert_materials([video_info])
-            if error_info:
-                print(f"视频 {video_id} overlays_text_info 生成失败: {error_info} 但是非必要可以继续运行")
-        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
-
-
+        if check_failure_details(failure_details):
+            return failure_details
+        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 
+
+        # 生成asr识别结果
         owner_asr_info = video_info.get('owner_asr_info', None)
         is_contains_author_voice = video_info.get('extra_info', {}).get('is_contains_author_voice', True)
         if is_contains_author_voice and owner_asr_info is None:
@@ -190,16 +193,15 @@ def gen_extra_info(task_info, video_info_dict, manager):
                     "error_info": error_info,
                     "error_level": ERROR_STATUS.ERROR
                 }
-                video_info["owner_asr_error"] = error_info
-            manager.upsert_materials([video_info])
-            if error_info:
-                continue
-        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+            update_video_info(video_info_dict, manager, failure_details, error_key='owner_asr_error')
+
+        if check_failure_details(failure_details):
+            return failure_details
+        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
-
+        # 生成互动信息
         hudong_info = video_info.get('hudong_info', {})
-
         if not hudong_info:
             error_info, hudong_info = gen_hudong_by_llm(video_path, video_info)
             if not error_info:
@@ -209,17 +211,166 @@ def gen_extra_info(task_info, video_info_dict, manager):
                     "error_info": error_info,
                     "error_level": ERROR_STATUS.ERROR
                 }
-                video_info["hudong_error"] = error_info
-            manager.upsert_materials([video_info])
-            if error_info:
-                continue
-        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+            update_video_info(video_info_dict, manager, failure_details, error_key='hudong_error')
+        if check_failure_details(failure_details):
+            return failure_details
+        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     return failure_details
 
 
+def gen_video_info_dict(task_info, manager):
+    """
+    生成相应的单视频信息字典，key为video_id，值为物料表的视频信息
+    :param task_info:
+    :param manager:
+    :return:
+    """
+    failure_details = {}  # 使用字典记录每个失败视频的详细原因
+
+    video_id_list = task_info.get('video_id_list', [])
+    task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
+
+    if not video_id_list:
+        error_info = f"任务 {task_id} 的 video_id_list 为空，直接标记为失败。"
+        print(error_info)
+        failure_details[task_id] = {
+            "error_info": error_info,
+            "error_level": ERROR_STATUS.CRITICAL
+        }
+        return failure_details, {}
+
+    # 1. 批量获取所有需要的物料信息
+    video_info_list = manager.find_materials_by_ids(video_id_list)
+    video_info_dict = {video_info['video_id']: video_info for video_info in video_info_list}
+    for video_id in video_id_list:
+        video_info = video_info_dict.get(video_id)
+        if not video_info:
+            print(f"任务 {task_id} 严重错误: 视频 {video_id} 在物料库中不存在，已跳过。")
+            failure_details[video_id] = {
+                "error_info": "Video info not found in database",
+                "error_level": ERROR_STATUS.CRITICAL
+            }
 
 
+    return failure_details, video_info_dict
+
+
+def prepare_basic_video_info(video_info_dict):
+    """
+    准备基础视频信息，比如评论，原始视频，等
+    :param video_info_dict:
+    :return:
+    """
+    log_pre = f"准备基础视频信息  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    failure_details = {}
+    for video_id, video_info in video_info_dict.items():
+        try:
+            # 准备路径和URL
+            video_path_info = build_video_paths(video_id)
+            origin_video_path = video_path_info['origin_video_path']
+            video_url = f"https://www.douyin.com/video/{video_id}"
+
+            # 步骤A: 保证视频文件存在，并清理相关的错误状态
+            if not is_valid_target_file_simple(origin_video_path):
+                print(f"视频 {video_id} 的原始文件不存在，准备下载...{log_pre}")
+                result = download_douyin_video_sync(video_url)
+
+                if not result:
+                    error_info = f"错误: 视频 {video_id} 下载失败。{log_pre}"
+                    print(error_info)
+                    failure_details[video_id] = {
+                        "error_info": error_info,
+                        "error_level": ERROR_STATUS.ERROR
+                    }
+                    continue
+
+                # 下载成功
+                original_file_path, metadata = result
+                os.makedirs(os.path.dirname(origin_video_path), exist_ok=True)
+                os.replace(original_file_path, origin_video_path)
+                print(f"视频 {video_id} 下载并移动成功。{log_pre}")
+                video_info['metadata'] = metadata
+
+
+            # 步骤B: 保证评论信息完整
+            comment_list = video_info.get('comment_list', [])
+            if not comment_list or NEED_REFRESH_COMMENT:
+                print(f"视频 {video_id} 的评论需要获取或刷新...{log_pre}")
+                fetched_comments = get_comment(video_id, comment_limit=100)
+                video_info['comment_list'] = fetched_comments
+
+        except Exception as e:
+            error_info = f"严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
+            failure_details[video_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+    return failure_details, video_info_dict
+
+
+def update_video_info(video_info_dict, manager, failure_details, error_key='last_error'):
+    """
+    更新物料视频信息
+    :param video_info_dict:
+    :param manager:
+    :param failure_details:
+    :param error_key:
+    :return:
+    """
+    for video_id, detail in failure_details.items():
+        video_info = video_info_dict.get(video_id)
+        # 注释掉下面的一行代码就能够保存历史错误，而不至于覆盖
+        video_info[error_key] = ""
+        if video_info:
+            video_info[error_key] = detail.get('error_info', 'Unknown error')
+    manager.upsert_materials(video_info_dict.values())
+
+
+def gen_derive_videos(video_info_dict):
+    """
+    生成后续需要处理的派生视频，主要是静态去除以及降低分辨率后的视频
+    :param video_info_dict:
+    :return:
+    """
+    failure_details = {}
+    for video_id, video_info in video_info_dict.items():
+        try:
+            process_origin_video(video_id)
+        except Exception as e:
+            error_info = f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {str(e)}"
+            print(error_info)
+            failure_details[video_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+    return failure_details
+
+def gen_video_script(task_info, video_info_dict, manager):
+    """
+    生成多素材的方案
+    :param task_info:
+    :param video_info_dict:
+    :param manager:
+    :return:
+    """
+    task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
+    failure_details = {}
+    video_script_info = task_info.get('video_script_info', {})
+    if not video_script_info:
+        error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
+        if not error_info:
+            task_info['video_script_info'] = video_script_info
+            task_info['final_scene_info'] = final_scene_info
+            task_info['status'] = TaskStatus.PLAN_GENERATED
+        else:
+            failure_details[task_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            task_info["script_error"] = error_info
+        manager.upsert_tasks([task_info])
+    return failure_details
 
 
 def process_single_task(task_info, manager):
@@ -228,207 +379,49 @@ def process_single_task(task_info, manager):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
-    video_id_list = task_info.get('video_id_list', [])
-    task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
 
-    if not video_id_list:
-        print(f"任务 {task_id} 的 video_id_list 为空，直接标记为失败。")
-        task_info['status'] = TaskStatus.FAILED
-        task_info['failed_count'] = VIDEO_MAX_RETRY_TIMES + 1
-        task_info['last_error'] = "Empty video_id_list"
-        task_info['finished_time'] = time.time()
-        manager.upsert_tasks([task_info])
-        return
 
-    # 1. 批量获取所有需要的物料信息
-    video_info_list = manager.find_materials_by_ids(video_id_list)
-    video_info_dict = {video_info['video_id']: video_info for video_info in video_info_list}
-
-    materials_to_update = []
-    failure_details = {}  # 使用字典记录每个失败视频的详细原因
-    successful_video_ids = []
-
-    # 2. 循环处理每个视频，并在循环内部处理异常
-    for video_id in video_id_list:
-        try:
-            video_info = video_info_dict.get(video_id)
-
-            if not video_info:
-                print(f"严重错误: 视频 {video_id} 在物料库中不存在，已跳过。")
-                failure_details[video_id] = {
-                    "error_info": "Video info not found in database",
-                    "error_level": ERROR_STATUS.CRITICAL
-                }
-                continue
-
-            needs_db_update = False
-
-            # --- 修改点 1: 清理通用错误，将字段值设为 None ---
-            # 检查 'processing_error' 是否有旧值。如果有，则清空它并标记需要更新数据库。
-            if video_info.get('processing_error'):
-                video_info['processing_error'] = None
-                needs_db_update = True
-
-            # 准备路径和URL
-            video_path_info = build_video_paths(video_id)
-            origin_video_path = video_path_info['origin_video_path']
-            video_url = f"https://www.douyin.com/video/{video_id}"
-
-            # 步骤A: 保证视频文件存在，并清理相关的错误状态
-            if not is_valid_target_file_simple(origin_video_path):
-                print(f"视频 {video_id} 的原始文件不存在，准备下载...")
-                result = download_douyin_video_sync(video_url)
-
-                if not result:
-                    print(f"错误: 视频 {video_id} 下载失败。")
-                    video_info["download_error"] = VIDEO_ERROR.DOWNLOAD_FAILED
-                    failure_details[video_id] = {
-                        "error_info": "Download failed",
-                        "error_level": ERROR_STATUS.ERROR
-                    }
-                    materials_to_update.append(video_info)
-                    continue
-
-                # 下载成功
-                original_file_path, metadata = result
-                os.makedirs(os.path.dirname(origin_video_path), exist_ok=True)
-                os.replace(original_file_path, origin_video_path)
-                print(f"视频 {video_id} 下载并移动成功。")
-                video_info['metadata'] = metadata
-                needs_db_update = True
-
-                # --- 新增修改 2: 下载成功后，同样确保 download_error 字段为空 ---
-                if video_info.get('download_error'):
-                    video_info['download_error'] = None
-                    # needs_db_update 已经是 True, 无需重复设置
-            else:
-                # --- 修改点 3: 文件已存在，清理下载错误字段 ---
-                # 如果文件已存在，意味着下载是成功的，将任何历史 download_error 值设为 None。
-                if video_info.get('download_error'):
-                    print(f"视频 {video_id} 文件已存在，清理历史下载错误标记。")
-                    video_info['download_error'] = None
-                    needs_db_update = True
-
-            # 步骤B: 保证评论信息完整
-            # (这部分逻辑没有错误字段，保持不变)
-            comment_list = video_info.get('base_info', {}).get('comment_list', [])
-            if not comment_list or NEED_REFRESH_COMMENT:
-                print(f"视频 {video_id} 的评论需要获取或刷新...")
-                fetched_comments = get_comment(video_id, comment_limit=100)
-                if 'base_info' not in video_info: video_info['base_info'] = {}
-                video_info['base_info']['comment_list'] = fetched_comments
-                needs_db_update = True
-
-            successful_video_ids.append(video_id)
-            if needs_db_update:
-                materials_to_update.append(video_info)
-
-        except Exception as e:
-            print(f"严重错误: 处理视频 {video_id} 时发生未知异常: {e}")
-            failure_details[video_id] = {
-                "error_info": f"Unexpected error: {str(e)}",
-                "error_level": ERROR_STATUS.ERROR
-            }
-            if 'video_info' in locals() and video_info:
-                video_info['processing_error'] = str(e)  # 这里是设置错误，保持不变
-                materials_to_update.append(video_info)
-            continue
-
-    # 3. 批量更新物料信息
-    if materials_to_update:
-        unique_materials = {v['video_id']: v for v in materials_to_update}.values()
-        manager.upsert_materials(list(unique_materials))
-        print(f"任务 {task_id}: 批量更新了 {len(unique_materials)} 个物料信息。")
-
-    # 4. 根据处理结果更新任务状态 (这部分逻辑无需修改)
-    if not failure_details:
-        task_info['last_error'] = None
-    else:
-        error_msg = json.dumps(failure_details, ensure_ascii=False, indent=2)
-        print(f"任务 {task_id} 处理完成，但存在失败项:\n{error_msg}")
-        task_info['last_error'] = error_msg
-
-        if not successful_video_ids:
-            current_failures = task_info.get('failed_count', 0) + 1
-            task_info['failed_count'] = current_failures
-            task_info['status'] = TaskStatus.FAILED
-
-    task_info['finished_time'] = time.time()
-    # 完成数据拉取阶段，可以先保存一份数据
-    manager.upsert_tasks([task_info])
-
-    # 如果上一步出现过错误直接结束
+    # 准备好相应的视频数据
+    failure_details, video_info_dict = gen_video_info_dict(task_info, manager)
     if check_failure_details(failure_details):
-        return
+        return failure_details, video_info_dict
 
-    # 进行原始视频的加工，生成后续要处理的视频
-    for video_id in successful_video_ids:
-        try:
-            process_origin_video(video_id)
-        except Exception as e:
-            print(f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {e}")
-            failure_details[video_id] = {
-                "error_info": f"Error processing origin video: {str(e)}",
-                "error_level": ERROR_STATUS.ERROR
-            }
-            video_info = video_info_dict.get(video_id)
-            if video_info:
-                video_info['processing_error'] = str(e)
-                manager.upsert_materials([video_info])
-            continue
-
-    if not failure_details:
-        task_info['last_error'] = None
-    else:
-        error_msg = json.dumps(failure_details, ensure_ascii=False, indent=2)
-        print(f"任务 {task_id} 原始视频处理完成，但存在失败项:\n{error_msg}")
-        task_info['last_error'] = error_msg
-
-        if not successful_video_ids:
-            current_failures = task_info.get('failed_count', 0) + 1
-            task_info['failed_count'] = current_failures
-            task_info['status'] = TaskStatus.FAILED
-
-    manager.upsert_tasks([task_info])
-
-    # 如果上一步出现过错误直接结束
+    # 确保基础数据存在，比如视频文件，评论等
+    failure_details, video_info_dict = prepare_basic_video_info(video_info_dict)
+    update_video_info(video_info_dict, manager, failure_details, error_key='prepare_basic_video_error')
     if check_failure_details(failure_details):
-        return
+        return failure_details, video_info_dict
 
-    failure_details = gen_extra_info(task_info, video_info_dict, manager)
-
+    # 生成后续需要处理的派生视频，主要是静态去除以及降低分辨率后的视频
+    failure_details = gen_derive_videos(video_info_dict)
+    update_video_info(video_info_dict, manager, failure_details, error_key='gen_derive_error')
     if check_failure_details(failure_details):
-        return
+        return failure_details, video_info_dict
 
-
-    video_script_info = task_info.get('video_script_info', {})
-    error_info = ""
-    if not video_script_info:
-        error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
-        if not error_info:
-            task_info['video_script_info'] = video_script_info
-            task_info['final_scene_info'] = final_scene_info
-            task_info['status'] = TaskStatus.PLAN_GENERATED
-        else:
-            failure_details[video_id] = {
-                "error_info": error_info,
-                "error_level": ERROR_STATUS.ERROR
-            }
-            task_info["script_error"] = error_info
-        manager.upsert_tasks([task_info])
-
+    # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
+    failure_details = gen_extra_info(video_info_dict, manager)
     if check_failure_details(failure_details):
-        return
-    print(f"任务 {task_id} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
+        return failure_details, video_info_dict
+    print(f"任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
-    # 生成最终视频
+
+    # 生成新的视频脚本方案
+    failure_details = gen_video_script(task_info, video_info_dict, manager)
+    if check_failure_details(failure_details):
+        return failure_details, video_info_dict
+    print(f"任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+
+    # 根据方案生成最终视频
     failure_details = gen_video_by_script(task_info, video_info_dict)
     if check_failure_details(failure_details):
-        return
+        return failure_details, video_info_dict
+    print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    return failure_details, video_info_dict
 
 
-    print(f"任务 {task_id} 全部处理完成。\n")
 
 
 if __name__ == '__main__':

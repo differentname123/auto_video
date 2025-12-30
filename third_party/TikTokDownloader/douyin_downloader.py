@@ -253,7 +253,7 @@ def get_comment(video_id: str, comment_limit=200):
         # 下载图片 (前10个带图评论)
         text_list = asyncio.run(_download_comments_async(text_list, limit=10, video_id=video_id))
 
-        print(f"获取到 {len(text_list)} 条评论，耗时 {time.time() - start_time:.2f} 秒。")
+        print(f"{video_id} 获取到 {len(text_list)} 条评论，耗时 {time.time() - start_time:.2f} 秒。")
         return text_list
 
     except Exception as e:

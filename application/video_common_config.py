@@ -90,6 +90,7 @@ def build_video_paths(video_id):
     :return:
     """
     origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
+    low_origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin_low.mp4")  # 直接下载下来的原始视频，只进行了降分辨率和降帧率处理
     static_cut_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
                                          f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
     low_resolution_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
@@ -102,6 +103,7 @@ def build_video_paths(video_id):
                                          f"{video_id}/{video_id}_cover.mp4")  # 封面视频地址
     return {
         'origin_video_path': origin_video_path,
+        'low_origin_video_path': low_origin_video_path,
         'static_cut_video_path': static_cut_video_path,
         'low_resolution_video_path': low_resolution_video_path,
         'subtitle_box_path':subtitle_box_path,
