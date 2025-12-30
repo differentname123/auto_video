@@ -107,3 +107,16 @@ def build_video_paths(video_id):
         'subtitle_box_path':subtitle_box_path,
         'cover_video_path':cover_video_path
     }
+
+
+def check_failure_details(failure_details):
+    """
+    判断failure_details中错误等级是否有超过ERROR的
+    :param failure_details:
+    :return:
+    """
+    for video_id, detail in failure_details.items():
+        if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
+            print(f"检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
+            return True
+    return False

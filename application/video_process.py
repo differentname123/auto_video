@@ -11,9 +11,11 @@
         1.查询需要处理的任务
 """
 import os
+import shutil
 import time
 
-from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths
+from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths, ERROR_STATUS, \
+    check_failure_details
 from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle
@@ -40,68 +42,127 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
     merge_intervals_list = merge_intervals(duration_list)
     return merge_intervals_list
 
-def gen_subtitle_box_and_cover_subtitle(task_info, video_info_dict):
+
+
+
+
+def _process_single_video(video_id, video_info):
     """
-    生成遮挡作者字幕的视频
-    :param task_info:
-    :param video_info_dict:
-    :return:
+    处理单个视频的字幕遮挡逻辑
+    :return: 如果出错返回错误字典，成功返回 None
     """
+    log_pre = f"{video_id} 字幕遮挡逻辑 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    # 1. 准备路径和基本信息
+    paths = build_video_paths(video_id)
+    video_path = paths.get('static_cut_video_path')
+    cover_video_path = paths.get('cover_video_path')
+    subtitle_box_path = paths.get('subtitle_box_path')
+
+    if not os.path.exists(video_path):
+        return {"error_info": f"原视频文件不存在: {video_path}", "error_level": ERROR_STATUS.ERROR}
+
+    video_size = os.path.getsize(video_path)
+
+    # 2. 检查目标文件是否已存在且有效（跳过机制）
+    if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
+        print(f"已存在遮挡字幕的视频，跳过: {cover_video_path} {log_pre}")
+        return None
+
+    # 3. 获取视频时长
+    try:
+        video_duration = probe_duration(video_path)
+        video_duration_ms = int(video_duration * 1000)
+    except Exception as e:
+        error_msg = f"获取视频时长失败: {e} {log_pre}"
+        print(error_msg)
+        return {"error_info": error_msg, "error_level": ERROR_STATUS.ERROR}
+
+    # 4. 计算作者说话时间段
+    owner_asr_info_list = video_info.get('owner_asr_info')
+    merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
+
+    # 5. Case: 如果没有作者说话，直接复制原视频
+    if not merge_intervals_list:
+        print(f"视频中无作者说话时间段，直接复制文件: {video_path} {log_pre}")
+        shutil.copy2(video_path, cover_video_path)
+        return None
+
+    # 准备时间数据
+    # merged_timerange_list: 用于传给检测算法 [{'startTime': '00:01', 'endTime': '00:05'}]
+    # time_ranges: 用于传给ffmpeg处理 [(1.0, 5.0)]
+    merged_timerange_list = [
+        {"startTime": ms_to_time(start), "endTime": ms_to_time(end)}
+        for start, end in merge_intervals_list
+    ]
+    time_ranges = [(start / 1000, end / 1000) for start, end in merge_intervals_list]
+
+    # 6. 字幕区域检测（如果缓存不存在则计算）
+    if not is_valid_target_file_simple(subtitle_box_path, 10):
+        box_dir = os.path.dirname(subtitle_box_path)
+        detected_box = find_overall_subtitle_box_target_number(
+            video_path, merged_timerange_list, output_dir=box_dir
+        )
+        save_json(subtitle_box_path, detected_box)
+
+    # 7. 读取并调整字幕区域坐标
+    raw_box = read_json(subtitle_box_path)
+    top_left, bottom_right, _, _ = adjust_subtitle_box(video_path, raw_box)
+
+    # 8. 执行遮挡操作
+    print(f"开始生成遮挡字幕视频: {cover_video_path} | Box: {raw_box} {log_pre}")
+    start_time = time.time()
+
+    cover_subtitle(video_path, cover_video_path, top_left, bottom_right, time_ranges=time_ranges)
+
+    elapsed_time = time.time() - start_time
+    print(f"完成生成，耗时: {elapsed_time:.2f} 秒 {log_pre}")
+
+    # 9. 结果校验
+    if not is_valid_target_file_simple(cover_video_path, video_size * 0.1):
+        current_size_mb = os.path.getsize(cover_video_path) / (1024 * 1024) if os.path.exists(cover_video_path) else 0
+        original_size_mb = video_size / (1024 * 1024)
+
+        error_info = (f"生成失败: 文件大小异常。当前: {current_size_mb:.2f}Mb, "
+                      f"原始: {original_size_mb:.2f}Mb (需大于原始10%)")
+
+        return {
+            "error_info": error_info,
+            "error_level": ERROR_STATUS.ERROR
+        }
+
+    return None
+
+
+
+
+
+def gen_subtitle_box_and_cover_subtitle(video_info_dict):
+    """
+    批量生成遮挡作者字幕的视频
+    :param video_info_dict: 视频信息字典 {video_id: video_info}
+    :param manager: 数据库管理器
+    :return: 失败详情字典 failure_details
+    """
+    failure_details = {}
+
     for video_id, video_info in video_info_dict.items():
-        all_path = build_video_paths(video_id)
-        video_path = all_path.get('static_cut_video_path')
-        cover_video_path = all_path.get('cover_video_path')
-        subtitle_box_path = all_path.get('subtitle_box_path')
-        dir_path = os.path.dirname(subtitle_box_path)
-
         try:
-            video_duration = probe_duration(video_path)
-            video_duration_ms = int(video_duration * 1000)
+            # 处理单个视频，返回错误信息（如果有）
+            error_result = _process_single_video(video_id, video_info)
+
+            if error_result:
+                failure_details[video_id] = error_result
+
+
         except Exception as e:
-            print(f"获取视频时长失败: {e}")
-            return None
-        owner_asr_info_list = video_info.get('owner_asr_info')
-        merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
-        merged_timerange_list = []
-        time_ranges = []
-        for start, end in merge_intervals_list:
-            merged_timerange_list.append(
-                {
-                    "startTime": ms_to_time(start),
-                    "endTime": ms_to_time(end)
-                }
-            )
-            time_ranges.append((start / 1000, end / 1000))
-        if not merge_intervals_list:
-            print(f"视频中无作者说话时间段，跳过遮挡字幕: {video_path}")
-            continue
-        if not is_valid_target_file_simple(subtitle_box_path, 10):
-            final_box = find_overall_subtitle_box_target_number(video_path, merged_timerange_list, output_dir=dir_path)
-            save_json(subtitle_box_path, final_box)
+            # 捕获未预料的异常，防止整个任务中断
+            error_msg = f"处理视频 {video_id} 时发生未知错误: {str(e)}"
+            failure_details[video_id] = {
+                "error_info": error_msg,
+                "error_level": ERROR_STATUS.ERROR
+            }
 
-        final_box = read_json(subtitle_box_path)
-
-        top_left, bottom_right, vid_w, vid_h = adjust_subtitle_box(video_path, final_box)
-
-        video_size = os.path.getsize(video_path)
-
-        if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
-            print(f"已存在遮挡字幕的视频: {cover_video_path}")
-            continue
-
-        start_time = time.time()
-        print(f"开始生成遮挡字幕视频: {cover_video_path} final_box: {final_box}")
-        cover_subtitle(video_path, cover_video_path, top_left, bottom_right, time_ranges=time_ranges)
-        if not is_valid_target_file_simple(cover_video_path, video_size * 0.1):
-            raise ValueError(
-                f"生成遮挡字幕视频失败: {cover_video_path} 文件大小Mb为 {os.path.getsize(cover_video_path) / (1024 * 1024):.2f}，小于原始文件的10% 原始文件大小Mb为 {video_size / (1024 * 1024):.2f}")
-        print(f"完成生成遮挡字幕视频: {cover_video_path} 耗时: {time.time() - start_time:.2f} 秒")
-
-
-
-
-
-
+    return failure_details
 
 
 
@@ -113,7 +174,9 @@ def gen_video_by_script(task_info, video_info_dict):
     :return:
     """
 
-    gen_subtitle_box_and_cover_subtitle(task_info, video_info_dict)
+    failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
+    if check_failure_details(failure_details):
+        return failure_details
 
     #
     #

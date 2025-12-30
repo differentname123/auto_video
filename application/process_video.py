@@ -20,7 +20,8 @@ from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_l
 from application.video_process import gen_video_by_script
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
-    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths
+    _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths, \
+    check_failure_details
 
 _configure_third_party_paths()
 
@@ -67,7 +68,7 @@ def run():
     manager = MongoManager(mongo_base_instance)
     for task_info in tasks_to_process:
         try:
-            process_single_task(task_info, manager)
+            failure_details = process_single_task(task_info, manager)
         except Exception as e:
             print(f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {e}")
             continue
@@ -217,17 +218,7 @@ def gen_extra_info(task_info, video_info_dict, manager):
     return failure_details
 
 
-def check_failure_details(failure_details):
-    """
-    判断failure_details中错误等级是否有超过ERROR的
-    :param failure_details:
-    :return:
-    """
-    for video_id, detail in failure_details.items():
-        if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
-            print(f"检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
-            return True
-    return False
+
 
 
 
@@ -430,7 +421,12 @@ def process_single_task(task_info, manager):
         return
     print(f"任务 {task_id} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} {error_info}")
 
-    gen_video_by_script(task_info, video_info_dict)
+
+    # 生成最终视频
+    failure_details = gen_video_by_script(task_info, video_info_dict)
+    if check_failure_details(failure_details):
+        return
+
 
     print(f"任务 {task_id} 全部处理完成。\n")
 
