@@ -75,7 +75,7 @@ def run():
             traceback.print_exc()
             error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
             print(error_info)
-            failure_details[task_info.get('_id', 'N/A')] = {
+            failure_details[str(task_info.get('_id', 'N/A'))] = {
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.CRITICAL
             }

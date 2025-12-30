@@ -8,6 +8,7 @@
 :description:
     
 """
+import pathlib
 import random
 import shlex
 import tempfile
@@ -26,7 +27,8 @@ from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import cv2
 import numpy as np
 
-from utils.common_utils import is_valid_target_file_simple, read_json, save_json, time_to_ms
+from utils.common_utils import is_valid_target_file_simple, read_json, save_json, time_to_ms, ms_to_time
+from utils.edge_tts_utils import generate_audio_and_get_duration_sync
 from utils.split_scenes import split_scenes_json
 
 
@@ -1506,3 +1508,653 @@ def add_text_overlays_to_video(
         print(f"\n✅ 视频处理成功！输出文件: {output_video_path}")
     except subprocess.CalledProcessError as e:
         print("\n❌ FFmpeg 执行失败! 错误信息:\n", e.stderr)
+
+
+
+def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fixed_rect=None, voice_info=None):
+    """
+    生成结尾视频（测试用），结尾语为txt
+    """
+    voice_name = "zh-CN-XiaoxiaoNeural"
+    rate = "+30%"
+    pitch = '+30Hz'
+    if voice_info is not None:
+        voice_name = voice_info.get('voice_name', voice_name)
+        rate = voice_info.get('rate', "+30%")
+        pitch = voice_info.get('pitch', '+30Hz')
+    output_path = pathlib.Path(output_path)
+    audio_path = output_path.with_suffix(".mp3")
+    duration = generate_audio_and_get_duration_sync(
+        text=text,
+        output_filename=str(audio_path),
+        voice_name=voice_name,
+        trim_silence=False,
+        rate=rate,
+        pitch=pitch,
+    )
+    video_duration = probe_duration(origin_video_path)
+    segments_info = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(video_duration * 1000),
+        'outputPath': str(audio_path),
+        'trimmedDuration': duration,
+    }]
+    with_audio_path = output_path.with_name(output_path.stem + "_with_audio.mp4")
+    redub_video_with_ffmpeg(video_path=origin_video_path, segments_info=segments_info, output_path=str(with_audio_path),keep_original_audio=keep_original_audio)
+
+    # 4. 添加字幕
+    subtitle_data = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(duration * 1000),
+        'optimizedText': text
+    }]
+    add_subtitles_to_video(
+        video_path=str(with_audio_path),
+        subtitles_info=subtitle_data,
+        output_path=str(output_path),
+        font_size=70,
+        bottom_margin=30,
+        fixed_rect=fixed_rect
+    )
+
+
+    if os.path.exists(audio_path):
+        os.remove(audio_path)
+    if os.path.exists(with_audio_path):
+        os.remove(with_audio_path)
+    return str(output_path.resolve())
+
+
+
+
+def redub_video_with_ffmpeg(video_path: str,
+                            segments_info: list,
+                            output_path: str = "final_video_ffmpeg.mp4",
+                            keep_original_audio: bool = False) -> str:
+    """
+    使用 FFmpeg 直接为视频重新配音。
+    如果新音频比对应的视频片段长，则慢放视频以匹配音频时长。
+    修复点：避免混音后的音量自然变小（禁用 amix 归一化 + 限幅防削波）。
+
+    :param video_path: 原始视频文件的路径。
+    :param segments_info: 一个包含片段信息的列表，每个元素至少包括：
+                          - 'startTime' (如 "00:00:05.000")
+                          - 'endTime'   (如 "00:00:10.000")
+                          - 'outputPath' (对应音频文件路径)
+                          - 'trimmedDuration' (新音频时长，秒) 可选；缺失时将尝试用 ffprobe 推断
+    :param output_path: 输出的最终视频文件路径。
+    :param keep_original_audio: 是否保留原始音频并与新音频混合。
+                                False (默认) - 替换原始音频。
+                                True - 混合原始音频和新音频（不归一化，不降音量）。
+    :return: 输出视频的路径。
+    """
+    start_time = time.time()
+    # ---------- 内部工具函数 ----------
+    def _time_str_to_seconds(ts: str) -> float:
+        """
+        支持 "HH:MM:SS", "HH:MM:SS.mmm" 等格式。
+        """
+        if not ts:
+            return 0.0
+        ts = ts.strip()
+        neg = ts.startswith("-")
+        if neg:
+            ts = ts[1:]
+        parts = ts.split(":")
+        parts = [float(p) for p in parts]
+        while len(parts) < 3:
+            parts.insert(0, 0.0)
+        h, m, s = parts[-3], parts[-2], parts[-1]
+        val = h * 3600 + m * 60 + s
+        return -val if neg else val
+
+    def _probe_has_audio(path: str) -> bool:
+        """
+        通过 ffprobe 判断是否存在音频流。
+        """
+        if not shutil.which("ffprobe"):
+            return True
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-select_streams", "a",
+                "-show_entries", "stream=index",
+                "-of", "csv=p=0",
+                path
+            ]
+            out = subprocess.run(cmd, check=False, capture_output=True, text=True).stdout.strip()
+            return len(out) > 0
+        except Exception:
+            return True
+
+    def _probe_duration_seconds(path: str) -> float:
+        """
+        用 ffprobe 获取媒体总时长（秒），失败则返回 0。
+        """
+        if not shutil.which("ffprobe"):
+            return 0.0
+        try:
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                path
+            ]
+            out = subprocess.run(cmd, check=False, capture_output=True, text=True).stdout.strip()
+            return float(out) if out else 0.0
+        except Exception:
+            return 0.0
+
+    def build_atempo_filter(tempo: float) -> str:
+        """
+        构建安全的 atempo 滤镜链，支持任意正 tempo 值。
+        FFmpeg 的 atempo 范围是 [0.5, 2.0]，超出需链式组合。
+        """
+        if abs(tempo - 1.0) < 1e-6:
+            return "anull"
+        filters = []
+        t = tempo
+        # 处理小于 0.5 的情况
+        while t < 0.5:
+            filters.append("atempo=0.5")
+            t *= 2.0
+        # 处理大于 2.0 的情况
+        while t > 2.0:
+            filters.append("atempo=2.0")
+            t /= 2.0
+        # 剩余部分
+        if abs(t - 1.0) > 1e-6:
+            filters.append(f"atempo={t:.6f}")
+        return ",".join(filters)
+
+    # ---------- 依赖与输入检查 ----------
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError("FFmpeg not found. Please install FFmpeg and ensure it is in your system's PATH.")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"视频文件未找到: {video_path}")
+
+    source_has_audio = _probe_has_audio(video_path)
+
+    # ---------- 处理每个片段 ----------
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_files_list = []
+        concat_file_path = os.path.join(temp_dir, "file_list.txt")
+
+        for i, segment in enumerate(segments_info):
+            segment_id = segment.get('id', i + 1)
+            start_time_str = segment['startTime']
+            end_time_str = segment['endTime']
+            audio_path = segment['outputPath']
+
+            if not os.path.exists(audio_path):
+                print(f"警告: 音频文件未找到 {audio_path}，跳过此片段。")
+                continue
+
+            original_duration = max(0.000001, _time_str_to_seconds(end_time_str) - _time_str_to_seconds(start_time_str))
+            new_audio_duration = float(segment.get('trimmedDuration') or 0.0)
+            if new_audio_duration <= 0.0:
+                new_audio_duration = _probe_duration_seconds(audio_path) or original_duration
+
+            temp_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
+            temp_files_list.append(temp_output_path)
+
+            speed_multiplier = 1.0
+            if new_audio_duration > original_duration and original_duration > 0:
+                speed_multiplier = new_audio_duration / original_duration
+
+
+            # ---------- 构建滤镜与映射 ----------
+            if keep_original_audio and source_has_audio:
+                # 需要混合原始音频和新音频
+                audio_tempo = 1.0 / speed_multiplier
+                atempo_filter = build_atempo_filter(audio_tempo)
+                filter_complex = (
+                    f"[0:v]setpts={speed_multiplier:.6f}*PTS[v];"
+                    f"[0:a]{atempo_filter},aformat=sample_fmts=fltp:channel_layouts=stereo[a0];"
+                    f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a1];"
+                    f"[a0][a1]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.97[a]"
+                )
+                map_args = ["-map", "[v]", "-map", "[a]"]
+                print("模式: 混合新旧音频（原始音频已同步变速）")
+            else:
+                # 替换模式：直接使用新音频
+                filter_complex = (
+                    f"[0:v]setpts={speed_multiplier:.6f}*PTS[v];"
+                    f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,alimiter=limit=0.97[a]"
+                )
+                map_args = ["-map", "[v]", "-map", "[a]"]
+                if keep_original_audio and not source_has_audio:
+                    print("模式: 源视频无音轨，使用新音频替换。")
+
+            base_cmd = [
+                "ffmpeg", "-y", "-loglevel", "error",
+                "-ss", start_time_str, "-to", end_time_str,
+                "-i", video_path, "-i", audio_path,
+                "-filter_complex", filter_complex,
+            ]
+
+            encoding_cmd = [
+                "-c:v", "libx264", "-preset", "veryfast",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", temp_output_path
+            ]
+
+            cmd = base_cmd + map_args + encoding_cmd
+
+            try:
+                subprocess.run(
+                    cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding='utf-8',
+                    errors='ignore',
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"处理片段 {segment_id} 时 FFmpeg 发生错误：")
+                print(f"FFmpeg Stderr:\n{e.stderr}")
+                raise
+
+        if not temp_files_list:
+            print("没有可处理的片段，无法生成最终视频。")
+            return ""
+
+        # ---------- 拼接片段 ----------
+        with open(concat_file_path, 'w', encoding='utf-8') as f:
+            for file_path in temp_files_list:
+                safe_path = file_path.replace('\\', '/')
+                f.write(f"file '{safe_path}'\n")
+
+        concat_cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+            "-i", concat_file_path, "-c", "copy", output_path
+        ]
+
+        try:
+            subprocess.run(
+                concat_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore',
+            )
+        except subprocess.CalledProcessError as e:
+            print("拼接视频时 FFmpeg 发生错误：")
+            print(f"FFmpeg Stderr:\n{e.stderr}")
+            raise
+    print(f"进行音频匹配画面：原片段时长: {original_duration:.3f}s, 新音频时长: {new_audio_duration:.3f}s 视频速度调整为: {1/speed_multiplier:.3f}x 耗时: {time.time() - start_time:.2f}s")
+
+    return output_path
+
+
+def add_subtitles_to_video(
+        video_path: str,
+        subtitles_info: list,
+        output_path: str,
+        font_size: int = 48,
+        font_path='C:/Windows/Fonts/msyhbd.ttc',
+        font_color: str = 'white',
+        box_color: str = 'black@0.5',
+        bottom_margin: int = 50,
+        fixed_rect=None
+) -> None:
+    """
+    将字幕信息“烧录”到视频中，并自动分割过长的字幕行，
+    并在每条字幕出现的时段内，先绘制一个固定大小的矩形背景。
+
+    :param video_path: 输入视频的路径。
+    :param subtitles_info: 原始字幕信息列表。
+    :param output_path: 输出视频的路径。
+    :param font_path: 字体文件路径。
+    :param font_size: 字体大小，默认 48。
+    :param font_color: 字体颜色，默认白色。
+    :param box_color: 半透明背景色，默认黑@0.5。
+    :param bottom_margin: 距离底部的像素偏移，默认 50。
+    :param fixed_rect: 固定矩形区域 [[x1,y1],[x2,y2]]。如果为 None，则自动计算。
+    """
+    current_start_time = time.time()
+    if not os.path.exists(font_path):
+        raise FileNotFoundError(f"字体文件未找到: {font_path}")
+
+    # ------------------- [ 核心修改开始 ] -------------------
+
+    # 1. 获取视频尺寸以计算最大字幕宽度和矩形位置
+    try:
+        # [调整] 同时获取视频宽度和高度
+        video_width, video_height = get_video_dimensions(video_path)
+        max_subtitle_width = video_width * 0.9
+        # print(f"视频尺寸: {video_width}x{video_height}px, 字幕最大允许宽度: {max_subtitle_width:.0f}px")
+    except (ValueError, FileNotFoundError) as e:
+        print(f"警告: 无法获取视频尺寸，将不执行字幕分割和矩形自动计算。错误: {e}")
+        processed_subtitles = subtitles_info
+        # 如果无法获取尺寸且需要自动计算，则必须报错退出
+        if fixed_rect is None:
+            raise ValueError("无法获取视频尺寸，无法自动计算矩形区域。请手动提供 'fixed_rect' 参数。") from e
+    else:
+        # 2. 加载字体用于计算文本宽度
+        # 注意：如果 fixed_rect 提供了，font_size 可能会被覆盖，但仍需字体对象用于分割
+        effective_font_size = font_size
+        if fixed_rect is not None:
+            top_left, bottom_right = fixed_rect
+            rect_height = bottom_right[1] - top_left[1]
+            effective_font_size = int(rect_height * 0.8)
+            # 确保字体大小至少为 1
+            effective_font_size = max(1, effective_font_size)
+
+        try:
+            font = ImageFont.truetype(font_path, effective_font_size)
+        except IOError:
+            raise FileNotFoundError(f"无法加载字体文件，请检查路径和文件格式: {font_path}")
+
+        # 3. 预处理字幕，分割过长行
+        # print("正在预处理字幕，检查并分割过长行...")
+        processed_subtitles = _process_and_split_subtitles(
+            subtitles_info,
+            font,
+            max_subtitle_width
+        )
+        # print(f"字幕预处理完成。原始字幕数: {len(subtitles_info)}, 处理后字幕数: {len(processed_subtitles)}")
+
+        # [调整] 如果 fixed_rect 未指定，则在此处自动计算
+        if fixed_rect is None:
+            # print("fixed_rect 未提供，开始自动计算矩形区域...")
+            if not processed_subtitles:
+                print("警告：没有字幕信息，无法计算矩形。将不绘制背景。")
+                fixed_rect = [[0, 0], [0, 0]]  # 创建一个0尺寸的矩形，避免后续代码出错
+            else:
+                max_text_w, max_text_h = 0, 0
+                for sub in processed_subtitles:
+                    # 使用 getbbox 获取包含多行文本的精确边界框
+                    bbox = font.getbbox(sub['optimizedText'])
+                    text_w = bbox[2] - bbox[0]
+                    text_h = bbox[3] - bbox[1]
+                    if text_w > max_text_w:
+                        max_text_w = text_w
+                    if text_h > max_text_h:
+                        max_text_h = text_h
+
+                # print(f"计算出的最大字幕尺寸: {max_text_w:.0f}x{max_text_h:.0f}px")
+
+                # 为矩形添加一些内边距（padding）
+                padding_x = effective_font_size  # 水平方向使用一个字体大小作为边距
+                padding_y = effective_font_size // 2  # 垂直方向使用半个字体大小作为边距
+                max_text_w = max_subtitle_width
+                rect_w = max_text_w + padding_x
+                rect_h = max_text_h + padding_y
+
+                # 计算矩形坐标
+                # 水平居中
+                rect_x1 = (video_width - rect_w) / 2
+                # 垂直位置与字幕文本对齐
+                rect_y1 = video_height - bottom_margin - max_text_h - (padding_y / 2)
+
+                rect_x2 = rect_x1 + rect_w
+                rect_y2 = rect_y1 + rect_h
+
+                fixed_rect = [[int(rect_x1), int(rect_y1)], [int(rect_x2), int(rect_y2)]]
+                # print(f"自动计算的矩形区域为: {fixed_rect}")
+
+    # ------------------- [ 核心修改结束 ] -------------------
+
+    # 为 ffmpeg 的滤镜语法格式化字体路径
+    formatted_font_path = font_path.replace('\\', '/')
+    if os.name == 'nt':
+        formatted_font_path = formatted_font_path.replace(':', '\\:')
+
+    # 计算固定矩形的位置和尺寸 (现在 fixed_rect 必定有值)
+    x1, y1 = fixed_rect[0]
+    x2, y2 = fixed_rect[1]
+    rect_w = x2 - x1
+    rect_h = y2 - y1
+
+    # 如果 fixed_rect 被提供，重新计算 font_size 用于 drawtext（与上面一致）
+    if fixed_rect is not None:
+        effective_font_size = int(rect_h * 0.8)
+        effective_font_size = max(1, effective_font_size)
+    else:
+        effective_font_size = font_size
+
+    filters = []
+    # 只有当矩形有实际大小时才添加绘制指令
+    if rect_w > 0 and rect_h > 0:
+        for sub in processed_subtitles:
+            start_time = _parse_subtitle_time(sub['startTime'])
+            end_time = _parse_subtitle_time(sub['endTime'])
+
+            # 1) 先画固定大小的矩形
+            drawbox = (
+                f"drawbox="
+                f"x={x1}:y={y1}:w={rect_w}:h={rect_h}:"
+                f"color={box_color}:t=fill:"
+                f"enable='between(t,{start_time},{end_time})'"
+            )
+            filters.append(drawbox)
+
+    # 总是绘制字幕文本
+    for sub in processed_subtitles:
+        start_time = _parse_subtitle_time(sub['startTime'])
+        end_time = _parse_subtitle_time(sub['endTime'])
+        text = _escape_ffmpeg_text(sub['optimizedText'])
+
+        if fixed_rect is not None:
+            # 文字在 fixed_rect 内水平垂直居中
+            text_x_expr = f"x=({x1}+{x2})/2 - text_w/2"
+            text_y_expr = f"y=({y1}+{y2})/2 - text_h/2"
+        else:
+            # 原有逻辑：居中 + 底部偏移
+            text_x_expr = "x=(w-text_w)/2"
+            text_y_expr = f"y=h-text_h-{bottom_margin}"
+
+        # 2) 再画字幕文字
+        drawtext = (
+            f"drawtext="
+            f"fontfile='{formatted_font_path}':"
+            f"text='{text}':"
+            f"fontsize={effective_font_size}:"
+            f"fontcolor={font_color}:"
+            f"{text_x_expr}:"
+            f"{text_y_expr}:"
+            f"box=0:"
+            f"enable='between(t,{start_time},{end_time})'"
+        )
+        filters.append(drawtext)
+
+    if not filters:
+        print("没有可烧录的字幕，将直接复制视频。")
+        import shutil
+        shutil.copy(video_path, output_path)
+        return
+
+    vf_arg = ",".join(filters)
+
+    # ... 后续的 ffmpeg 调用代码保持不变 ...
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_filter_file:
+        temp_filter_file.write(vf_arg)
+        filter_script_path = temp_filter_file.name
+
+    formatted_filter_path = filter_script_path.replace('\\', '/')
+
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", video_path,
+        "-filter_complex_script", formatted_filter_path,
+        "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-c:a", "copy",
+        output_path
+    ]
+
+    try:
+        # print("正在为视频添加字幕和矩形背景...")
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+        print(f"字幕添加成功: 已将带字幕的视频保存至: {output_path} 耗时: {time.time() - current_start_time:.2f} 秒")
+    except FileNotFoundError:
+        print("[错误] ffmpeg 未安装或未在系统 PATH 中。请先安装 ffmpeg。")
+        raise
+    except subprocess.CalledProcessError as e:
+        print(f"[错误] ffmpeg 执行失败。返回码: {e.returncode}")
+        print(f"FFMPEG 错误输出:\n{e.stderr}")
+        print(f"滤镜脚本内容保存在: {filter_script_path}")
+        raise
+    finally:
+        if os.path.exists(filter_script_path):
+            os.remove(filter_script_path)
+
+
+def get_video_dimensions(video_path: str) -> (int, int):
+    """
+    使用 ffprobe 获取视频的宽度和高度。
+    此版本确保 video_path 被正确传递，并提供详细的错误处理。
+    """
+    # 检查文件是否存在，提前给出更友好的提示
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"视频文件未找到，请检查路径: {video_path}")
+
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height",
+        "-of", "json",
+        video_path  # <-- 修正：将 video_path 作为命令的一部分
+    ]
+
+    try:
+        # 使用 check=True, ffprobe 失败时会抛出 CalledProcessError
+        result = subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        data = json.loads(result.stdout)
+
+        # 健壮性检查：确保返回的 JSON 结构符合预期
+        if "streams" in data and len(data["streams"]) > 0:
+            stream = data["streams"][0]
+            if "width" in stream and "height" in stream:
+                return stream["width"], stream["height"]
+
+        # 如果 JSON 结构不符
+        raise ValueError("在 ffprobe 的输出中未找到有效的视频流信息。")
+
+    except FileNotFoundError:
+        # 如果 ffprobe 命令本身就找不到
+        print("错误: ffprobe 命令未找到。请确保 ffmpeg (及 ffprobe) 已安装并在系统 PATH 中。")
+        raise
+    except subprocess.CalledProcessError as e:
+        # 捕获 ffprobe 执行失败的错误，并打印其 stderr
+        print(f"ffprobe 执行失败。返回码: {e.returncode}")
+        # ffprobe 的错误信息通常在 stderr 中，这对于调试至关重要
+        print(f"ffprobe 的原始错误输出:\n---\n{e.stderr.strip()}\n---")
+        raise ValueError(f"无法从视频 {video_path} 中解析出尺寸。")
+    except json.JSONDecodeError:
+        # 如果 ffprobe 输出的不是有效的 json
+        print(f"ffprobe 输出了非预期的内容，无法解析为JSON。输出内容: {result.stdout}")
+        raise ValueError(f"无法解析来自 ffprobe 的视频尺寸信息。")
+
+
+def _parse_subtitle_time(time_str: str) -> float:
+    """
+    将各种格式的时间字符串统一转换为秒 (float)。
+    这个函数现在是 time_to_ms 的一个包装器，以保证健壮性和一致性。
+    """
+    # 1. 调用我们已经写好的、非常健壮的 time_to_ms 函数
+    milliseconds = time_to_ms(time_str)
+
+    # 2. 将毫秒转换为秒 (float)，以匹配原始函数的返回值类型
+    return milliseconds / 1000.0
+
+
+def _escape_ffmpeg_text(text: str) -> str:
+    """
+    为ffmpeg的drawtext滤镜转义特殊字符。
+    """
+    # 转义 \ ' % :
+    # 单引号 ' 替换为视觉上相似的 ’，避免破坏滤镜语法
+    return text.replace('\\', '\\\\').replace("'", "’").replace('%', r'\%').replace(':', r'\:')
+
+
+def _process_and_split_subtitles(
+        subtitles_info,
+        font: ImageFont.FreeTypeFont,
+        max_width: int
+):
+    """
+    预处理字幕列表，将过长的字幕分割成多段，直到每段都不超过最大宽度 max_width。
+    """
+    processed_subs = []
+    split_chars = ['，', '。', '？', '！', '；', ',', '.', '?', '!', ';']
+
+    for sub in subtitles_info:
+        # 队列：存放 (startTime_str, endTime_str, text) 待处理
+        segments_to_process = [(sub['startTime'], sub['endTime'], sub['optimizedText'])]
+
+        while segments_to_process:
+            start_str, end_str, text = segments_to_process.pop(0)
+            # 计算渲染宽度
+            try:
+                text_width = font.getlength(text)
+            except AttributeError:
+                text_width = font.getsize(text)[0]
+
+            # 如果宽度合格，直接输出
+            if text_width <= max_width:
+                processed_subs.append({
+                    'startTime': start_str,
+                    'endTime': end_str,
+                    'optimizedText': text
+                })
+                continue  # 处理下一个队列项
+
+            # 否则需要拆分
+            t_start = _parse_subtitle_time(start_str)
+            t_end = _parse_subtitle_time(end_str)
+            duration = t_end - t_start
+            if duration <= 0:
+                # 畸形时间区间，跳过
+                continue
+
+            # --- 1. 找标点做最佳拆分点 ---
+            best_split = -1
+            min_offset = float('inf')
+            for ch in split_chars:
+                idx = 0
+                while True:
+                    pos = text.find(ch, idx)
+                    if pos == -1:
+                        break
+                    # 考虑标点后面作为拆点
+                    offset = abs(pos + 1 - len(text) / 2)
+                    if offset < min_offset:
+                        min_offset = offset
+                        best_split = pos + 1
+                    idx = pos + 1
+
+            # --- 2. 如果没有标点就硬拆中间 ---
+            if best_split == -1:
+                best_split = len(text) // 2
+
+            # 切成两段，去除首尾空白
+            part1 = text[:best_split].strip()
+            part2 = text[best_split:].strip()
+
+            # 特殊情况：如果某段为空，就强制中点拆分一次
+            if not part1 or not part2:
+                mid = len(text) // 2
+                part1 = text[:mid].strip()
+                part2 = text[mid:].strip()
+
+            # --- 3. 按字符比例分配时间 ---
+            ratio1 = len(part1) / len(text)
+            split_time_sec = t_start + duration * ratio1
+            split_time_str = _format_time_for_ffmpeg(split_time_sec)
+
+            # **改动点**：不再直接输出 part1，而是把两段都入队再检测
+            segments_to_process.append((start_str, split_time_str, part1))
+            segments_to_process.append((split_time_str, end_str, part2))
+
+        # end while
+
+    # end for
+    return processed_subs
