@@ -598,10 +598,10 @@ def find_overall_subtitle_box_target_number(
 
     detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]
 
-    print(f"[阶段 2] 检测完成。共检测到 {len(detected_boxes)} 个字幕框。")
+    print(f"[阶段 2] 检测完成。共检测到 {len(detected_boxes)} 个字幕框。{video_path}")
 
     if not detected_boxes:
-        print("未找到任何字幕框。")
+        print(f"未找到任何字幕框。{video_path}")
         return None
 
 

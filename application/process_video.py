@@ -66,7 +66,11 @@ def run():
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     for task_info in tasks_to_process:
-        process_single_task(task_info, manager)
+        try:
+            process_single_task(task_info, manager)
+        except Exception as e:
+            print(f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {e}")
+            continue
 
 def process_origin_video(video_id):
     """
@@ -174,9 +178,9 @@ def gen_extra_info(task_info, video_info_dict, manager):
 
 
 
-        owner_asr_info = video_info.get('owner_asr_info', {})
+        owner_asr_info = video_info.get('owner_asr_info', None)
         is_contains_author_voice = video_info.get('extra_info', {}).get('is_contains_author_voice', True)
-        if is_contains_author_voice and not owner_asr_info:
+        if is_contains_author_voice and owner_asr_info is None:
             error_info, owner_asr_info = gen_owner_asr_by_llm(video_path, video_info)
             if not error_info:
                 video_info['owner_asr_info'] = owner_asr_info
