@@ -2204,6 +2204,7 @@ def text_image_to_video_with_subtitles(
         rate = voice_info.get('rate', "+30%")
         pitch = voice_info.get('pitch', '+30Hz')
 
+    min_size = min(resolution)
 
 
     if not os.path.exists(image_path):
@@ -2253,14 +2254,14 @@ def text_image_to_video_with_subtitles(
         video_path=str(audio_video_path),
         subtitles_info=subtitle_data,
         output_path=str(subtitle_video_path),
-        font_size=70,
-        bottom_margin=30
+        font_size=70 / 1000 * min_size,
+        bottom_margin=30 / 1000 * min_size
     )
 
     # 5. 如果有简略文案，加第二层字幕
     if short_text and len(text) > 30:
         subtitle_data = [{
-            'startTime': ms_to_time(duration * 500),
+            'startTime': ms_to_time(duration * 0),
             'endTime': ms_to_time(duration * 1000),
             'optimizedText': short_text
         }]
@@ -2269,8 +2270,8 @@ def text_image_to_video_with_subtitles(
             subtitles_info=subtitle_data,
             output_path=str(output_path),
             font_color='#FFD700',
-            font_size=80,
-            bottom_margin=1000
+            font_size=80/1000*min_size,
+            bottom_margin=min_size
         )
     else:
         shutil.copy(str(subtitle_video_path), str(output_path))

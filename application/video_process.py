@@ -524,7 +524,7 @@ def gen_transition_video(video_path, split_scene_list, transition_text, voice_in
     :return:
     """
     base_dir = os.path.dirname(video_path)
-    image_time = split_scene_list[0][0]
+    image_time = split_scene_list[0][0] + 20
     image_time_str = ms_to_time(image_time)
     image_path = os.path.join(base_dir, 'transition', f"{image_time}.jpg")
     os.makedirs(os.path.dirname(image_path), exist_ok=True)
