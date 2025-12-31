@@ -114,6 +114,31 @@ def build_video_paths(video_id):
         'image_text_video_path':image_text_video_path
     }
 
+def build_task_video_paths(task_info):
+    """
+    为任务生成相应的视频路径字典
+    :param task_info:
+    :return:
+    """
+    video_id_list = task_info.get('video_id_list', [])
+    # 对video_id_list进行排序，确保路径的一致性
+    video_id_list.sort()
+    video_id_str = '_'.join(task_info.get('video_id_list', []))
+
+
+    final_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, 'final_remake.mp4')
+    video_with_title_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, 'title.mp4')
+    all_scene_video_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, 'all_scene.mp4')
+    video_with_bgm_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, 'bgm.mp4')
+
+
+    return {
+        'final_output_path': final_output_path,
+        'video_with_title_output_path': video_with_title_output_path,
+        'all_scene_video_path': all_scene_video_path,
+        'video_with_bgm_output_path': video_with_bgm_output_path
+    }
+
 
 def check_failure_details(failure_details):
     """
@@ -126,3 +151,84 @@ def check_failure_details(failure_details):
             print(f"检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
             return True
     return False
+
+
+def correct_owner_timestamps(asr_result, duration):
+    """
+    对ASR结果列表中speaker为owner的文本时间进行纠正。
+
+    Args:
+        asr_result: ASR结果列表。
+        duration: 视频总时长（毫秒）。
+
+    Returns:
+        带有 'fix_start' 和 'fix_end' 字段的ASR结果列表。
+    """
+    # 1. 初始化 fix_start 和 fix_end 字段
+    for segment in asr_result:
+        segment['fix_start'] = segment['start']
+        segment['fix_end'] = segment['end']
+
+    # 2. 遍历列表，应用修正逻辑
+    for i in range(len(asr_result)):
+        current_segment = asr_result[i]
+
+        # 只处理 speaker 为 'owner' 的情况
+        if current_segment['speaker'] == 'owner':
+
+            # --- 向前修正逻辑 (修正 start) ---
+            # 查看上一个文本
+            if i > 0:
+                prev_segment = asr_result[i - 1]
+                # 如果上一个不是 owner，则尝试移动 start
+                if prev_segment['speaker'] != 'owner':
+                    gap = current_segment['start'] - prev_segment['end']
+                    if gap > 0:
+                        # 最多移动500ms
+                        movement = min(500, gap / 2)
+                        current_segment['fix_start'] = current_segment['start'] - movement
+
+            # --- 向后修正逻辑 (修正 end) ---
+            # 查看下一个文本是否存在
+            if i < len(asr_result) - 1:
+                next_segment = asr_result[i + 1]
+
+                # 如果下一个也是 owner
+                if next_segment['speaker'] == 'owner':
+                    gap = next_segment['start'] - current_segment['end']
+                    if gap > 0:
+                        if gap < 1000:
+                            # 间隔小于1000ms，取中点
+                            midpoint = round(current_segment['end'] + gap / 2)
+                            current_segment['fix_end'] = midpoint
+                            # 注意：这里直接修正了下一个owner的fix_start
+                            next_segment['fix_start'] = midpoint
+                        else:
+                            # 间隔大于等于1000ms，各自移动，但最多500ms
+                            # 同时要保证移动后两者间隔至少500ms
+                            movement = min(500, (gap - 500) / 2)
+                            if movement > 0:
+                                current_segment['fix_end'] = round(current_segment['end'] + movement)
+                                # 注意：这里直接修正了下一个owner的fix_start
+                                next_segment['fix_start'] = round(next_segment['start'] - movement)
+
+                # 如果下一个不是 owner
+                else:
+                    gap = next_segment['start'] - current_segment['end']
+                    if gap > 0:
+                        # 最多移动500ms
+                        movement = min(500, gap / 2)
+                        current_segment['fix_end'] = current_segment['end'] + movement
+
+            else:
+                # --- 新增逻辑：这是最后一个片段 ---
+                # 如果当前片段是 owner，且是整个列表的最后一个
+                gap = duration - current_segment['end']
+
+                # 只有当视频还有剩余时间时才延伸
+                if gap > 0:
+                    # 向后延伸最多 500ms，或者直到视频结束 (取较小值)
+                    movement = min(500, gap)
+                    current_segment['fix_end'] = current_segment['end'] + movement
+
+    return asr_result

@@ -15,14 +15,17 @@ import random
 import shutil
 import time
 
+import cv2
+
 from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths, ERROR_STATUS, \
-    check_failure_details
+    check_failure_details, correct_owner_timestamps, build_task_video_paths
 from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json, \
-    time_to_ms, first_greater
+    time_to_ms, first_greater, remove_last_punctuation
 from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
-    add_text_overlays_to_video, gen_video
+    add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
+    add_text_adaptive_padding, add_bgm_to_video
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -38,9 +41,9 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
             continue
         if not final_text:
             continue
-        asr_start = asr_info.get('start')
+        asr_start = asr_info.get('fix_start')
         asr_start = max(0, asr_start-500)
-        asr_end = asr_info.get('end')
+        asr_end = asr_info.get('fix_end')
         asr_end = min(video_duration_ms, asr_end+500)
         duration_list.append((asr_start, asr_end))
     merge_intervals_list = merge_intervals(duration_list)
@@ -83,6 +86,7 @@ def _process_single_video(video_id, video_info):
 
     # 4. 计算作者说话时间段
     owner_asr_info_list = video_info.get('owner_asr_info')
+    owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
     merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
 
     # 5. Case: 如果没有作者说话，直接复制原视频
@@ -514,33 +518,381 @@ def get_voice_info(tags=None):
 
 
 
+def gen_transition_video(video_path, split_scene_list, transition_text, voice_info):
+    """
+    生成转场视频
+    :return:
+    """
+    base_dir = os.path.dirname(video_path)
+    image_time = split_scene_list[0][0]
+    image_time_str = ms_to_time(image_time)
+    image_path = os.path.join(base_dir, 'transition', f"{image_time}.jpg")
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+
+    transition_video_output_path = os.path.join(base_dir, 'transition', f"{image_time}.mp4")
+    target_frame = get_frame_at_time_safe(video_path=video_path, time_str=image_time_str)
+    cv2.imwrite(image_path, target_frame)
+    # 获取图片的分辨率
+    height, width, _ = target_frame.shape
+    resolution = (width, height)
+    text_image_to_video_with_subtitles(transition_text, image_path, transition_video_output_path, short_text=transition_text, resolution=resolution, voice_info=voice_info)
+    return transition_video_output_path
+
+
+
+
+
 
 def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info):
     """
     生成单个场景视频
     :return:
     """
-    output_dir = os.path.dirname(video_path)
-
+    failure_details = {}
     need_merge_video_file_list = []
+
+    # 如果场景数据已经存在就直接返回
+    output_dir = os.path.dirname(video_path)
+    final_scene_output_path = os.path.join(output_dir, 'scene_remake', f"{new_script_scene.get('scene_id')}_remake.mp4")
+    os.makedirs(os.path.dirname(final_scene_output_path), exist_ok=True)
+
+    if is_valid_target_file_simple(final_scene_output_path):
+        print(f"已存在最终单个场景视频，跳过生成: {final_scene_output_path}")
+        return failure_details, final_scene_output_path
+
+
+
+
+    # 生成转场视频
+    transition_text = new_script_scene.get('transition_text', '')
+    if transition_text:
+        transition_video_output_path = gen_transition_video(video_path, merged_segment_list, transition_text, voice_info)
+        if is_valid_target_file_simple(transition_video_output_path):
+            need_merge_video_file_list.append(transition_video_output_path)
+
+
+    # 生成不同的分割段，然后进行每一段视频的生成
     new_narration_script_list = new_script_scene.get('new_narration_script')
     new_narration_script_info_list = []
     for new_narration_script in new_narration_script_list:
         asr_info = narration_detail_info.get(new_narration_script)
         new_narration_script_info_list.append({
             'new_narration_script': new_narration_script,
-            'narration_script_start': asr_info.get('start'),
-            'narration_script_end': asr_info.get('end')
+            'narration_script_start': asr_info.get('fix_start', asr_info.get('start')),
+            'narration_script_end': asr_info.get('fix_end', asr_info.get('end'))
         })
     split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_info_list, min_duration=500)
-
     count = 0
     for split_scene in split_scene_list:
         count += 1
         need_merge_video_file = process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box, voice_info)
         if need_merge_video_file:
             need_merge_video_file_list.append(need_merge_video_file)
-    return need_merge_video_file_list
+
+    merge_videos_ffmpeg(need_merge_video_file_list, output_path=final_scene_output_path)
+
+    return failure_details, final_scene_output_path
+
+def gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_file_list, best_script, video_with_title_output_path):
+    """
+    生成带有标题以及场景的视频
+    :param all_scene_video_path:
+    :param all_scene_video_file_list:
+    :param best_script:
+    :param video_with_title_output_path:
+    :return:
+    """
+    failure_details = {}
+    if is_valid_target_file_simple(video_with_title_output_path):
+        print(f"已存在带标题视频，跳过生成: {video_with_title_output_path}")
+        return failure_details, video_with_title_output_path
+
+    if is_need_scene_title is False:
+        print(f"{all_scene_video_path} 不需要生成带标题视频，直接返回原视频路径")
+        return failure_details, all_scene_video_path
+
+
+    new_script_scenes = best_script.get('场景顺序与新文案', [])
+    video_abstract = best_script.get('video_abstract')
+    video_abstract_list = [video_abstract]
+    video_abstract_list = [remove_last_punctuation(text) for text in video_abstract_list if text.strip()]
+
+    PALETTE = ['#FFFFFF', '#FF4C4C', '#FFD700']  # 白 / 黑 / 金
+    fontcolor = random.choice(PALETTE)
+    color_config = {
+        'fontcolor': fontcolor
+    }
+
+    if len(new_script_scenes) != len(all_scene_video_file_list):
+        error_info = f"新脚本场景数量与生成视频数量不匹配，无法生成带标题视频 分别为 场景数量{len(new_script_scenes)} vs 场景视频数量{len(all_scene_video_file_list)}"
+        print(error_info)
+        failure_details['error_info'] = {
+            "error_info": error_info,
+            "error_level": ERROR_STATUS.ERROR
+        }
+        return failure_details, all_scene_video_path
+    # 准备生成标题数据
+    texts_list = []
+    scene_start = 0
+    for i, scene_video_path in enumerate(all_scene_video_file_list):
+        temp_text_list = video_abstract_list.copy()
+
+        scene_duration_s = probe_duration(scene_video_path)
+        scene_end = scene_start + scene_duration_s
+        new_script_scene = new_script_scenes[i]
+        on_screen_text = new_script_scene.get('on_screen_text')
+        if on_screen_text:
+            temp_text_list.append(on_screen_text)
+        temp_dict = {}
+        temp_dict['text_list'] = temp_text_list
+        temp_dict['start_time'] = scene_start
+        temp_dict['end_time'] = scene_end
+        temp_dict['color_config'] = color_config
+        texts_list.append(temp_dict)
+        scene_start = scene_end
+
+    if not texts_list:
+        print(f"{all_scene_video_path} 没有找到任何需要添加的标题文案。")
+        failure_details['error_info'] = {
+            "error_info": "没有找到任何需要添加的标题文案。",
+            "error_level": ERROR_STATUS.WARNING
+        }
+        return failure_details, all_scene_video_path
+    print(f"准备添加 {len(texts_list)} 条标题文案到视频中。")
+
+    add_text_adaptive_padding(all_scene_video_path, video_with_title_output_path, texts_list)
+    return failure_details, video_with_title_output_path
+
+
+def get_bgm_path(tags={}):
+    """
+    根据标签匹配数量对BGM进行排序，并选择一个合适的BGM路径。
+
+    Args:
+        tags (dict): 输入的标签字典，例如 {'style': ['清新'], 'mood': ['愉快']}
+        logger: 日志记录器实例
+
+    Returns:
+        str: 选中的BGM文件路径。
+    """
+    all_tags = []
+    for key, value in tags.items():
+        all_tags.extend(value)
+    # 使用集合以便快速计算交集
+    all_tags_set = set(all_tags)
+
+    bgm_dir = r"W:\project\python_project\watermark_remove\content_community\app\bgm_audio"
+    bgm_info_list = read_json(r"W:\project\python_project\watermark_remove\content_community\app\bgm_info.json")
+
+    bgm_info_map = {}
+    for bgm_info in bgm_info_list:
+        bgm_name = bgm_info.get('bgm_name', '未知').split('.')[0]
+        bgm_tags_dict = bgm_info.get('selected_tags', {})
+        bgm_all_tags = []
+        for key, bgm_tag_list in bgm_tags_dict.items():
+            bgm_all_tags.extend(bgm_tag_list)
+        bgm_info_map[bgm_name] = bgm_all_tags
+
+    # 获取所有有效的BGM文件
+    bgm_files = [f for f in os.listdir(bgm_dir) if f.lower().endswith('.wav')]
+    bgm_file_names = [os.path.splitext(f)[0] for f in bgm_files]
+
+    bgm_with_match_count = []
+    for bgm_file_name in bgm_file_names:
+        bgm_tags = bgm_info_map.get(bgm_file_name, [])
+        if not bgm_tags:
+            continue
+
+        # 计算交集，获取匹配的标签数量
+        match_count = len(all_tags_set.intersection(set(bgm_tags)))
+
+        if match_count > 0:
+            bgm_path = os.path.join(bgm_dir, f"{bgm_file_name}.wav")
+            bgm_with_match_count.append({'path': bgm_path, 'match_count': match_count})
+
+    if not bgm_with_match_count:
+        # 如果没有任何匹配的BGM，可以采取备用策略，例如随机选择一个BGM
+        print(f"在 {bgm_dir} 目录下未找到任何与给定标签匹配的音频文件，将随机选择一个文件。")
+        if not bgm_files:
+            raise FileNotFoundError(f"在 {bgm_dir} 目录下找不到任何音频文件！")
+        return os.path.join(bgm_dir, random.choice(bgm_files))
+
+    # 根据匹配数量进行降序排序
+    bgm_with_match_count.sort(key=lambda x: x['match_count'], reverse=True)
+
+    # --- 选择策略 ---
+    # 策略2：在匹配度最高的几个BGM中随机选择一个（例如前3个）
+    top_n = 3
+    top_choices = bgm_with_match_count[:top_n]
+    if not top_choices:
+        # 理论上，如果bgm_with_match_count不为空，这里就不会为空
+        raise ValueError("未能确定顶部的BGM选项。")
+
+    selected_bgm = random.choice(top_choices)
+
+    print(f"最终选择的BGM: {selected_bgm['path']} (匹配数: {selected_bgm['match_count']})")
+    return selected_bgm['path']
+
+
+def _calculate_bgm_ratio(new_script_scenes, video_info_dict):
+    """
+    辅助函数：计算需要添加BGM的场景比例
+    """
+    if not new_script_scenes:
+        return 0.0
+
+    need_bgm_count = 0
+    for scene in new_script_scenes:
+        # 1. 如果加了新旁白，原声肯定没了，需要BGM
+        if len(scene.get('new_narration_script', [])) > 0:
+            need_bgm_count += 1
+            continue
+
+        # 2. 检查原视频片段是否自带BGM
+        scene_id = scene.get('scene_id')
+        video_id = scene_id.split('_')[0]
+        # 使用链式get避免KeyError，更加优雅
+        has_bgm = video_info_dict.get(video_id, {}) \
+            .get('hudong_info', {}) \
+            .get('视频分析', {}) \
+            .get('has_bgm', False)
+
+        if not has_bgm:
+            need_bgm_count += 1
+
+    return need_bgm_count / len(new_script_scenes)
+
+
+def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_script_scenes):
+    """
+    尝试生成带有bgm的视频。
+    如果需要BGM的场景超过50%，则合成新视频；否则直接使用原视频。
+    """
+    failure_details = {}
+    if is_valid_target_file_simple(output_video_path):
+        print(f"已存在带BGM视频，跳过生成: {output_video_path}")
+        return failure_details, output_video_path
+
+    # --- 1. 决策阶段：判断是否需要加BGM ---
+    bgm_ratio = _calculate_bgm_ratio(new_script_scenes, video_info_dict)
+    print(f"需要添加BGM的场景比例: {bgm_ratio:.2f} {video_path} ")
+    # 如果比例不足 0.5，直接返回原视频（不进行处理）
+    if bgm_ratio <= 0.5:
+        return failure_details, video_path
+
+    # --- 2. 准备阶段：获取资源 ---
+    bgm_path = get_bgm_path()
+
+    # 修复原代码Bug：如果需要BGM但找不到BGM文件，应该降级返回原视频
+    if not bgm_path or not os.path.exists(bgm_path):
+        print(f"警告：需要添加BGM (比例 {bgm_ratio:.2f}) 但未找到BGM文件。")
+        return failure_details, video_path
+
+    # --- 3. 执行阶段：合成视频 ---
+    try:
+        add_bgm_to_video(
+            video_path,
+            bgm_path,
+            str(output_video_path),
+            auto_compute=True,
+            rate=bgm_ratio
+        )
+    except Exception as e:
+        # 捕获潜在的转换异常，防止程序崩溃
+        print(f"添加背景音乐执行出错: {e}")
+        failure_details['error_info'] = {"error_info": str(e), "error_level": ERROR_STATUS.WARNING}
+        return failure_details, video_path
+
+    # --- 4. 验证阶段：检查结果 ---
+    original_size = os.path.getsize(video_path)
+    # 假设最小阈值为原视频大小的 10%
+    if is_valid_target_file_simple(output_video_path, original_size * 0.1):
+        print(f"成功：已添加背景音乐。BGM: {bgm_path}, 输出: {output_video_path}")
+        return failure_details, output_video_path
+    else:
+        # 虽然执行了但文件无效（如大小为0），回退到原视频
+        error_msg = f"添加背景音乐失败(文件校验未通过)，回退到无BGM版本: {output_video_path}"
+        print(error_msg)
+        failure_details['error_info'] = {
+            "error_info": error_msg,
+            "error_level": ERROR_STATUS.WARNING
+        }
+        return failure_details, video_path
+
+def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_info_dict, all_logical_scene_dict,
+                         voice_info):
+    """
+    处理单个场景的视频生成逻辑
+    Returns:
+        tuple: (video_id, final_output_path, error_msg)
+        如果成功，error_msg 为 None；如果失败，前两个值为 None。
+    """
+    failure_details = {}
+    scene_id = new_script_scene.get('scene_id')
+    scene_info = all_final_scene_dict.get(scene_id, {})
+    video_id = scene_info.get('source_video_id')
+
+    # 1. 准备视频和字幕路径信息
+    all_path_info = build_video_paths(video_id)
+    video_path = all_path_info.get('cover_video_path')
+    subtitle_box_path = all_path_info.get('subtitle_box_path')
+
+    # 2. 处理字幕框
+    subtitle_box = read_json(subtitle_box_path)
+    real_subtitle_box = None
+    if subtitle_box:
+        top_left, bottom_right, vid_w, vid_h = adjust_subtitle_box(video_path, subtitle_box)
+        real_subtitle_box = [top_left, bottom_right]
+
+    # 3. 检查是否使用图文视频路径
+    if is_valid_target_file_simple(all_path_info.get('image_text_video_path')):
+        video_path = all_path_info.get('image_text_video_path')
+
+    # 4. 处理旁白脚本对应关系
+    scene_number_list = scene_info.get('scene_number_list')
+    narration_script_list = scene_info.get('narration_script_list', [])
+    target_narration_scripts = new_script_scene.get('new_narration_script', [])  # 重命名变量以避免混淆
+
+    new_narration_detail_info = {}
+
+    for i, current_narration in enumerate(target_narration_scripts):
+        original_narration_script = narration_script_list[i]
+        asr_info = all_owner_asr_info_dict.get(original_narration_script)
+
+        if not asr_info:
+            error_info = f"未找到对应的ASR信息，场景ID: {scene_id}, 旁白脚本: {original_narration_script} 第{i}段"
+            print(error_info)
+            failure_details['error_info'] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            return failure_details, None
+
+        new_narration_detail_info[current_narration] = asr_info
+
+    # 5. 合并时间片段
+    all_segment_list = []
+    for scene_number in scene_number_list:
+        scene_key = f"{video_id}_{scene_number}"
+        scene_logical_info = all_logical_scene_dict.get(scene_key)
+        if scene_logical_info:
+            start = scene_logical_info.get('start')
+            end = scene_logical_info.get('end')
+            all_segment_list.append((start, end))
+
+    merged_segment_list = merge_intervals(all_segment_list)
+
+    # 6. 生成视频
+    failure_details, final_scene_output_path = gen_scene_video(
+        video_path,
+        new_script_scene,
+        new_narration_detail_info,
+        merged_segment_list,
+        real_subtitle_box,
+        voice_info
+    )
+
+    return failure_details, final_scene_output_path
 
 
 def gen_new_video(task_info, video_info_dict):
@@ -551,69 +903,67 @@ def gen_new_video(task_info, video_info_dict):
     :return:
     """
     failure_details = {}
-    voice_info = get_voice_info()
-    video_id_str = '_'.join(task_info.get('video_id_list', []))
-
-    final_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, 'remake.mp4')
+    all_task_video_path_info = build_task_video_paths(task_info)
+    final_output_path = all_task_video_path_info.get('final_output_path')
     # 保证final_output_path所在目录存在
     os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
 
-    if is_valid_target_file_simple(final_output_path):
-        print(f"已存在最终生成视频，跳过生成: {final_output_path}")
-        return failure_details
 
+    voice_info = get_voice_info()
+
+    # if is_valid_target_file_simple(final_output_path):
+    #     print(f"已存在最终生成视频，跳过生成: {final_output_path}")
+    #     return failure_details
+
+    # 准备好一些数据
     final_scene_info = task_info.get('final_scene_info', {})
     all_logical_scene_dict, all_owner_asr_info_dict = build_all_need_data_map(video_info_dict)
     video_script_info = task_info.get('video_script_info', {})
     best_script = find_best_solution(video_script_info)
     new_script_scenes = best_script.get('场景顺序与新文案', [])
     all_scene_list = final_scene_info.get('all_scenes', [])
-
     all_final_scene_dict = {}
     for scene in all_scene_list:
         scene_id = scene.get('scene_id')
         all_final_scene_dict[scene_id] = scene
 
-    all_need_merge_video_file_list = []
+    # 生成好了的每一个场景视频
+    all_scene_video_file_list = []
     for new_script_scene in new_script_scenes:
+        failure_details, final_scene_output_path = process_single_scene(
+            new_script_scene,
+            all_final_scene_dict,
+            all_owner_asr_info_dict,
+            all_logical_scene_dict,
+            voice_info
+        )
+        if check_failure_details(failure_details):
+            return failure_details
+        all_scene_video_file_list.append(final_scene_output_path)
 
-        scene_id = new_script_scene.get('scene_id')
-        scene_info = all_final_scene_dict.get(scene_id, {})
-        video_id = scene_info.get('source_video_id')
-        all_path_info = build_video_paths(video_id)
-        video_path = all_path_info.get('cover_video_path')
-        subtitle_box_path = all_path_info.get('subtitle_box_path')
-        subtitle_box = read_json(subtitle_box_path)
-        real_subtitle_box = None
-        if subtitle_box:
-            top_left, bottom_right, vid_w, vid_h = adjust_subtitle_box(video_path, subtitle_box)
-            real_subtitle_box = [top_left, bottom_right]
-        if is_valid_target_file_simple(all_path_info.get('image_text_video_path')):
-            video_path = all_path_info.get('image_text_video_path')
-        scene_number_list = scene_info.get('scene_number_list')
-        narration_script_list = scene_info.get('narration_script_list', [])
-        new_narration_script = new_script_scene.get('new_narration_script', [])
-        new_narration_detail_info = {}
-        for i, new_narration_script in enumerate(new_narration_script):
-            original_narration_script = narration_script_list[i]
-            asr_info = all_owner_asr_info_dict.get(original_narration_script)
-            if not asr_info:
-                error_info = f"未找到对应的ASR信息，场景ID: {scene_id}, 旁白脚本: {original_narration_script} 第{i}段"
-                return error_info, None
-            new_narration_detail_info[new_narration_script] = asr_info
+    # 合并所有场景视频
+    all_scene_video_path = all_task_video_path_info.get('all_scene_video_path')
+    if not is_valid_target_file_simple(all_scene_video_path):
+        merge_videos_ffmpeg(all_scene_video_file_list, output_path=all_scene_video_path)
 
-        all_segment_list = []  # 最终场景的时间段
-        for scene_number in scene_number_list:
-            scene_key = f"{video_id}_{scene_number}"
-            scene_logical_info = all_logical_scene_dict.get(scene_key)
-            start = scene_logical_info.get('start')
-            end = scene_logical_info.get('end')
-            all_segment_list.append((start, end))
-        merged_segment_list = merge_intervals(all_segment_list)
-        need_merge_video_file_list = gen_scene_video(video_path, new_script_scene, new_narration_detail_info, merged_segment_list, real_subtitle_box, voice_info)
-        all_need_merge_video_file_list.extend(need_merge_video_file_list)
 
-    merge_videos_ffmpeg(all_need_merge_video_file_list, output_path=final_output_path)
+    # 生成带有标题的视频
+    is_need_scene_title = task_info.get('creation_guidance_info', {}).get('is_need_scene_title', True)
+    video_with_title_output_path = all_task_video_path_info.get('video_with_title_output_path')
+    failure_details, current_video_path = gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_file_list, best_script, video_with_title_output_path)
+    if check_failure_details(failure_details):
+        return failure_details
+
+
+
+    # 生成带有bgm的视频
+    video_with_bgm_output_path = all_task_video_path_info.get('video_with_bgm_output_path')
+    failure_details, current_video_path = gen_video_with_bgm(current_video_path, video_with_bgm_output_path, video_info_dict, new_script_scenes)
+    if check_failure_details(failure_details):
+        return failure_details
+
+    # 将current_video_path复制到final_output_path
+    shutil.copyfile(current_video_path, final_output_path)
     return failure_details
 
 

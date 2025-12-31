@@ -12,6 +12,7 @@ import ast
 import json
 import os
 import re
+import string
 from pathlib import Path
 from typing import Union
 
@@ -335,3 +336,23 @@ def first_greater(target_num, num_list):
         if x > target_num:
             return x
     return None
+
+
+def remove_last_punctuation(sentence: str) -> str:
+  """
+  如果句子的最后一个字符是标点符号，则移除它。
+
+  参数:
+    sentence: 输入的字符串。
+
+  返回:
+    移除末尾标点符号的字符串。
+  """
+  chinese_punctuations = "。，！？；：（）《》【】“”‘’、"
+
+  # 将英文和中文标点合并
+  all_punctuations = string.punctuation + chinese_punctuations
+
+  if sentence and sentence[-1] in all_punctuations:
+      return sentence[:-1]
+  return sentence

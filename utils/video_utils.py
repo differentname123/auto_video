@@ -1,3 +1,4 @@
+
 # -- coding: utf-8 --
 """:authors:
     zhuxiaohu
@@ -9,6 +10,7 @@
     
 """
 import pathlib
+import platform
 import random
 import shlex
 import tempfile
@@ -31,6 +33,7 @@ from utils.common_utils import is_valid_target_file_simple, read_json, save_json
 from utils.edge_tts_utils import generate_audio_and_get_duration_sync
 from utils.split_scenes import split_scenes_json
 
+from pydub import AudioSegment
 
 def probe_video_new(path):
     """用 ffprobe 获取视频的宽、高、帧率和 SAR。"""
@@ -958,27 +961,26 @@ def probe_video(path: str) -> dict:
         raise RuntimeError(f"Failed to probe video file: {path}. Error: {e}")
 
 
+import shutil
+import subprocess
+import time
 
-def _build_enable_expr(time_ranges) -> str:
+
+def _build_enable_expr(time_ranges):
     """
-    构建 FFmpeg 的 enable 表达式，支持多个时间段。
-    返回格式: ":enable='between(t,s1,e1)+between(t,s2,e2)+...'"
-    如果 time_ranges 为 None 或空，则返回空字符串（全程生效）
+    根据时间段构建 FFmpeg 的 enable 表达式字符串。
+    返回格式例如: ":enable='between(t,0,5)+between(t,10,15)'"
+    如果 time_ranges 为空，返回空字符串（意味着全程生效）。
     """
     if not time_ranges:
         return ""
 
-    conditions = []
+    parts = []
     for start, end in time_ranges:
-        # 确保 start <= end
-        if start >= end:
-            continue  # 跳过无效区间
-        conditions.append(f"between(t,{start},{end})")
+        parts.append(f"between(t,{start},{end})")
 
-    if not conditions:
-        return ""  # 没有有效区间，全程不遮挡？但通常不会这样用
-
-    expr = "+".join(conditions)
+    # 组合表达式
+    expr = "+".join(parts)
     return f":enable='{expr}'"
 
 
@@ -993,7 +995,7 @@ def cover_video_area_blur_super_robust(
         preset: str = "ultrafast"
 ):
     """
-    为一个视频的指定区域应用模糊，并进行大量的预检查和参数修正以确保成功。
+    为一个视频的指定区域应用模糊，并在相同时间段将音频静音。
     """
     # --- 步骤 1: 检查环境依赖 ---
     if not shutil.which("ffmpeg"):
@@ -1001,74 +1003,72 @@ def cover_video_area_blur_super_robust(
 
     # --- 步骤 2: 获取视频元数据 ---
     try:
+        # 这里假设 probe_video 函数在你原本的 context 中存在
+        # 如果不存在，你需要补充该函数，或者直接使用 subprocess 调用 ffprobe
         video_info = probe_video(video_path)
         video_w, video_h = video_info["width"], video_info["height"]
         print(f"Probed video: {video_w}x{video_h}, duration: {video_info['duration']:.2f}s")
-    except RuntimeError as e:
-        # 如果探测失败，直接中止
+    except Exception as e:
+        # 为了代码的完整性，如果 probe_video 不存在，这里可能报错
+        # 实际使用中请确保 probe_video 可用
         raise RuntimeError(f"Could not process video, probing failed. Reason: {e}")
 
     # --- 步骤 3: 验证和修正坐标 ---
     x1_orig, y1_orig = top_left
     x2_orig, y2_orig = bottom_right
 
-    # 将坐标钳位在 [0, video_dimension] 范围内
     x1 = max(0, x1_orig)
     y1 = max(0, y1_orig)
     x2 = min(video_w, x2_orig)
     y2 = min(video_h, y2_orig)
 
     if (x1, y1, x2, y2) != (x1_orig, y1_orig, x2_orig, y2_orig):
-        print(f"[INFO] Original coordinates ({x1_orig},{y1_orig})-({x2_orig},{y2_orig}) were out of bounds.")
-        print(f"[INFO] Clamped to valid area: ({x1},{y1})-({x2},{y2})")
+        print(f"[INFO] Original coordinates were out of bounds. Clamped to: ({x1},{y1})-({x2},{y2})")
 
     # --- 步骤 4: 计算和修正裁剪尺寸 ---
     w, h = x2 - x1, y2 - y1
 
-    # 确保宽高为偶数，这是很多编码器（特别是yuv420p）的要求
-    if w % 2 != 0:
-        w -= 1
-        print(f"[INFO] Adjusted width to be even: {w + 1} -> {w}")
-    if h % 2 != 0:
-        h -= 1
-        print(f"[INFO] Adjusted height to be even: {h + 1} -> {h}")
+    if w % 2 != 0: w -= 1
+    if h % 2 != 0: h -= 1
 
     # --- 步骤 5: 最终有效性检查 ---
     if w <= 0 or h <= 0:
-        raise ValueError(
-            f"The specified or corrected area has non-positive dimensions (w={w}, h={h}). "
-            "This can happen if the requested area is completely outside the video frame. Aborting."
-        )
+        raise ValueError(f"The specified area has non-positive dimensions (w={w}, h={h}). Aborting.")
 
-    # --- 步骤 6: 构建滤镜图，并安全地处理 boxblur 参数 ---
+    # --- 步骤 6: 构建滤镜图 ---
+
+    # 6.1 生成时间控制表达式 (例如: ":enable='between(t,0,5)'")
     enable_expr = _build_enable_expr(time_ranges)
 
-    # **核心修复：解决 boxblur 的参数问题**
-    # luma_radius (亮度模糊) 可以是 blur_strength
-    # chroma_radius (色度模糊) 必须被限制在一个较小的范围内
+    # 6.2 视频模糊参数
     luma_radius = blur_strength
-    chroma_radius = min(blur_strength, 9)  # 9 是一个非常安全的值
-    power = 2  # 模糊迭代次数，2通常效果不错
+    chroma_radius = min(blur_strength, 9)
+    power = 2
     boxblur_params = f"{luma_radius}:{power}:{chroma_radius}:{power}"
 
-    # 也可以考虑直接换成 gblur，它没有这个问题，参数更简单
-    # gblur_params = f"gblur=sigma={blur_strength}"
-
+    # 6.3 构建 Filter Complex
+    # [orig][blurred]overlay=...:enable='...'
     vf = (
         f"[0:v]split=2[orig][crop];"
         f"[crop]crop={w}:{h}:{x1}:{y1},boxblur={boxblur_params}[blurred];"
         f"[orig][blurred]overlay={x1}:{y1}{enable_expr}"
     )
 
+    # 6.4 构建音频滤镜 (新增)
+    # volume=0:enable='...'
+    af = f"volume=0{enable_expr}"
+
     print(f"Final crop area: x={x1}, y={y1}, w={w}, h={h}")
-    print(f"Using boxblur with params: {boxblur_params}")
+    print(f"Audio Filter: {af}")
 
     # --- 步骤 7: 执行 FFmpeg 命令 ---
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", video_path,
-        "-filter_complex", vf,
-        "-c:a", "copy",
+        "-filter_complex", vf,  # 视频滤镜图
+        "-af", af,  # 音频滤镜 (静音)
+        "-c:a", "aac",  # 【修改】必须重编码音频才能生效，不能用 copy
+        "-b:a", "192k",  # 指定音频比特率，保证音质
         "-c:v", "libx264",
         "-preset", preset,
         "-crf", str(crf),
@@ -1089,24 +1089,34 @@ def cover_video_area_blur_super_robust(
 
 
 def cover_video_area_simple(
-    video_path: str,
-    output_path: str,
-    top_left,
-    bottom_right,
-    time_ranges = None,
-    color: str = "black@1.0"
+        video_path: str,
+        output_path: str,
+        top_left,
+        bottom_right,
+        time_ranges=None,
+        color: str = "black@1.0"
 ):
     x1, y1 = top_left
     x2, y2 = bottom_right
     w, h = x2 - x1, y2 - y1
 
+    # 1. 生成时间控制表达式
     enable_expr = _build_enable_expr(time_ranges)
+
+    # 2. 视频滤镜
     vf = f"drawbox=x={x1}:y={y1}:w={w}:h={h}:color={color}:t=fill{enable_expr}"
+
+    # 3. 音频滤镜 (新增)
+    af = f"volume=0{enable_expr}"
+
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", video_path,
         "-vf", vf,
-        "-c:a", "copy",
+        "-af", af,  # 音频滤镜
+        "-c:a", "aac",  # 【修改】音频重编码
+        "-c:v", "libx264",  # drawbox 改变了画面内容，建议显式指定编码器
+        "-preset", "ultrafast",
         output_path
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -2158,3 +2168,802 @@ def _process_and_split_subtitles(
 
     # end for
     return processed_subs
+
+
+
+
+def text_image_to_video_with_subtitles(
+    text: str,
+    image_path: str,
+    output_path: str,
+    short_text: str = "",
+    voice_info=None,
+    cleanup: bool = True,
+    resolution: tuple = (1920, 1080)
+) -> str:
+    """
+    根据文本和图片生成带字幕的视频，并可选添加背景音乐（bgm），并自动清理中间视频文件。
+
+    参数:
+        text: 完整文案
+        image_path: 图片路径
+        output_path: 输出视频路径
+        short_text: 简略文案（可选）
+        voice_name: 语音合成声音
+        bgm_path: 背景音乐文件路径（可选，若存在则在生成最终视频后添加）
+        cleanup: 是否在生成最终视频后清理中间视频文件
+
+    返回:
+        最终视频路径（若提供了 bgm_path，返回带 bgm 的视频路径；否则返回无 bgm 的视频路径）
+    """
+    voice_name = "zh-CN-XiaoxiaoNeural"
+    rate = "+30%"
+    pitch = '+30Hz'
+    if voice_info is not None:
+        voice_name = voice_info.get('voice_name', voice_name)
+        rate = voice_info.get('rate', "+30%")
+        pitch = voice_info.get('pitch', '+30Hz')
+
+
+
+    if not os.path.exists(image_path):
+        raise FileNotFoundError(f"图片文件不存在: {image_path}")
+
+    output_path = pathlib.Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 1. 文本转语音
+    audio_path = output_path.with_suffix(".mp3")
+    duration = generate_audio_and_get_duration_sync(
+        text=text,
+        output_filename=str(audio_path),
+        voice_name=voice_name,
+        trim_silence=False,
+        rate=rate,
+        pitch=pitch,
+    )
+
+    # 2. 图片转视频
+    image_video_path = output_path.with_name(output_path.stem + "_img.mp4")
+    create_video_from_image_auto_select(
+        image_path=image_path,
+        output_path=str(image_video_path),
+        duration=duration,
+        resolution=resolution
+    )
+
+    # 3. 合成语音
+    audio_video_path = output_path.with_name(output_path.stem + "_audio.mp4")
+    segments_info = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(duration * 1000),
+        'outputPath': str(audio_path),
+        'trimmedDuration': duration,
+    }]
+    redub_video_with_ffmpeg(str(image_video_path), segments_info, output_path=str(audio_video_path))
+
+    # 4. 添加字幕
+    subtitle_data = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(duration * 1000),
+        'optimizedText': text
+    }]
+    subtitle_video_path = output_path.with_name(output_path.stem + "_sub.mp4")
+    add_subtitles_to_video(
+        video_path=str(audio_video_path),
+        subtitles_info=subtitle_data,
+        output_path=str(subtitle_video_path),
+        font_size=70,
+        bottom_margin=30
+    )
+
+    # 5. 如果有简略文案，加第二层字幕
+    if short_text and len(text) > 30:
+        subtitle_data = [{
+            'startTime': ms_to_time(duration * 500),
+            'endTime': ms_to_time(duration * 1000),
+            'optimizedText': short_text
+        }]
+        add_subtitles_to_video(
+            video_path=str(subtitle_video_path),
+            subtitles_info=subtitle_data,
+            output_path=str(output_path),
+            font_color='#FFD700',
+            font_size=80,
+            bottom_margin=1000
+        )
+    else:
+        shutil.copy(str(subtitle_video_path), str(output_path))
+
+    final_video_path = str(output_path.resolve())
+
+    # 7. 清理中间视频文件
+    if cleanup:
+        # 确定需要保留哪一个最终文件
+        kept_final_paths = set()
+
+        # 需要清理的中间视频路径
+        intermediates = [
+            str(audio_path),
+            str(image_video_path),
+            str(audio_video_path),
+            str(subtitle_video_path),
+        ]
+
+        # 删除中间视频文件
+        for p in intermediates:
+            if p and os.path.exists(p) and p not in kept_final_paths:
+                try:
+                    os.remove(p)
+                    # print(f"已清理中间视频：{p}")
+                except Exception as e:
+                    print(f"警告：无法清理中间视频 {p}，原因: {e}")
+
+            return final_video_path
+
+    return final_video_path
+
+
+
+def create_video_from_image_auto_select(
+        image_path: str,
+        output_path: str,
+        duration=5,
+        resolution: tuple = (1920, 1080),
+        fps: int = 30,
+        zoom_factor: float = 1.0,
+        scroll_speed: int = 30,
+        use_background_fill: bool = True
+):
+    if not os.path.exists(image_path):
+        print(f"错误：找不到输入图片 '{image_path}'")
+        return
+    # 随机设置use_background_fill
+    use_background_fill = random.choice([True, False])  # 随机选择是否使用背景填充
+    zoom_factor = random.choice([1.1, 1.1, 1.1])
+    try:
+        with Image.open(image_path) as img:
+            img_width, img_height = img.size
+    except Exception as e:
+        print(f"错误: 无法读取图片 '{image_path}'。 错误信息: {e}")
+        return
+
+    output_width, output_height = resolution
+
+    # 决策逻辑保持不变，但调用时简化参数传递
+    if img_height > 3 * img_width:
+        print(f"检测到高图 -> 【垂直滚动】")
+        ### <<< 优化：不再需要在此处计算 final_duration，交由子函数处理
+        scroll_image_vertically(
+            image_path=image_path, output_path=output_path,
+            scroll_speed=scroll_speed, output_width=output_width,
+            output_height=output_height, fps=fps, target_duration=duration,  # 直接传递 duration
+            use_background_fill=use_background_fill
+        )
+    elif img_width > 3 * img_height:
+        print(f"检测到宽图 -> 【水平滚动】")
+        scroll_image_horizontally(
+            image_path=image_path, output_path=output_path,
+            scroll_speed=scroll_speed, output_width=output_width,
+            output_height=output_height, fps=fps, target_duration=duration,  # 直接传递 duration
+            use_background_fill=use_background_fill
+        )
+    else:
+        print(f"检测到常规图 -> 【平滑缩放】")
+        create_video_from_image_smooth(
+            image_path=image_path, output_path=output_path,
+            duration=duration, resolution=resolution, fps=fps,
+            zoom_factor=zoom_factor, use_background_fill=use_background_fill
+        )
+
+
+
+def scroll_image_horizontally(
+        image_path,
+        output_path,
+        scroll_speed=30,
+        output_width=1920,
+        output_height=1080,
+        fps=30,
+        target_duration=None,
+        use_background_fill: bool = True
+):
+    try:
+        img = Image.open(image_path)
+        img_width, img_height = img.size
+    except Exception as e:
+        print(f"读取图片失败: {e}")
+        return
+
+    if img_height == 0: return
+    scaled_width = img_width * (output_height / img_height)
+    scroll_distance = max(0, scaled_width - output_width)
+
+    # 决定最终视频时长
+    if scroll_distance <= 0:
+        # 如果图片不够宽，无法滚动，则生成一个静止视频
+        final_duration = target_duration if target_duration is not None else 3
+        scroll_distance = 0  # 确保滚动距离为0
+    else:
+        # 如果指定了时长，就用指定的；否则根据滚动速度计算
+        calculated_duration = scroll_distance / scroll_speed
+        final_duration = target_duration if target_duration is not None else calculated_duration
+
+    speed_per_frame = scroll_speed / fps
+
+    filter_complex = ""
+    if use_background_fill:
+        filter_complex = (
+            f"[0:v]split[original][bg_src];"
+            f"[bg_src]scale=-1:{output_height},boxblur=luma_radius=20:luma_power=1,crop={output_width}:{output_height}[bg];"
+            f"[original]scale=-1:{output_height},format=rgba,setsar=1,"
+            f"crop={output_width}:{output_height}:x='min({scroll_distance},max(0,n*{speed_per_frame}))':y=0[fg];"
+            f"[bg][fg]overlay=0:0,format=yuv420p"
+        )
+    else:
+        # 方案B: 黑色背景
+        filter_complex = (
+            ### <<< 修正：为 color 滤镜添加 d={final_duration} 参数
+            f"color=c=black:s={output_width}x{output_height}:d={final_duration}[bg];"
+            f"[0:v]scale=-1:{output_height},format=rgba,setsar=1,"
+            f"crop={output_width}:{output_height}:x='min({scroll_distance},max(0,n*{speed_per_frame}))':y=0[fg];"
+            f"[bg][fg]overlay=0:0,format=yuv420p"
+        )
+
+    ### <<< 优化：采用与垂直滚动相同的、更健壮的命令结构
+    cmd = [
+        "ffmpeg", "-y", '-loglevel', 'error',
+        "-loop", "1", "-i", image_path,
+        "-filter_complex", filter_complex,
+        "-c:v", "libx264",
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        # 将 -t 作为输出选项放在最后，确保视频总长
+        "-t", str(final_duration),
+        output_path
+    ]
+
+    print("正在生成水平滚动视频...\n", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+        print(f"\n视频成功保存到: {output_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"\nFFmpeg 执行失败:\n{e.stderr}")
+
+
+# ==============================================================================
+# 垂直滚动（已优化）
+# ==============================================================================
+def scroll_image_vertically(
+        image_path,
+        output_path,
+        scroll_speed=30,
+        output_width=1920,
+        output_height=1080,
+        fps=30,
+        target_duration=None,
+        use_background_fill: bool = True
+):
+    try:
+        with Image.open(image_path) as img:
+            img_width, img_height = img.size
+    except Exception as e:
+        print(f"读取图片失败: {e}")
+        return
+
+    if img_width == 0: return
+    scaled_height = img_height * (output_width / img_width)
+    scroll_distance = max(0, scaled_height - output_height)
+
+    if scroll_distance <= 0:
+        final_duration = target_duration if target_duration is not None else 3
+        scroll_distance = 0
+    else:
+        calculated_duration = scroll_distance / scroll_speed
+        final_duration = target_duration if target_duration is not None else calculated_duration
+
+    speed_per_frame = scroll_speed / fps
+
+    filter_complex = ""
+    if use_background_fill:
+        filter_complex = (
+            f"[0:v]split[original][bg_src];"
+            f"[bg_src]scale={output_width}:-1,boxblur=luma_radius=20:luma_power=1,crop={output_width}:{output_height}[bg];"
+            f"[original]scale={output_width}:-1,format=rgba,setsar=1,"
+            f"crop={output_width}:{output_height}:x=0:y='min({scroll_distance},max(0,n*{speed_per_frame}))'[fg];"
+            f"[bg][fg]overlay=0:0,format=yuv420p"
+        )
+    else:
+        filter_complex = (
+            # 你的代码中这里已经正确添加了 d={final_duration}，这里保持
+            f"color=c=black:s={output_width}x{output_height}:d={final_duration}[bg];"
+            f"[0:v]scale={output_width}:-1,format=rgba,setsar=1,"
+            f"crop={output_width}:{output_height}:x=0:y='min({scroll_distance},max(0,n*{speed_per_frame}))'[fg];"
+            f"[bg][fg]overlay=0:0,format=yuv420p"
+        )
+
+    # ### <<< 优化：清理了你代码中被注释掉的旧命令，只保留最终的、最正确的版本
+    cmd = [
+        "ffmpeg", "-y", '-loglevel', 'error',
+        "-loop", "1", "-i", image_path,
+        "-filter_complex", filter_complex,
+        "-c:v", "libx264",
+        "-r", str(fps),
+        "-pix_fmt", "yuv420p",
+        "-t", str(final_duration),
+        output_path
+    ]
+
+    print("正在生成垂直滚动视频...\n", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8')
+        print(f"\n视频成功保存到: {output_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"\nFFmpeg 执行失败:\n{e.stderr}")
+
+
+def create_video_from_image_smooth(
+        image_path: str,
+        output_path: str,
+        duration: int = 5,
+        resolution: tuple = (1920, 1080),
+        fps: int = 30,
+        zoom_factor: float = 1.01,
+        use_background_fill: bool = True
+):
+    if not os.path.exists(image_path):
+        print(f"错误：找不到输入图片 '{image_path}'")
+        return
+
+    width, height = resolution
+    final_filter_complex = ""
+
+    if use_background_fill:
+        # 方案A: 使用模糊背景填充
+        filter_complex_base = (
+            ### <<< 修正：为 split 滤镜明确指定输入流 [0:v]
+            f"[0:v]split[bg][fg];"
+            f"[bg]scale=w='if(gte(iw/ih,{width}/{height}),-1,{width})':h='if(gte(iw/ih,{width}/{height}),{height},-1)',"
+            f"gblur=sigma=20,crop={width}:{height}[bg_pp];"
+            f"[fg]scale=w='if(gte(iw/ih,{width}/{height}),{width},-1)':h='if(gte(iw/ih,{width}/{height}),-1,{height})'[fg_pp];"
+            "[bg_pp][fg_pp]overlay=(W-w)/2:(H-h)/2[overlay_out];"
+        )
+    else:
+        # 方案B: 使用黑边
+        filter_complex_base = (
+            ### <<< 优化：为 color 滤镜添加时长，使其与视频总长一致
+            f"color=c=black:s={width}x{height}:d={duration}[black_bg];"
+            f"[0:v]scale=w='if(gte(iw/ih,{width}/{height}),{width},-2)':h='if(gte(iw/ih,{width}/{height}),-2,{height})'[fg_scaled];"
+            f"[black_bg][fg_scaled]overlay=(W-w)/2:(H-h)/2[overlay_out];"
+        )
+
+    # 动画滤镜部分作用于 [overlay_out]
+    zoom_expr = f"1+({zoom_factor}-1)*t/{duration}"
+    filter_complex_animation = (
+        f"[overlay_out]scale=w='iw*({zoom_expr})':h='ih*({zoom_expr})':eval=frame,"
+        f"crop=w={width}:h={height}:x='(iw-{width})/2':y='(ih-{height})/2',"
+        "format=yuv420p"
+    )
+    final_filter_complex = filter_complex_base + filter_complex_animation
+
+    command = [
+        'ffmpeg', '-y',
+        '-loglevel', 'error',
+        '-loop', '1', '-i', image_path,
+        '-filter_complex', final_filter_complex,
+        '-c:v', 'libx264',
+        '-preset', 'slow', '-crf', '18',
+        '-t', str(duration), '-r', str(fps),
+        output_path
+    ]
+
+    print("正在生成平滑动画视频，请稍候...")
+    print(f"执行的 FFmpeg 命令: {' '.join(command)}")
+
+    try:
+        process = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+        print(f"\n视频 '{output_path}' 生成成功！")
+    except subprocess.CalledProcessError as e:
+        print("\n视频生成失败！")
+        print(f"FFmpeg 错误信息:\n{e.stderr}")
+
+def get_frame_at_time_safe(video_path: str, time_str: str) -> np.ndarray | None:
+    """
+    从视频中提取指定时间点的帧，并在发生任何错误时安全地回退到第一帧。
+
+    - 如果成功，返回目标时间的帧。
+    - 如果时间格式错误、时间超出范围或读取目标帧失败，则返回视频的第一帧。
+    - 如果视频文件无法打开或无法读取第一帧，则返回 None。
+
+    参数:
+    - video_path (str): 视频文件的路径。
+    - time_str (str): "HH:MM:SS" 或 "MM:SS" 格式的时间字符串。
+
+    返回:
+    - np.ndarray: OpenCV格式的图像帧。
+    - None: 仅在视频文件无法打开或损坏时返回。
+    """
+    # 1. 尝试打开视频文件
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"严重错误: 无法打开视频文件: {video_path}。无法获取任何帧。")
+        return None
+
+    # 2. 立即读取第一帧作为备用
+    ret_first, first_frame = cap.read()
+    if not ret_first:
+        print(f"严重错误: 视频 '{video_path}' 可打开但无法读取第一帧。")
+        cap.release()
+        return None
+
+    try:
+        # 3. 尝试解析时间并定位目标帧（正常流程）
+        try:
+            total_seconds = time_to_ms(time_str) / 1000
+        except ValueError as e:
+            # 如果时间格式解析失败，直接触发回退
+            raise ValueError(f"时间格式不正确 ({e})") from e
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps == 0:
+            raise IOError("无法读取视频的帧率 (FPS)。")
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_duration = total_frames / fps
+
+        if total_seconds > video_duration:
+            raise ValueError(f"指定时间 {time_str} 超出视频总时长 ({video_duration:.2f}s)")
+
+        target_frame_index = int(total_seconds * fps)
+
+        # 对于非常接近第一帧的情况，直接使用已读取的第一帧
+        if target_frame_index == 0:
+            return first_frame
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame_index)
+        ret, target_frame = cap.read()
+
+        if not ret:
+            raise IOError(f"无法在时间点 {time_str} 读取到帧")
+
+        # 如果一切顺利，返回目标帧
+        return target_frame
+
+    except Exception as e:
+        # 4. 如果try块中出现任何异常，执行回退逻辑
+        print(f"处理时发生异常: {e}")
+        print(">>> 已触发回退机制，将返回视频的第一帧。")
+        return first_frame
+
+    finally:
+        # 5. 确保无论如何都释放视频捕获对象
+        cap.release()
+
+
+
+def add_text_adaptive_padding(input_video_path, output_video_path, text_events, font_path=None,
+                                    padding_ratio=0.1):
+    """
+    自适应地为视频添加边框和文字，实现文字靠近视频上边界的“底部对-齐”效果。
+
+    Args:
+        input_video_path (str): 输入视频的文件路径。
+        output_video_path (str): 输出视频的文件路径。
+        text_events (list): 包含文字事件的列表。
+        font_path (str, optional): 字体文件路径。
+        padding_ratio (float, optional): 添加的边框高度占原始视频高度的比例。
+    """
+    # --- 1. 参数校验和准备 (不变) ---
+    if not os.path.exists(input_video_path):
+        print(f"错误：输入视频文件不存在 -> {input_video_path}")
+        return
+    if font_path is None:
+        font_path = 'C:/Windows/Fonts/msyhbd.ttc'
+        print(f"提示：未使用指定字体，将尝试使用默认字体 -> {font_path}")
+    if not os.path.exists(font_path):
+        print(f"错误：字体文件不存在 -> {font_path}")
+        return
+    original_w, original_h, _, _ = probe_video_new(input_video_path)
+    if not all([original_w, original_h]):
+        print("错误：无法获取有效的视频尺寸。")
+        return
+
+    # --- 2. 计算新画布尺寸和视频位置 (不变) ---
+    top_padding = int(original_h * padding_ratio)
+    output_w = original_w
+    output_h = original_h + top_padding
+    video_y_start = top_padding
+    if original_w / original_h > 1.5:
+        bottom_padding = top_padding // 2
+        top_padding = top_padding + bottom_padding
+        output_h = original_h + top_padding + bottom_padding
+        video_y_start = top_padding
+
+    # --- 3. 构建滤镜链 ---
+    base_filter = f"pad={output_w}:{output_h}:0:{video_y_start}:color=black"
+    drawtext_filters = []
+    escaped_font_path = _escape_ffmpeg_path(font_path)
+    for event in text_events:
+        text_list = event.get('text_list', [])
+        if not text_list: continue
+
+        start_time = event.get('start_time', 0)
+        end_time = event.get('end_time', 99999)
+        if start_time >= end_time: continue
+
+        colors = event.get('color_config', {})
+        PALETTE = ['#FFFFFF', '#FF4C4C', '#FFD700']  # 白 / 黑 / 金
+        fontcolor = colors.get('fontcolor', random.choice(PALETTE))
+        # fontcolor = colors.get('fontcolor', '#FFD700')
+        shadowcolor = colors.get('shadowcolor', 'black@0.8')
+
+        # --- 字体大小计算逻辑 (保持不变，依然健壮) ---
+        margin_ratio = 0.0
+        line_spacing_ratio = 0.1
+        available_width = output_w * 0.9
+        available_height = top_padding * (1.0 - margin_ratio * 2)
+        longest_text = max(text_list, key=len) if any(text_list) else ''
+        fontsize_w = (available_width / len(longest_text)) if longest_text else 9999
+        num_lines = len(text_list)
+        if num_lines > 1:
+            denominator = num_lines + (num_lines - 1) * line_spacing_ratio
+            fontsize_h = available_height / denominator
+        else:
+            fontsize_h = available_height
+        fontsize = min(fontsize_w, fontsize_h, top_padding / 2)
+
+        # === NEW: 重新计算文本块起始位置以实现“底部对齐” ===
+
+        # 1. 计算单行高度（字体+行间距）
+        line_height = fontsize * (1 + line_spacing_ratio)
+
+        # 2. 计算整个文本块的总高度
+        # 总高度 = (行数 - 1) * 行高 + 最后一行的字体高度
+        total_text_block_height = (num_lines - 1) * line_height + fontsize
+
+        # 3. 计算文本块的起始Y坐标（反推法）
+        # 底部锚点 = 视频上边界 - 安全边距
+        bottom_anchor = video_y_start - (top_padding * margin_ratio)
+        # 起始Y坐标 = 底部锚点 - 文本块总高度
+        text_block_y_start = bottom_anchor - total_text_block_height
+
+        # 确保起始点不为负（在文本极多的情况下）
+        text_block_y_start = max(0, text_block_y_start)
+        # ======================================================
+
+        for i, text in enumerate(text_list):
+            if not text: continue
+
+            # 每行的Y坐标计算方式不变，因为它依赖于起始点
+            current_y = text_block_y_start + i * line_height
+            escaped_text = _escape_ffmpeg_text(text)
+
+            filter_str = (
+                f"drawtext="
+                f"fontfile='{escaped_font_path}':"
+                f"text='{escaped_text}':"
+                f"fontsize={fontsize}:"
+                f"fontcolor='{fontcolor}':"
+                f"shadowcolor='{shadowcolor}':shadowx=2:shadowy=2:"
+                f"x=(w-text_w)/2:"
+                f"y={current_y}:"
+                f"enable='between(t,{start_time},{end_time})'"
+            )
+            drawtext_filters.append(filter_str)
+
+    # --- 4. 组合最终滤镜并构建命令 (不变) ---
+    all_filters = [base_filter] + drawtext_filters
+    full_filter_chain = ",".join(all_filters)
+    command = [
+        'ffmpeg', '-i', input_video_path,
+        '-filter_complex', f"[0:v]{full_filter_chain}[outv]",
+        '-map', '[outv]', '-map', '0:a?',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+        '-c:a', 'aac', '-y', output_video_path
+    ]
+    print("即将执行的 FFmpeg 命令:")
+    print(shlex.join(command))
+
+    # --- 5. 执行命令 (不变) ---
+    try:
+        process = subprocess.run(
+            command, check=True, capture_output=True, text=True, encoding='utf-8'
+        )
+        print(f"\n视频处理成功！输出文件位于: {output_video_path}")
+    except subprocess.CalledProcessError as e:
+        print("\n--- FFmpeg 处理失败! ---")
+        print("FFmpeg 返回码:", e.returncode)
+        print("FFmpeg 错误信息:\n" + e.stderr)
+
+
+def _escape_ffmpeg_path(path):
+    """为 FFmpeg 滤镜中的文件路径进行转义，特别处理 Windows 路径。"""
+    if platform.system() == 'Windows':
+        return path.replace('\\', '\\\\').replace(':', '\\:')
+    return path
+
+
+
+def add_bgm_to_video(video_path: str, bgm_path: str, output_path: str, volume_percentage: int = 20, auto_compute=False, rate=1):
+    """
+    为视频添加背景音乐(BGM)。
+
+    功能:
+    - 如果 BGM 时长小于视频，则循环播放 BGM。
+    - 将 BGM 音量调整为指定百分比（例如 20 表示 20% 的原始音量）。
+    - 保留视频原声，与 BGM 进行混合。如果视频无原声，则仅添加 BGM。
+    - 视频流直接复制，不重新编码，以保证速度和画质。
+    - 输出视频的时长与原视频完全一致。
+
+    参数:
+    - video_path (str): 输入视频的文件路径。
+    - bgm_path (str): BGM 音频文件的路径。
+    - output_path (str): 输出视频的文件路径。
+    - volume_percentage (int, optional): BGM 的音量百分比 (0-100)。默认为 20。
+
+    返回:
+    - bool: 如果成功，返回 True。
+
+    抛出异常:
+    - FileNotFoundError: 如果输入文件或 ffmpeg/ffprobe 命令不存在。
+    - ValueError: 如果音量百分比无效。
+    - subprocess.CalledProcessError: 如果 ffmpeg 命令执行失败。
+    """
+    # 1. 检查依赖和输入参数
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError("错误: ffmpeg 命令未找到。请确保已安装 ffmpeg 并将其添加至系统 PATH。")
+    if not shutil.which("ffprobe"):
+        raise FileNotFoundError(
+            "错误: ffprobe 命令未找到。请确保已安装 ffmpeg (通常包含 ffprobe) 并将其添加至系统 PATH。")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"输入视频文件未找到: {video_path}")
+    if not os.path.exists(bgm_path):
+        raise FileNotFoundError(f"BGM 文件未找到: {bgm_path}")
+    if not 0 <= volume_percentage <= 100:
+        raise ValueError("音量百分比必须在 0 到 100 之间。")
+
+    if auto_compute:
+        bgm_volume = get_average_volume(bgm_path)
+        video_volume = get_average_volume(video_path)
+        volume_percentage = bgm_volume / video_volume * 100
+        volume_percentage *= 0.3
+        volume_percentage *= rate
+        if volume_percentage > 100:
+            volume_percentage = 100
+
+        print(f"自动计算的 BGM 音量百分比: {volume_percentage:.2f}% bgm平均音量: {bgm_volume:.2f}dBFS, 视频平均音量: {video_volume:.2f}dBFS")
+
+    # 2. 构建 ffmpeg 命令
+    # 将百分比转换为 ffmpeg 的音量因子（例如 20 -> 0.2）
+    volume_factor = volume_percentage / 100.0
+
+    # 检查视频是否已有音轨
+    video_has_audio = _probe_has_audio(video_path)
+
+    # -i video.mp4          -> 输入视频 (流 0)
+    # -stream_loop -1       -> 无限循环下一个输入
+    # -i bgm.mp3            -> 输入BGM (流 1)
+    # -filter_complex       -> 定义复杂的滤镜图
+    #   "[1:a]volume=...[bgm]" -> 将BGM(流1的音频)调整音量，并标记为[bgm]
+    #   "[0:a][bgm]amix=..."   -> 如果视频有原声(流0的音频)，则将其与[bgm]混合
+    # -map 0:v              -> 映射视频流
+    # -map "[a_out]"        -> 映射处理后的音频流
+    # -c:v copy             -> 复制视频流，不重新编码
+    # -shortest             -> 使输出文件的时长与最短的输入流（即原视频）一致
+    # -y                    -> 覆盖输出文件
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loglevel", "error",  # 只输出错误信息
+        "-hide_banner",  # 隐藏启动横幅
+        "-i", video_path,
+        "-stream_loop", "-1",
+        "-i", bgm_path,
+    ]
+
+    if video_has_audio:
+        # 混合原声和BGM
+        filter_complex = f"[0:a]volume=1.0[orig_a]; [1:a]volume={volume_factor}[bgm]; [orig_a][bgm]amix=inputs=2:duration=first:normalize=0[a_out]"
+        map_audio = "[a_out]"
+    else:
+        # 视频无原声，仅处理BGM
+        filter_complex = f"[1:a]volume={volume_factor}[a_out]"
+        map_audio = "[a_out]"
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", "0:v",
+        "-map", f"{map_audio}",
+        "-c:v", "copy",  # 直接复制视频流，速度快
+        "-c:a", "aac",  # 使用高质量的 AAC 音频编码器
+        "-b:a", "192k",  # 设置音频比特率为 192k
+        "-shortest",
+        output_path
+    ])
+
+    # 3. 执行命令
+    print("--------------------------------------------------")
+    print("开始为视频添加背景音乐...")
+    print(f"  输入视频: {video_path}")
+    print(f"  BGM: {bgm_path}")
+    print(f"  输出视频: {output_path}")
+    print(f"  BGM 音量: {volume_percentage}%")
+    # 使用 ' '.join 打印一个易于阅读和复制的命令版本
+    print(f"  执行的 FFmpeg 命令:\n  {' '.join(cmd)}")
+    print("--------------------------------------------------")
+
+    try:
+        # 使用 Popen 以便实时看到 ffmpeg 的输出，对于长时间任务更友好
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        for line in process.stdout:
+            # 你可以在这里解析ffmpeg的进度，但为了简单起见，我们只打印它
+            print(line.strip())
+
+        process.wait()  # 等待命令执行完成
+
+        if process.returncode != 0:
+            # 如果ffmpeg返回了错误码
+            raise subprocess.CalledProcessError(process.returncode, cmd)
+
+        print(f"\n处理完成！带BGM的视频已保存至: {output_path}")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print("\nFFmpeg 执行失败!")
+        print(f"错误码: {e.returncode}")
+        # 由于我们重定向了stderr，错误信息会在上面的循环中打印出来
+        return False
+    except Exception as e:
+        print(f"\n发生未知错误: {e}")
+        return False
+
+
+def _probe_has_audio(path):
+    """
+    一个内部辅助函数，用于检查媒体文件是否包含音频流。
+    """
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "a:0",  # 只选择第一个音频流
+        "-show_entries", "stream=codec_type",
+        "-of", "json",
+        path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    # 如果有音频流，输出将包含 "audio"
+    return "audio" in result.stdout
+
+
+
+def get_average_volume(media_path: str) -> float | None:
+    """
+    计算给定媒体文件（音频或视频）的平均音量。
+
+    该函数会加载媒体文件，并计算其音量的分贝值（dBFS）。
+    如果文件是视频，它会自动提取音频部分进行计算。
+
+    :param media_path: 媒体文件的路径（可以是音频或视频）。
+    :return: 以dBFS为单位的平均音量。如果文件无法加载或为完全静音，
+             对于无法加载的情况返回 None，对于完全静音的情况返回 -inf。
+    """
+    if not os.path.exists(media_path):
+        print(f"错误：文件不存在于路径: {media_path}")
+        return None
+
+    try:
+        print(f"正在加载媒体文件: {media_path}...")
+        # AudioSegment.from_file 可以智能处理音频和视频文件（提取音频）
+        audio = AudioSegment.from_file(media_path)
+    except Exception as e:
+        print(f"错误：无法加载媒体文件。请确保文件路径正确且FFmpeg已正确安装。错误信息: {e}")
+        return None
+
+    # .dBFS 属性可以计算出平均音量
+    average_dbfs = audio.dBFS
+
+    # -float('inf') 表示完全的静音
+    if average_dbfs == -float('inf'):
+        print("警告：输入媒体文件似乎是完全静音的。")
+
+    print(f"计算出的平均音量为: {average_dbfs:.2f} dBFS")
+    return average_dbfs

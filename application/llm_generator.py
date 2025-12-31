@@ -16,6 +16,7 @@ from collections import Counter
 
 import numpy as np
 
+from application.video_common_config import correct_owner_timestamps
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
 from utils.gemini import get_llm_content_gemini_flash_video
@@ -771,6 +772,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
             if not check_result:
                 error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
                 raise ValueError(error_info)
+            owner_asr_info = correct_owner_timestamps(owner_asr_info, video_duration_ms)
             return error_info, owner_asr_info
         except Exception as e:
             error_str = f"{error_info} {str(e)} {gen_error_info}"
@@ -1091,7 +1093,7 @@ def gen_video_script_llm(task_info, video_info_dict):
     print("生成场景的最终数据成功")
 
     prompt_path = './prompt/多素材视频生成不加过度.txt'
-    allow_commentary = creation_guidance_info.get('creation_guidance_info', {}).get('is_need_commentary', False)
+    allow_commentary = creation_guidance_info.get('is_need_commentary', False)
     is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
 
     if allow_commentary == True and is_need_narration == True:
