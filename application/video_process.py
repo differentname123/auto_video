@@ -518,7 +518,7 @@ def get_voice_info(tags=None):
 
 
 
-def gen_transition_video(video_path, split_scene_list, transition_text, voice_info):
+def gen_transition_video(video_path, split_scene_list, transition_text, voice_info, subtitle_box):
     """
     生成转场视频
     :return:
@@ -526,16 +526,16 @@ def gen_transition_video(video_path, split_scene_list, transition_text, voice_in
     base_dir = os.path.dirname(video_path)
     image_time = split_scene_list[0][0] + 20
     image_time_str = ms_to_time(image_time)
-    image_path = os.path.join(base_dir, 'transition', f"{image_time}.jpg")
+    image_path = os.path.join(base_dir, 'split_scene', f"{image_time}.jpg")
     os.makedirs(os.path.dirname(image_path), exist_ok=True)
 
-    transition_video_output_path = os.path.join(base_dir, 'transition', f"{image_time}.mp4")
+    transition_video_output_path = os.path.join(base_dir, 'split_scene', f"{image_time}.mp4")
     target_frame = get_frame_at_time_safe(video_path=video_path, time_str=image_time_str)
     cv2.imwrite(image_path, target_frame)
     # 获取图片的分辨率
     height, width, _ = target_frame.shape
     resolution = (width, height)
-    text_image_to_video_with_subtitles(transition_text, image_path, transition_video_output_path, short_text=transition_text, resolution=resolution, voice_info=voice_info)
+    text_image_to_video_with_subtitles(transition_text, image_path, transition_video_output_path, short_text=transition_text, resolution=resolution, voice_info=voice_info, fixed_rect=subtitle_box)
     return transition_video_output_path
 
 
@@ -553,7 +553,7 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
 
     # 如果场景数据已经存在就直接返回
     output_dir = os.path.dirname(video_path)
-    final_scene_output_path = os.path.join(output_dir, 'scene_remake', f"{new_script_scene.get('scene_id')}_remake.mp4")
+    final_scene_output_path = os.path.join(output_dir, 'split_scene', f"{new_script_scene.get('scene_id')}_remake.mp4")
     os.makedirs(os.path.dirname(final_scene_output_path), exist_ok=True)
 
     if is_valid_target_file_simple(final_scene_output_path):
@@ -566,7 +566,7 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
     # 生成转场视频
     transition_text = new_script_scene.get('transition_text', '')
     if transition_text:
-        transition_video_output_path = gen_transition_video(video_path, merged_segment_list, transition_text, voice_info)
+        transition_video_output_path = gen_transition_video(video_path, merged_segment_list, transition_text, voice_info, subtitle_box)
         if is_valid_target_file_simple(transition_video_output_path):
             need_merge_video_file_list.append(transition_video_output_path)
 

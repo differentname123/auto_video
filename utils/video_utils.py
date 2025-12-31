@@ -1575,35 +1575,28 @@ def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fi
     return str(output_path.resolve())
 
 
-
-
 def redub_video_with_ffmpeg(video_path: str,
                             segments_info: list,
                             output_path: str = "final_video_ffmpeg.mp4",
-                            keep_original_audio: bool = False) -> str:
+                            keep_original_audio: bool = False,
+                            max_speed_up: float = 2) -> str:
     """
     使用 FFmpeg 直接为视频重新配音。
-    如果新音频比对应的视频片段长，则慢放视频以匹配音频时长。
-    修复点：避免混音后的音量自然变小（禁用 amix 归一化 + 限幅防削波）。
+    自动调整视频速度以精确匹配音频时长，但增加了最大加速限制。
 
     :param video_path: 原始视频文件的路径。
-    :param segments_info: 一个包含片段信息的列表，每个元素至少包括：
-                          - 'startTime' (如 "00:00:05.000")
-                          - 'endTime'   (如 "00:00:10.000")
-                          - 'outputPath' (对应音频文件路径)
-                          - 'trimmedDuration' (新音频时长，秒) 可选；缺失时将尝试用 ffprobe 推断
-    :param output_path: 输出的最终视频文件路径。
-    :param keep_original_audio: 是否保留原始音频并与新音频混合。
-                                False (默认) - 替换原始音频。
-                                True - 混合原始音频和新音频（不归一化，不降音量）。
+    :param segments_info: 片段信息列表。
+    :param output_path: 输出路径。
+    :param keep_original_audio: 是否保留原始音频并混合。
+    :param max_speed_up: 视频最大加速倍率 (默认 1.5)。
+                         例如设置为 1.5，则视频最快只能变为原来的 1.5 倍速播放。
+                         如果音频过短，视频将不再强制对齐音频，而是保持 1.5 倍速播放完毕。
     :return: 输出视频的路径。
     """
     start_time = time.time()
+
     # ---------- 内部工具函数 ----------
     def _time_str_to_seconds(ts: str) -> float:
-        """
-        支持 "HH:MM:SS", "HH:MM:SS.mmm" 等格式。
-        """
         if not ts:
             return 0.0
         ts = ts.strip()
@@ -1619,9 +1612,6 @@ def redub_video_with_ffmpeg(video_path: str,
         return -val if neg else val
 
     def _probe_has_audio(path: str) -> bool:
-        """
-        通过 ffprobe 判断是否存在音频流。
-        """
         if not shutil.which("ffprobe"):
             return True
         try:
@@ -1638,9 +1628,6 @@ def redub_video_with_ffmpeg(video_path: str,
             return True
 
     def _probe_duration_seconds(path: str) -> float:
-        """
-        用 ffprobe 获取媒体总时长（秒），失败则返回 0。
-        """
         if not shutil.which("ffprobe"):
             return 0.0
         try:
@@ -1656,23 +1643,16 @@ def redub_video_with_ffmpeg(video_path: str,
             return 0.0
 
     def build_atempo_filter(tempo: float) -> str:
-        """
-        构建安全的 atempo 滤镜链，支持任意正 tempo 值。
-        FFmpeg 的 atempo 范围是 [0.5, 2.0]，超出需链式组合。
-        """
         if abs(tempo - 1.0) < 1e-6:
             return "anull"
         filters = []
         t = tempo
-        # 处理小于 0.5 的情况
         while t < 0.5:
             filters.append("atempo=0.5")
             t *= 2.0
-        # 处理大于 2.0 的情况
         while t > 2.0:
             filters.append("atempo=2.0")
             t /= 2.0
-        # 剩余部分
         if abs(t - 1.0) > 1e-6:
             filters.append(f"atempo={t:.6f}")
         return ",".join(filters)
@@ -1689,6 +1669,14 @@ def redub_video_with_ffmpeg(video_path: str,
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_files_list = []
         concat_file_path = os.path.join(temp_dir, "file_list.txt")
+
+        # 初始化变量
+        original_duration = 0.0
+        new_audio_duration = 0.0
+
+        # 这里的变量名修正为 pts_factor 以便理解（原代码叫 speed_multiplier）
+        # pts_factor < 1.0 意味着加速（时长变短）
+        pts_factor = 1.0
 
         for i, segment in enumerate(segments_info):
             segment_id = segment.get('id', i + 1)
@@ -1708,33 +1696,64 @@ def redub_video_with_ffmpeg(video_path: str,
             temp_output_path = os.path.join(temp_dir, f"temp_segment_{segment_id}.mp4")
             temp_files_list.append(temp_output_path)
 
-            speed_multiplier = 1.0
-            if new_audio_duration > original_duration and original_duration > 0:
-                speed_multiplier = new_audio_duration / original_duration
+            # [关键修改]：计算速度倍率与上限控制
+            # 1. 计算理论上需要的时长缩放系数 (Target PTS Factor)
+            target_pts_factor = 1.0
+            if original_duration > 0 and new_audio_duration > 0:
+                target_pts_factor = new_audio_duration / original_duration
 
+            # 2. 计算允许的最小缩放系数 (对应最大加速倍率)
+            # 例如 max_speed_up 为 1.5，则最小允许的时长系数为 1/1.5 = 0.666
+            min_pts_factor = 1.0 / max_speed_up
+
+            # 3. 应用限制逻辑
+            is_speed_limited = False
+            if target_pts_factor < min_pts_factor:
+                pts_factor = min_pts_factor
+                is_speed_limited = True
+            else:
+                pts_factor = target_pts_factor
+
+            # 简单的稳健性检查：防止过慢 (防止除以0等极端情况)
+            if pts_factor > 100.0: pts_factor = 100.0
+
+            # 实际的物理播放速度 (用于显示和音频调整)
+            real_speed_val = 1.0 / pts_factor
 
             # ---------- 构建滤镜与映射 ----------
             if keep_original_audio and source_has_audio:
-                # 需要混合原始音频和新音频
-                audio_tempo = 1.0 / speed_multiplier
+                # 视频速度是 real_speed_val，原音频也要匹配这个速度
+                audio_tempo = real_speed_val
                 atempo_filter = build_atempo_filter(audio_tempo)
+
                 filter_complex = (
-                    f"[0:v]setpts={speed_multiplier:.6f}*PTS[v];"
+                    f"[0:v]setpts={pts_factor:.6f}*PTS[v];"
                     f"[0:a]{atempo_filter},aformat=sample_fmts=fltp:channel_layouts=stereo[a0];"
                     f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo[a1];"
+                    # normalize=0 且 duration=first 或 longest
+                    # 这里依然使用 longest，如果视频因为限速变长了，新配音放完后背景音继续放是合理的
                     f"[a0][a1]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.97[a]"
                 )
                 map_args = ["-map", "[v]", "-map", "[a]"]
-                print("模式: 混合新旧音频（原始音频已同步变速）")
+
+                limit_msg = f" [已触发限速 {max_speed_up}x]" if is_speed_limited else ""
+                print(
+                    f"片段 {segment_id}: 混音模式。{original_duration:.2f}s -> {original_duration * pts_factor:.2f}s (倍率 {real_speed_val:.2f}x){limit_msg}")
+
             else:
-                # 替换模式：直接使用新音频
+                # 替换模式
                 filter_complex = (
-                    f"[0:v]setpts={speed_multiplier:.6f}*PTS[v];"
+                    f"[0:v]setpts={pts_factor:.6f}*PTS[v];"
                     f"[1:a]aformat=sample_fmts=fltp:channel_layouts=stereo,alimiter=limit=0.97[a]"
                 )
                 map_args = ["-map", "[v]", "-map", "[a]"]
+
+                limit_msg = f" [已触发限速 {max_speed_up}x]" if is_speed_limited else ""
                 if keep_original_audio and not source_has_audio:
-                    print("模式: 源视频无音轨，使用新音频替换。")
+                    print(f"片段 {segment_id}: 源视频无音轨，切换为替换模式。{limit_msg}")
+                else:
+                    print(
+                        f"片段 {segment_id}: 替换模式。{original_duration:.2f}s -> {original_duration * pts_factor:.2f}s (倍率 {real_speed_val:.2f}x){limit_msg}")
 
             base_cmd = [
                 "ffmpeg", "-y", "-loglevel", "error",
@@ -1792,7 +1811,9 @@ def redub_video_with_ffmpeg(video_path: str,
             print("拼接视频时 FFmpeg 发生错误：")
             print(f"FFmpeg Stderr:\n{e.stderr}")
             raise
-    print(f"进行音频匹配画面：原片段时长: {original_duration:.3f}s, 新音频时长: {new_audio_duration:.3f}s 视频速度调整为: {1/speed_multiplier:.3f}x 耗时: {time.time() - start_time:.2f}s")
+
+    if temp_files_list:
+        print(f"处理完成。总耗时: {time.time() - start_time:.2f}s")
 
     return output_path
 
@@ -1828,81 +1849,94 @@ def add_subtitles_to_video(
 
     # ------------------- [ 核心修改开始 ] -------------------
 
-    # 1. 获取视频尺寸以计算最大字幕宽度和矩形位置
+    # 1. 获取视频尺寸
     try:
-        # [调整] 同时获取视频宽度和高度
         video_width, video_height = get_video_dimensions(video_path)
-        max_subtitle_width = video_width * 0.9
-        # print(f"视频尺寸: {video_width}x{video_height}px, 字幕最大允许宽度: {max_subtitle_width:.0f}px")
     except (ValueError, FileNotFoundError) as e:
-        print(f"警告: 无法获取视频尺寸，将不执行字幕分割和矩形自动计算。错误: {e}")
-        processed_subtitles = subtitles_info
-        # 如果无法获取尺寸且需要自动计算，则必须报错退出
+        print(f"警告: 无法获取视频尺寸，将使用默认分辨率 1920x1080 进行计算。错误: {e}")
+        video_width, video_height = 1920, 1080
         if fixed_rect is None:
-            raise ValueError("无法获取视频尺寸，无法自动计算矩形区域。请手动提供 'fixed_rect' 参数。") from e
+            # 如果既没尺寸也没提供矩形，无法自动计算位置，必须报错
+            raise ValueError("无法获取视频尺寸且未提供 fixed_rect，无法继续。") from e
+
+    # 2. 【关键】先确定最终要用的字号 (effective_font_size)
+    # 必须在分割字幕前确定，否则检测不到超长
+    effective_font_size = font_size  # 默认值
+
+    # 设定最大允许宽度
+    if fixed_rect is not None:
+        # 如果用户指定了固定区域，根据区域高度计算字号
+        x1, y1 = fixed_rect[0]
+        x2, y2 = fixed_rect[1]
+        rect_h_fixed = y2 - y1
+        rect_w_fixed = x2 - x1
+
+        effective_font_size = int(rect_h_fixed * 0.8)
+        effective_font_size = max(1, effective_font_size)
+
+        # 最大宽度限制为矩形宽度（减去一点内边距）
+        max_subtitle_width = rect_w_fixed * 0.95
     else:
-        # 2. 加载字体用于计算文本宽度
-        # 注意：如果 fixed_rect 提供了，font_size 可能会被覆盖，但仍需字体对象用于分割
-        effective_font_size = font_size
-        if fixed_rect is not None:
-            top_left, bottom_right = fixed_rect
-            rect_height = bottom_right[1] - top_left[1]
-            effective_font_size = int(rect_height * 0.8)
-            # 确保字体大小至少为 1
-            effective_font_size = max(1, effective_font_size)
+        # 如果没有固定框，最大宽度为视频宽度的 90%
+        max_subtitle_width = video_width * 0.9
 
-        try:
-            font = ImageFont.truetype(font_path, effective_font_size)
-        except IOError:
-            raise FileNotFoundError(f"无法加载字体文件，请检查路径和文件格式: {font_path}")
+    # 3. 加载字体（使用最终确定的字号）
+    try:
+        font = ImageFont.truetype(font_path, effective_font_size)
+    except IOError:
+        raise FileNotFoundError(f"无法加载字体文件，请检查路径和文件格式: {font_path}")
 
-        # 3. 预处理字幕，分割过长行
-        # print("正在预处理字幕，检查并分割过长行...")
-        processed_subtitles = _process_and_split_subtitles(
-            subtitles_info,
-            font,
-            max_subtitle_width
-        )
-        # print(f"字幕预处理完成。原始字幕数: {len(subtitles_info)}, 处理后字幕数: {len(processed_subtitles)}")
+    # 4. 预处理字幕，分割过长行
+    # 此时 font 是大号字体，如果字太长，这里就会检测出来并进行分割
+    processed_subtitles = _process_and_split_subtitles(
+        subtitles_info,
+        font,
+        max_subtitle_width
+    )
 
-        # [调整] 如果 fixed_rect 未指定，则在此处自动计算
-        if fixed_rect is None:
-            # print("fixed_rect 未提供，开始自动计算矩形区域...")
-            if not processed_subtitles:
-                print("警告：没有字幕信息，无法计算矩形。将不绘制背景。")
-                fixed_rect = [[0, 0], [0, 0]]  # 创建一个0尺寸的矩形，避免后续代码出错
-            else:
-                max_text_w, max_text_h = 0, 0
-                for sub in processed_subtitles:
-                    # 使用 getbbox 获取包含多行文本的精确边界框
-                    bbox = font.getbbox(sub['optimizedText'])
-                    text_w = bbox[2] - bbox[0]
-                    text_h = bbox[3] - bbox[1]
-                    if text_w > max_text_w:
-                        max_text_w = text_w
-                    if text_h > max_text_h:
-                        max_text_h = text_h
+    # 5. 如果 fixed_rect 未指定，则在此处自动计算
+    if fixed_rect is None:
+        if not processed_subtitles:
+            print("警告：没有字幕信息，无法计算矩形。将不绘制背景。")
+            fixed_rect = [[0, 0], [0, 0]]
+        else:
+            max_text_w, max_text_h = 0, 0
+            for sub in processed_subtitles:
+                # 获取文字尺寸
+                try:
+                    w = font.getlength(sub['optimizedText'])
+                except AttributeError:
+                    w = font.getsize(sub['optimizedText'])[0]
 
-                # print(f"计算出的最大字幕尺寸: {max_text_w:.0f}x{max_text_h:.0f}px")
+                bbox = font.getbbox(sub['optimizedText'])
+                h = bbox[3] - bbox[1]
 
-                # 为矩形添加一些内边距（padding）
-                padding_x = effective_font_size  # 水平方向使用一个字体大小作为边距
-                padding_y = effective_font_size // 2  # 垂直方向使用半个字体大小作为边距
-                max_text_w = max_subtitle_width
-                rect_w = max_text_w + padding_x
-                rect_h = max_text_h + padding_y
+                if w > max_text_w: max_text_w = w
+                if h > max_text_h: max_text_h = h
 
-                # 计算矩形坐标
-                # 水平居中
-                rect_x1 = (video_width - rect_w) / 2
-                # 垂直位置与字幕文本对齐
-                rect_y1 = video_height - bottom_margin - max_text_h - (padding_y / 2)
+            # 为矩形添加一些内边距（padding）
+            padding_x = effective_font_size
+            padding_y = effective_font_size // 2
 
-                rect_x2 = rect_x1 + rect_w
-                rect_y2 = rect_y1 + rect_h
+            # 【修复】让背景框宽度跟随实际最长字幕，而不是强制设为视频宽度的90%
+            rect_w = max_text_w + padding_x
+            rect_h = max_text_h + padding_y
 
-                fixed_rect = [[int(rect_x1), int(rect_y1)], [int(rect_x2), int(rect_y2)]]
-                # print(f"自动计算的矩形区域为: {fixed_rect}")
+            # 再次检查：防止自动计算出的框偶尔超过屏幕
+            if rect_w > video_width:
+                rect_w = video_width
+
+            # 计算矩形坐标
+            rect_x1 = (video_width - rect_w) / 2
+            rect_y1 = video_height - bottom_margin - max_text_h - (padding_y / 2)
+
+            # 确保坐标是整数
+            rect_x1 = int(rect_x1)
+            rect_y1 = int(rect_y1)
+            rect_w = int(rect_w)
+            rect_h = int(rect_h)
+
+            fixed_rect = [[rect_x1, rect_y1], [rect_x1 + rect_w, rect_y1 + rect_h]]
 
     # ------------------- [ 核心修改结束 ] -------------------
 
@@ -1917,12 +1951,10 @@ def add_subtitles_to_video(
     rect_w = x2 - x1
     rect_h = y2 - y1
 
-    # 如果 fixed_rect 被提供，重新计算 font_size 用于 drawtext（与上面一致）
-    if fixed_rect is not None:
-        effective_font_size = int(rect_h * 0.8)
-        effective_font_size = max(1, effective_font_size)
-    else:
-        effective_font_size = font_size
+    # 注意：此处不再重新计算 effective_font_size，因为前面已经算好并用于分割逻辑了
+
+    display_font_size = int(effective_font_size * 1)
+    # ================= [ 修改结束 ] =================
 
     filters = []
     # 只有当矩形有实际大小时才添加绘制指令
@@ -1931,7 +1963,7 @@ def add_subtitles_to_video(
             start_time = _parse_subtitle_time(sub['startTime'])
             end_time = _parse_subtitle_time(sub['endTime'])
 
-            # 1) 先画固定大小的矩形
+            # 1) 先画固定大小的矩形 (这里依然使用基于 effective_font_size 算出来的 rect_w/rect_h)
             drawbox = (
                 f"drawbox="
                 f"x={x1}:y={y1}:w={rect_w}:h={rect_h}:"
@@ -1948,10 +1980,10 @@ def add_subtitles_to_video(
 
         if fixed_rect is not None:
             # 文字在 fixed_rect 内水平垂直居中
+            # 注意：ffmpeg 运行时使用的是当前 text_w (也就是小字体的宽)，所以依然会完美居中
             text_x_expr = f"x=({x1}+{x2})/2 - text_w/2"
             text_y_expr = f"y=({y1}+{y2})/2 - text_h/2"
         else:
-            # 原有逻辑：居中 + 底部偏移
             text_x_expr = "x=(w-text_w)/2"
             text_y_expr = f"y=h-text_h-{bottom_margin}"
 
@@ -1960,7 +1992,7 @@ def add_subtitles_to_video(
             f"drawtext="
             f"fontfile='{formatted_font_path}':"
             f"text='{text}':"
-            f"fontsize={effective_font_size}:"
+            f"fontsize={display_font_size}:"  # <--- 这里把 effective_font_size 改为 display_font_size
             f"fontcolor={font_color}:"
             f"{text_x_expr}:"
             f"{text_y_expr}:"
@@ -2179,7 +2211,8 @@ def text_image_to_video_with_subtitles(
     short_text: str = "",
     voice_info=None,
     cleanup: bool = True,
-    resolution: tuple = (1920, 1080)
+    resolution: tuple = (1920, 1080),
+    fixed_rect=None
 ) -> str:
     """
     根据文本和图片生成带字幕的视频，并可选添加背景音乐（bgm），并自动清理中间视频文件。
@@ -2254,8 +2287,7 @@ def text_image_to_video_with_subtitles(
         video_path=str(audio_video_path),
         subtitles_info=subtitle_data,
         output_path=str(subtitle_video_path),
-        font_size=70 / 1000 * min_size,
-        bottom_margin=30 / 1000 * min_size
+        fixed_rect=fixed_rect
     )
 
     # 5. 如果有简略文案，加第二层字幕
