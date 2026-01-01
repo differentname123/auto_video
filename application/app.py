@@ -8,6 +8,8 @@
 1. 优先利用本地映射和数据库缓存，减少重复解析。
 2. 任务查重加入 creative_guidance 校验，支持同素材不同指令的多次生成。
 3. 确保所有涉及的素材（无论新旧）都会再次执行保存操作。
+4. [新增] 统一返回格式 {status, message, errors}。
+5. [新增] 批次内 video_id 查重，防止单次请求包含重复视频内容。
 """
 
 import time
@@ -15,7 +17,7 @@ from typing import Optional, List, Tuple, Dict, Any
 
 from flask import Flask, request, jsonify, render_template, Response
 
-from utils.common_utils import read_json, save_json
+from utils.common_utils import read_json, save_json, check_timestamp
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
     ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH
@@ -65,8 +67,23 @@ def parse_douyin_video(video_url: str):
         return False, None, f"解析异常: {e}"
 
 
-def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str) -> Dict:
+
+def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
     """构建单条视频素材的存库数据结构"""
+    remove_time_segments = video_item.get('remove_time_segments', [])
+    split_time_points = video_item.get('split_time_points', [])
+
+    all_timestamps = split_time_points
+    for remove_time_segment in remove_time_segments:
+        start_time = remove_time_segment.split('-')[0]
+        end_time = remove_time_segment.split('-')[1]
+        all_timestamps.append(start_time)
+        all_timestamps.append(end_time)
+
+    error_info = check_timestamp(all_timestamps, meta_data.get('duration'))
+    if error_info:
+        return error_info, None
+
     # 提取基础信息
     base_info = {
         'video_title': meta_data.get('full_title') or meta_data.get('desc'),
@@ -89,7 +106,7 @@ def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str) 
         'comment_list': []
     }
 
-    return {
+    return error_info, {
         'video_id': video_id,
         'status': TaskStatus.PROCESSING,
         'error_info': None,
@@ -104,10 +121,8 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
     video_id_list = [m['video_id'] for m in materials]
 
     # 构建 original_url_info_list (将原始URL映射到解析后的video_id)
-    # 注意：materials可能来自数据库，也可能来自新解析，需确保base_info中有original_url
     successful_urls = {}
     for m in materials:
-        # 兼容处理：如果是新解析的在base_info里，如果是数据库读出来的也在base_info里
         original_url = m.get('base_info', {}).get('original_url')
         if original_url:
             successful_urls[original_url] = m['video_id']
@@ -117,7 +132,6 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
     for item in original_video_list:
         url = item.get('original_url')
         if url in successful_urls:
-            # 复制一份 item 避免修改原始数据
             info_item = item.copy()
             info_item['video_id'] = successful_urls[url]
             url_info_list.append(info_item)
@@ -141,15 +155,25 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
 def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
     """
     处理一键生成请求的核心业务流程
-    步骤：校验 -> 尝试获取缓存/批量解析 -> 智能查重 -> 保存素材 -> 保存任务
     """
+    # 初始化返回结构
+    response_structure = {
+        'status': ResponseStatus.ERROR,
+        'message': '',
+        'errors': []  # 明确定义 errors 字段
+    }
+
     # --- Step 1: 基础参数校验 ---
     if not request_data or not request_data.get('userName') or not request_data.get('video_list'):
-        return {'status': ResponseStatus.ERROR, 'message': ErrorMessage.MISSING_REQUIRED_FIELDS}, 400
+        response_structure['message'] = ErrorMessage.MISSING_REQUIRED_FIELDS
+        response_structure['errors'].append("缺少 userName 或 video_list 参数")
+        return response_structure, 400
 
     user_name = request_data['userName']
     if user_name not in ALLOWED_USER_LIST:
-        return {'status': ResponseStatus.ERROR, 'message': f"用户名{user_name}未向管理员注册"}, 403
+        response_structure['message'] = f"用户名{user_name}未向管理员注册"
+        response_structure['errors'].append("用户鉴权失败")
+        return response_structure, 403
 
     global_settings = request_data.get('global_settings', {})
     input_video_list = request_data['video_list']
@@ -159,124 +183,122 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
     # --- Step 2: 获取视频素材 (优先查本地缓存+DB，失败则解析) ---
     valid_materials = []
     errors = []
+    # [新增] 用于当前批次的去重集合
+    current_batch_video_ids = set()
+
     original_url_id_info = read_json(LOCAL_ORIGIN_URL_ID_INFO_PATH)
-    is_url_mapping_updated = False  # 标记是否需要回写本地json
+    is_url_mapping_updated = False
 
     for idx, video_item in enumerate(input_video_list, start=1):
         url = video_item.get('original_url', '').strip()
         if not url:
-            errors.append(f"第 {idx} 条视频链接为空")
+            errors.append(f"第 {idx} 条记录错误: 视频链接为空")
             continue
 
-        # [需求1优化]：先尝试从本地映射ID + 数据库内容获取
         cached_material = None
         local_video_id = original_url_id_info.get(url)
 
+        # 1. 尝试从缓存获取
         if local_video_id:
-            # 如果本地有ID，尝试去数据库查完整数据
-            # find_materials_by_ids 通常返回列表，我们取第一个
+            # 数据库查询
             db_results = mongo_manager.find_materials_by_ids([local_video_id])
             if db_results and len(db_results) > 0:
                 print(f"URL命中缓存，跳过解析: {url}")
-                # 使用数据库中的数据，并更新extra_info以匹配当前请求上下文（如果需要）
                 cached_material = db_results[0]
-                # 确保 extra_info 是当前请求传入的（可能包含新的时间戳或其他标记）
                 cached_material['extra_info'] = video_item
 
         if cached_material:
-            valid_materials.append(cached_material)
+            video_id = cached_material.get('video_id')
         else:
-            # 缓存未命中（无ID 或 有ID但库里没数据），执行解析
+            # 缓存未命中，执行解析
             print(f"缓存未命中，开始解析: {url}")
             success, meta, err_msg = parse_douyin_video(url)
 
             if not success:
-                errors.append(f"第 {idx} 条解析失败: {err_msg}")
+                errors.append(f"第 {idx} 条记录解析失败 (URL: {url}): {err_msg}")
                 continue
 
             video_id = meta.get('id')
             if not video_id:
-                errors.append(f"第 {idx} 条解析成功但无ID")
+                errors.append(f"第 {idx} 条记录解析成功但无ID (URL: {url})")
                 continue
 
-            # 更新本地映射
+            # 解析成功，准备更新缓存和构建数据
             original_url_id_info[url] = video_id
             is_url_mapping_updated = True
+            error_info, cached_material = build_video_material_data(video_item, meta, video_id)
+            if error_info:
+                errors.append(f"第 {idx} 条记录时间戳错误 (URL: {url}): {error_info}")
+                continue
 
-            # 调用纯函数构建素材数据
-            material = build_video_material_data(video_item, meta, video_id)
-            valid_materials.append(material)
+        # 3. [新增] 核心逻辑：检查当前批次是否重复
+        if video_id in current_batch_video_ids:
+            errors.append(f"第 {idx} 条记录重复 (URL: {url}): 对应的视频ID {video_id} 已存在于当前提交的任务列表中，不允许重复添加。")
+            continue
 
-    # 仅当有更新时回写本地文件
+        # 通过所有检查，加入列表
+        current_batch_video_ids.add(video_id)
+        if cached_material:
+            valid_materials.append(cached_material)
+
+    # 回写本地缓存
     if is_url_mapping_updated:
         save_json(LOCAL_ORIGIN_URL_ID_INFO_PATH, original_url_id_info)
 
+    # 如果有任何错误（包括解析失败或重复），根据业务需求这里选择报错返回
+    # 你也可以选择"忽略错误继续执行"，但为了前端明确知道问题，这里设为一旦有错则整体失败
     if errors:
-        return {
-            'status': ResponseStatus.ERROR,
-            'message': ErrorMessage.PARTIAL_PARSE_FAILURE,
-            'errors': errors
-        }, 400
+        response_structure['message'] = ErrorMessage.PARTIAL_PARSE_FAILURE
+        response_structure['errors'] = errors
+        return response_structure, 400
 
     if not valid_materials:
-        return {'status': ResponseStatus.ERROR, 'message': "无有效视频可处理"}, 400
+        response_structure['message'] = "无有效视频可处理"
+        response_structure['errors'].append("解析后未获得任何有效素材")
+        return response_structure, 400
 
-    # --- Step 3: 任务查重 (优化版：同时校验 creative_guidance) ---
+    # --- Step 3: 任务查重 (历史任务校验) ---
     video_ids = [m['video_id'] for m in valid_materials]
-
-    # 获取数据库中包含这些 video_ids 的已有任务
-    # 假设 find_task_by_exact_video_ids 返回的是匹配的任务列表(或单个任务对象)，而非简单的True/False
-    # 如果原方法只返回True，需要修改 mongo_manager 让其返回具体数据。
-    # 这里假定它返回所有 video_id_list 完全匹配的任务列表。
     existing_tasks = mongo_manager.find_task_by_exact_video_ids(video_ids)
 
-    # [需求2优化]：判定重复逻辑
     is_duplicate_task = False
     current_guidance = global_settings.get('creative_guidance', '')
 
     if existing_tasks:
-        # 统一转为列表处理
         if not isinstance(existing_tasks, list):
             existing_tasks = [existing_tasks]
 
         for task in existing_tasks:
-            # 获取已有任务的 creative_guidance
-            task_guidance_info = task.get('creation_guidance_info', {})
-            # 兼容有些历史数据可能没有 creation_guidance_info 字段的情况
-            if task_guidance_info is None:
-                task_guidance_info = {}
-
+            task_guidance_info = task.get('creation_guidance_info', {}) or {}
             old_guidance = task_guidance_info.get('creative_guidance', '')
-
-            # 如果 video_ids 相同 且 guidance 也相同，才判定为重复
             if old_guidance == current_guidance:
                 is_duplicate_task = True
                 break
 
     if is_duplicate_task:
-        print(f"用户 {user_name} 提交的任务完全重复（视频+Prompt相同），跳过。Ids: {video_ids}")
-        return {'status': ResponseStatus.SUCCESS, 'message': ErrorMessage.TASK_ALREADY_EXISTS}, 200
+        print(f"用户 {user_name} 提交的任务完全重复，跳过。")
+        response_structure['status'] = ResponseStatus.SUCCESS # 业务上算成功处理（已存在）
+        response_structure['message'] = ErrorMessage.TASK_ALREADY_EXISTS
+        response_structure['errors'] = [] # 无错误，只是提示已存在
+        return response_structure, 200
 
-    # --- Step 4: 保存视频素材 (独立步骤) ---
-    # [需求3优化]：无论素材是查出来的还是新解析的，都执行 upsert 操作
+    # --- Step 4 & 5: 保存数据 ---
     try:
         mongo_manager.upsert_materials(valid_materials)
-        print(f"成功保存/更新 {len(valid_materials)} 条视频素材。")
-    except Exception as e:
-        app.logger.error(f"保存素材失败: {e}")
-        return {'status': ResponseStatus.ERROR, 'message': "数据库错误: 无法保存视频素材"}, 500
-
-    # --- Step 5: 构建并保存任务 (独立步骤) ---
-    try:
-        # 调用纯函数构建任务数据
         task_data = build_publish_task_data(user_name, global_settings, valid_materials, input_video_list)
         mongo_manager.upsert_tasks([task_data])
-        print(f"成功创建新任务，包含 {len(valid_materials)} 个视频。")
-    except Exception as e:
-        app.logger.error(f"保存任务失败: {e}")
-        return {'status': ResponseStatus.ERROR, 'message': "数据库错误: 无法创建任务"}, 500
 
-    return {'status': ResponseStatus.SUCCESS, 'message': f'新任务已成功创建，包含 {len(valid_materials)} 个视频。'}, 200
+        print(f"成功创建新任务，包含 {len(valid_materials)} 个视频。")
+        response_structure['status'] = ResponseStatus.SUCCESS
+        response_structure['message'] = f'新任务已成功创建，包含 {len(valid_materials)} 个视频。'
+        response_structure['errors'] = [] # 成功时 errors 为空列表
+        return response_structure, 200
+
+    except Exception as e:
+        app.logger.error(f"数据库操作失败: {e}")
+        response_structure['message'] = "系统内部错误: 数据库保存失败"
+        response_structure['errors'].append(str(e))
+        return response_structure, 500
 
 
 # =============================================================================
@@ -303,7 +325,8 @@ def one_click_generate() -> Tuple[Response, int]:
         app.logger.exception("one_click_generate 接口发生未处理异常")
         return jsonify({
             'status': ResponseStatus.ERROR,
-            'message': f'内部服务器错误: {str(e)}'
+            'message': '内部服务器错误',
+            'errors': [str(e)]
         }), 500
 
 
@@ -312,6 +335,8 @@ def get_user_upload_info() -> Response:
     """获取用户上传统计信息 (Mock)"""
     return jsonify({
         'status': ResponseStatus.SUCCESS,
+        'message': '获取成功',
+        'errors': [],
         'data': {
             'total_count_today': 0,
             'unprocessed_count_today': 0,

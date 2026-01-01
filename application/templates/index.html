@@ -620,7 +620,6 @@
                 </div>
             </div>
 
-            <!-- 新增: 剪辑指导 -->
             <div style="margin-top: 15px;">
                 <div class="label-wrap">
                     <span class="option-label">场景划分指导</span>
@@ -630,7 +629,6 @@
                 <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
             </div>
 
-            <!-- 新增: 待剔除画面时间段 -->
             <div class="dynamic-section">
                 <div class="label-wrap">
                     <span class="option-label">待剔除画面时间段</span>
@@ -643,7 +641,6 @@
                 </button>
             </div>
 
-            <!-- 新增: 分割点时间段 -->
             <div class="dynamic-section">
                 <div class="label-wrap">
                     <span class="option-label">分割点时间段</span>
@@ -761,6 +758,8 @@
         };
 
         console.log('Payload:', payload);
+
+        // 1. 锁定按钮并显示加载中
         els.submitBtn.disabled = true;
         els.submitBtn.innerHTML = '处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
@@ -768,17 +767,37 @@
         try {
             const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
             const d = await res.json();
+
+            // 2. 提前隐藏加载动画，以便 alert 不会阻塞UI更新
+            document.getElementById('loading-mask').classList.add('hidden');
+
+            // 3. 详细解析响应结果
             if(res.ok) {
-                alert('✅ 任务提交成功！');
+                // HTTP 200 成功 (含正常创建 和 重复任务提示)
+                // 后端返回结构: { status: "success", message: "xxx" }
+                alert(`✅ 提交结果：\n\n${d.message}`);
                 fetchUploadStats();
             } else {
-                alert('❌ 提交失败: ' + (d.message||'未知错误'));
+                // HTTP 400/500 错误
+                // 后端返回结构: { status: "error", message: "xxx", errors: ["..."] }
+                let errorDetails = d.message || '未知错误';
+
+                // 如果有详细的错误列表（例如部分解析失败），追加显示
+                if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
+                    errorDetails += '\n\n----------------\n❌ 详细错误列表：\n' + d.errors.join('\n');
+                }
+
+                alert(`❌ 提交失败：\n\n${errorDetails}`);
             }
-        } catch(e) { alert('❌ 网络连接错误'); }
+        } catch(e) {
+            document.getElementById('loading-mask').classList.add('hidden');
+            alert('❌ 网络请求发生错误，请检查网络连接。');
+            console.error(e);
+        }
         finally {
+            // 4. 恢复按钮状态
             els.submitBtn.disabled = false;
             els.submitBtn.innerHTML = '提交创作任务';
-            document.getElementById('loading-mask').classList.add('hidden');
         }
     });
 </script>

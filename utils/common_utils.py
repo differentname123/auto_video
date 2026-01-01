@@ -364,3 +364,19 @@ def remove_last_punctuation(sentence: str) -> str:
   if sentence and sentence[-1] in all_punctuations:
       return sentence[:-1]
   return sentence
+
+def check_timestamp(all_timestamps, duration):
+    """
+    检查时间是否都在正常的范围内
+    :param all_timestamps:
+    :param duration:
+    :return:
+    """
+    error_info = ""
+    duration_ms = time_to_ms(duration)
+    for ts in all_timestamps:
+        ts_ms = time_to_ms(ts)
+        if ts_ms < 0 or ts_ms > duration_ms:
+            error_info += f"时间戳 {ts} 超出视频范围 (0 - {duration})。\n"
+            return error_info
+    return ""
