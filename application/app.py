@@ -10,6 +10,7 @@
 3. 确保所有涉及的素材（无论新旧）都会再次执行保存操作。
 4. [新增] 统一返回格式 {status, message, errors}。
 5. [新增] 批次内 video_id 查重，防止单次请求包含重复视频内容。
+6. [修复] 修复了 build_video_material_data 返回值解包错误，并正确集成了 validate_timestamp。
 """
 
 import time
@@ -66,24 +67,29 @@ def parse_douyin_video(video_url: str):
         print(f"解析URL '{video_url}' 异常: {e}")
         return False, None, f"解析异常: {e}"
 
-
-
-def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
-    """构建单条视频素材的存库数据结构"""
+def validate_timestamp(video_item, duration):
+    """
+    校验用户输入的时间戳是否超出视频时长
+    """
     remove_time_segments = video_item.get('remove_time_segments', [])
     split_time_points = video_item.get('split_time_points', [])
 
-    all_timestamps = split_time_points
+    # 这里的切片逻辑需要拷贝一份，防止修改原数据
+    all_timestamps = list(split_time_points)
     for remove_time_segment in remove_time_segments:
-        start_time = remove_time_segment.split('-')[0]
-        end_time = remove_time_segment.split('-')[1]
-        all_timestamps.append(start_time)
-        all_timestamps.append(end_time)
+        # 简单校验格式，防止 crash
+        if '-' in remove_time_segment:
+            parts = remove_time_segment.split('-')
+            if len(parts) == 2:
+                all_timestamps.append(parts[0])
+                all_timestamps.append(parts[1])
 
-    error_info = check_timestamp(all_timestamps, meta_data.get('duration'))
-    if error_info:
-        return error_info, None
+    # 调用 common_utils 中的校验逻辑
+    error_info = check_timestamp(all_timestamps, duration)
+    return error_info, None
 
+def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
+    """构建单条视频素材的存库数据结构"""
     # 提取基础信息
     base_info = {
         'video_title': meta_data.get('full_title') or meta_data.get('desc'),
@@ -106,7 +112,7 @@ def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
         'comment_list': []
     }
 
-    return error_info, {
+    return {
         'video_id': video_id,
         'status': TaskStatus.PROCESSING,
         'error_info': None,
@@ -197,6 +203,9 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
 
         cached_material = None
         local_video_id = original_url_id_info.get(url)
+        meta_data = None # 临时存储元数据
+        current_video_id = None # 临时存储 ID
+        duration = 0 # 临时存储时长
 
         # 1. 尝试从缓存获取
         if local_video_id:
@@ -205,12 +214,14 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
             if db_results and len(db_results) > 0:
                 print(f"URL命中缓存，跳过解析: {url}")
                 cached_material = db_results[0]
+                # 更新 input 的指令到 material 中
                 cached_material['extra_info'] = video_item
+                current_video_id = cached_material.get('video_id')
+                # 从缓存中获取时长
+                duration = cached_material.get('base_info', {}).get('duration', 0)
 
-        if cached_material:
-            video_id = cached_material.get('video_id')
-        else:
-            # 缓存未命中，执行解析
+        # 2. 如果缓存未命中，执行解析
+        if not cached_material:
             print(f"缓存未命中，开始解析: {url}")
             success, meta, err_msg = parse_douyin_video(url)
 
@@ -218,26 +229,39 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
                 errors.append(f"第 {idx} 条记录解析失败 (URL: {url}): {err_msg}")
                 continue
 
-            video_id = meta.get('id')
-            if not video_id:
+            current_video_id = meta.get('id')
+            if not current_video_id:
                 errors.append(f"第 {idx} 条记录解析成功但无ID (URL: {url})")
                 continue
 
-            # 解析成功，准备更新缓存和构建数据
-            original_url_id_info[url] = video_id
-            is_url_mapping_updated = True
-            error_info, cached_material = build_video_material_data(video_item, meta, video_id)
-            if error_info:
-                errors.append(f"第 {idx} 条记录时间戳错误 (URL: {url}): {error_info}")
-                continue
+            # 解析成功，记录元数据和时长
+            meta_data = meta
+            duration = meta.get('duration', 0)
 
-        # 3. [新增] 核心逻辑：检查当前批次是否重复
-        if video_id in current_batch_video_ids:
-            errors.append(f"第 {idx} 条记录重复 (URL: {url}): 对应的视频ID {video_id} 已存在于当前提交的任务列表中，不允许重复添加。")
+            # 标记需要更新本地映射
+            original_url_id_info[url] = current_video_id
+            is_url_mapping_updated = True
+
+        # --- 核心修改：在此处插入 validate_timestamp ---
+        # 此时无论来自缓存还是新解析，我们都有了 duration 和 video_item
+        time_err, _ = validate_timestamp(video_item, duration)
+        if time_err:
+            errors.append(f"第 {idx} 条记录时间戳错误 (URL: {url}): {time_err}")
+            continue
+        # -------------------------------------------
+
+        # 3. 如果是新解析的数据，构建 material 对象 (缓存命中的话 cached_material 已存在)
+        if not cached_material:
+            # 注意：build_video_material_data 返回的是 dict，不是 tuple
+            cached_material = build_video_material_data(video_item, meta_data, current_video_id)
+
+        # 4. [新增] 核心逻辑：检查当前批次是否重复
+        if current_video_id in current_batch_video_ids:
+            errors.append(f"第 {idx} 条记录重复 (URL: {url}): 对应的视频ID {current_video_id} 已存在于当前提交的任务列表中，不允许重复添加。")
             continue
 
         # 通过所有检查，加入列表
-        current_batch_video_ids.add(video_id)
+        current_batch_video_ids.add(current_video_id)
         if cached_material:
             valid_materials.append(cached_material)
 
@@ -246,7 +270,6 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         save_json(LOCAL_ORIGIN_URL_ID_INFO_PATH, original_url_id_info)
 
     # 如果有任何错误（包括解析失败或重复），根据业务需求这里选择报错返回
-    # 你也可以选择"忽略错误继续执行"，但为了前端明确知道问题，这里设为一旦有错则整体失败
     if errors:
         response_structure['message'] = ErrorMessage.PARTIAL_PARSE_FAILURE
         response_structure['errors'] = errors
