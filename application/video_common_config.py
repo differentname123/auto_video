@@ -24,6 +24,9 @@ class ErrorMessage:
     TASK_ALREADY_EXISTS = '任务已存在，无需重复创建。'
     PARSE_NO_METADATA = '解析失败：未能从链接中提取到任何元数据'
 
+ALLOWED_USER_LIST = ['mama']
+LOCAL_ORIGIN_URL_ID_INFO_PATH = r'W:/project/python_project/auto_video/videos/origin_url_id_info.json'
+
 class TaskStatus:
     """任务状态常量"""
     PROCESSING = '处理中'

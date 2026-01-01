@@ -18,6 +18,9 @@ from typing import Union
 
 import aiofiles
 import aiohttp
+from filelock import FileLock
+
+
 def read_json(json_path):
     """
     读取 JSON 文件并返回内容。
@@ -40,15 +43,20 @@ def read_json(json_path):
 
 
 def save_json(json_path, data):
-    """
-    将数据保存为 JSON 文件。如果路径不存在则自动创建。
-    """
     dir_path = os.path.dirname(json_path)
-    if dir_path:  # 只有在有实际目录时才创建
+    if dir_path:
         os.makedirs(dir_path, exist_ok=True)
 
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    # 锁文件通常以 .lock 结尾
+    lock_path = json_path + ".lock"
+
+    # FileLock 会在文件系统层面创建锁，支持多进程和多线程安全
+    with FileLock(lock_path):
+        # 原子写入
+        tmp_path = json_path + ".tmp"
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        os.replace(tmp_path, json_path)
 
 
 # 2. 基础辅助功能
