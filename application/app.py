@@ -5,57 +5,22 @@
 解析抖音视频元数据，并将任务信息存储到MongoDB中。
 """
 
-import sys
-import os
 import time
 from typing import Optional
 from dataclasses import dataclass
 
 from flask import Flask, request, jsonify, render_template, Response
 
-from video_common_config import TaskStatus, _configure_third_party_paths
-
-# =============================================================================
-# 路径配置
-# =============================================================================
-
+from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus
 
 
 _configure_third_party_paths()
 
-# =============================================================================
-# 依赖导入（必须在路径配置之后）
-# =============================================================================
 
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 from third_party.TikTokDownloader.douyin_downloader import get_meta_info
 
-
-# =============================================================================
-# 常量定义
-# =============================================================================
-
-
-
-class ResponseStatus:
-    """API响应状态常量"""
-    SUCCESS = 'success'
-    ERROR = 'error'
-
-
-class ErrorMessage:
-    """错误消息常量"""
-    EMPTY_REQUEST_BODY = '请求体为空'
-    MISSING_REQUIRED_FIELDS = '用户名或视频列表为空'
-    PARTIAL_PARSE_FAILURE = '部分视频解析失败，任务未创建。'
-    TASK_ALREADY_EXISTS = '任务已存在，无需重复创建。'
-    PARSE_NO_METADATA = '解析失败：未能从链接中提取到任何元数据'
-
-
-# =============================================================================
-# 数据类定义
-# =============================================================================
 
 @dataclass
 class ParseResult:
@@ -65,9 +30,6 @@ class ParseResult:
     error_message: Optional[str] = None
 
 
-# =============================================================================
-# 应用初始化
-# =============================================================================
 
 app = Flask(__name__)
 

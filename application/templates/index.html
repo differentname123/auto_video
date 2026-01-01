@@ -65,7 +65,7 @@
             background-color: #e6f7ff; color: var(--primary-color);
             font-size: 12px; font-weight: bold; cursor: help;
             transition: background-color 0.2s, color 0.2s;
-            flex-shrink: 0; /* 防止图标被压缩 */
+            flex-shrink: 0;
         }
 
         .info-icon:hover {
@@ -145,6 +145,62 @@
         .option-item { display: flex; flex-direction: column; gap: 6px; }
         .option-label { font-size: 0.85rem; color: #555; font-weight: 500; }
         .required-star { color: #ff4d4f; }
+
+        /* --- 新增样式: 动态时间段 --- */
+        .dynamic-section {
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px dashed #eee;
+        }
+        .dynamic-list-container {
+            margin-top: 8px;
+        }
+        .dynamic-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .time-picker-input {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-family: monospace; /* 时间对齐 */
+        }
+        .btn-mini {
+            padding: 5px 10px;
+            font-size: 0.85rem;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+        .btn-add-row {
+            background-color: #f6ffed;
+            border-color: #b7eb8f;
+            color: #389e0d;
+            margin-top: 5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-add-row:hover {
+            background-color: #d9f7be;
+        }
+        .btn-del-row {
+            background-color: #fff1f0;
+            border-color: #ffa39e;
+            color: #f5222d;
+            padding: 6px 10px;
+        }
+        .btn-del-row:hover {
+            background-color: #ffccc7;
+        }
+        .time-separator {
+            color: #999;
+            font-weight: bold;
+        }
 
         /* --- 6. 全局设置区域 --- */
         .global-settings-box {
@@ -251,12 +307,11 @@
 
             <div style="margin: 25px 0;">
                 <button type="button" id="add-video-btn" class="btn btn-secondary">
-                    <span style="font-size: 1.2rem; vertical-align: -1px;">+</span> 添加视频链接
+                    <span style="font-size: 1.2rem; vertical-align: -1px;">+</span> 添加素材链接
                 </button>
             </div>
 
             <div class="global-settings-box">
-                <!-- 原创处理开关已移除，现在直接显示高级选项 -->
                 <div id="advanced-options" class="advanced-options">
                     <div class="settings-header">🛠️ 创作参数设置</div>
 
@@ -374,7 +429,6 @@
         videoList: document.getElementById('video-list-container'),
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
-        // globalOriginalRadios 已移除
         advancedOptions: document.getElementById('advanced-options'),
         dateSelect: document.getElementById('schedule-date'),
         stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
@@ -431,6 +485,38 @@
                 }
             }
         } catch(e) {}
+    }
+
+    /* --- 新增辅助函数：动态添加时间段行 --- */
+    window.addTimeSegmentRow = function(cardId) {
+        const container = document.getElementById(`remove-segments-list-${cardId}`);
+        const row = document.createElement('div');
+        row.className = 'dynamic-row time-segment-row';
+        // 使用 type="time" step="0.001" 支持毫秒
+        row.innerHTML = `
+            <input type="time" step="0.001" class="time-picker-input start-time" required>
+            <span class="time-separator">-</span>
+            <input type="time" step="0.001" class="time-picker-input end-time" required>
+            <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
+        `;
+        container.appendChild(row);
+    }
+
+    /* --- 新增辅助函数：动态添加分割点行 --- */
+    window.addSplitPointRow = function(cardId) {
+        const container = document.getElementById(`split-points-list-${cardId}`);
+        const row = document.createElement('div');
+        row.className = 'dynamic-row split-point-row';
+        row.innerHTML = `
+            <input type="time" step="0.001" class="time-picker-input split-point" required>
+            <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
+        `;
+        container.appendChild(row);
+    }
+
+    /* --- 新增辅助函数：删除行 --- */
+    window.removeDynamicRow = function(btn) {
+        btn.parentElement.remove();
     }
 
     function addVideoCard() {
@@ -533,14 +619,48 @@
                     </select>
                 </div>
             </div>
+
+            <!-- 新增: 剪辑指导 -->
+            <div style="margin-top: 15px;">
+                <div class="label-wrap">
+                    <span class="option-label">场景划分指导</span>
+                    <i class="info-icon">?</i>
+                    <span class="tooltip-text">按照你的方案来划分场景，例如：帮我划分为三个场景分别是前期进攻，关键进球以及赛后回放这三个场景</span>
+                </div>
+                <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
+            </div>
+
+            <!-- 新增: 待剔除画面时间段 -->
+            <div class="dynamic-section">
+                <div class="label-wrap">
+                    <span class="option-label">待剔除画面时间段</span>
+                    <i class="info-icon">?</i>
+                    <span class="tooltip-text">指定视频中需要删除的时间范围，支持毫秒。会严格按照提供的时间段来进行切分</span>
+                </div>
+                <div id="remove-segments-list-${id}" class="dynamic-list-container"></div>
+                <button type="button" class="btn-mini btn-add-row" onclick="addTimeSegmentRow(${id})">
+                    <span>+</span> 添加时间段
+                </button>
+            </div>
+
+            <!-- 新增: 分割点时间段 -->
+            <div class="dynamic-section">
+                <div class="label-wrap">
+                    <span class="option-label">分割点时间段</span>
+                    <i class="info-icon">?</i>
+                    <span class="tooltip-text">指定视频的强制分割点。至少一定会在提供的时间点上进行切割</span>
+                </div>
+                <div id="split-points-list-${id}" class="dynamic-list-container"></div>
+                <button type="button" class="btn-mini btn-add-row" onclick="addSplitPointRow(${id})">
+                    <span>+</span> 添加时间点
+                </button>
+            </div>
         `;
         els.videoList.appendChild(card);
     }
 
     els.addVideoBtn.addEventListener('click', addVideoCard);
     window.removeCard = (id) => document.getElementById(`video-card-${id}`)?.remove();
-
-    // 移除了 原创处理单选框 的事件监听代码
 
     els.submitBtn.addEventListener('click', async () => {
         const cards = document.querySelectorAll('.video-item-card');
@@ -563,9 +683,35 @@
 
             const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
             const adFaceVal = card.querySelector('.select-ad-face').value;
-
-            // 获取新选项的值
             const sceneOrderFixedVal = card.querySelector('.select-scene-order-fixed').value;
+
+            // 获取新增字段：剪辑指导
+            const splitGuidanceVal = card.querySelector('.textarea-split-guidance').value.trim();
+
+            // 获取新增字段：待剔除时间段
+            const removeSegments = [];
+            const segmentRows = card.querySelectorAll('.time-segment-row');
+            for (let row of segmentRows) {
+                const start = row.querySelector('.start-time').value;
+                const end = row.querySelector('.end-time').value;
+                if (start && end) {
+                    if (start >= end) {
+                        err = `第 ${idx + 1} 个视频的剔除时间段有误：\n结束时间 (${end}) 必须大于 开始时间 (${start})`;
+                        return;
+                    }
+                    removeSegments.push(`${start}-${end}`);
+                }
+            }
+
+            // 获取新增字段：分割点时间点
+            const splitPoints = [];
+            const pointRows = card.querySelectorAll('.split-point-row');
+            for (let row of pointRows) {
+                const point = row.querySelector('.split-point').value;
+                if (point) {
+                    splitPoints.push(point);
+                }
+            }
 
             vList.push({
                 original_url: url,
@@ -575,14 +721,17 @@
                 is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
                 max_scenes: maxScenesVal,
                 has_ad_or_face: adFaceVal,
-                scene_order_fixed: sceneOrderFixedVal
+                scene_order_fixed: sceneOrderFixedVal,
+                // 新增字段 Payload
+                split_guidance: splitGuidanceVal,
+                remove_time_segments: removeSegments,
+                split_time_points: splitPoints
             });
         });
 
         if(err) return alert(err);
         if(!vList.length) return alert('请至少添加一个有效的视频链接');
 
-        // 默认强制开启原创处理
         const isOriginal = true;
         const audioReplaceSelect = document.getElementById('audio-replace');
 
@@ -601,7 +750,7 @@
             userName: APP.currentUser,
             global_settings: {
                 video_type: document.getElementById('video-type').value,
-                retention_ratio: retentionVal, // 直接使用该值，因为现在默认为原创模式
+                retention_ratio: retentionVal,
                 is_need_audio_replace: (document.getElementById('audio-replace').value === 'yes'),
                 is_need_scene_title: (document.getElementById('scene-title').value === 'yes'),
                 is_need_commentary: (document.getElementById('allow-commentary').value === 'yes'),
