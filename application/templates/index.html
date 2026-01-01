@@ -73,7 +73,7 @@
         }
 
         .tooltip-text {
-            visibility: hidden; opacity: 0; width: 240px;
+            visibility: hidden; opacity: 0; width: 480px;
             background-color: rgba(33, 33, 33, 0.95);
             color: #fff; text-align: left;
             border-radius: 8px; padding: 12px; font-size: 0.85rem; line-height: 1.5;
@@ -264,7 +264,7 @@
                         <div class="label-wrap">
                             <label class="option-label">视频风格类型</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">• 通用: 标准风格<br>• 游戏: 高光/击杀时刻<br>• 体育: 动作聚焦<br>• 娱乐: 趣味向剪辑</span>
+                            <span class="tooltip-text">针对不同的类型题材能够有更好的创作效果</span>
                         </div>
                         <select id="video-type" class="input-styled">
                             <option value="通用" selected>通用</option>
@@ -278,7 +278,7 @@
                         <div class="label-wrap">
                             <label class="option-label">素材保留比例</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">• 无要求(free): 优先逻辑去重<br>• 全量保留(full): 几乎不删减<br>• 较多保留(major): 仅删冗余</span>
+                            <span class="tooltip-text">• 无要求: 自动创作符合创作指导的方案<br>• 全量保留: 所有场景都会被保留<br>• 较多保留: 要求最终的视频会用到一半以上的场景</span>
                         </div>
                         <select id="retention-ratio" class="input-styled">
                             <option value="free" selected>无要求 (智能推荐)</option>
@@ -299,9 +299,9 @@
                     <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px;">
                         <div class="option-item">
                             <div class="label-wrap">
-                                <span class="option-label">AI 音频替换</span>
+                                <span class="option-label">原作者音频替换</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">完全替换背景音为AI解说，去重效果最佳。</span>
+                                <span class="tooltip-text">也就是把原作者的语音进行替换</span>
                             </div>
                             <select id="audio-replace" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -312,7 +312,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">场景标题与摘要</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">自动添加关键帧花字，提升完播率。</span>
+                                <span class="tooltip-text">视频画面上方增加视频摘要以及相应的场景标题</span>
                             </div>
                             <select id="scene-title" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -321,9 +321,9 @@
                         </div>
                         <div class="option-item">
                             <div class="label-wrap">
-                                <span class="option-label">允许增加解说</span>
+                                <span class="option-label">是否增加过渡解说</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">AI自动理解素材，生成解说词。</span>
+                                <span class="tooltip-text">在场景切换的时候增加衔接语</span>
                             </div>
                             <select id="allow-commentary" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -336,9 +336,20 @@
                         <div class="label-wrap" style="margin-bottom: 8px;">
                             <label class="option-label">创作指导 (Prompt)</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">输入给AI的自然语言指令，如：“剪辑节奏要快”、“配乐要悲伤”。</span>
+                            <span class="tooltip-text">
+                                <b>• 定制标题：</b><br>
+                                &nbsp;&nbsp;例1：标题中必须出现“梅西”“c罗”。<br>
+                                &nbsp;&nbsp;例2：标题需要有反转效果，比如“我曾经讨厌梅西，但现在我喜欢他了”等。<br>
+                                <br>
+                                <b>• 视频主题（表达意思或节奏）：</b><br>
+                                &nbsp;&nbsp;例1：主题是贬低c罗。先夸梅西，后踩c罗。如：“把c罗和梅西相提并论都是侮辱梅西了”。<br>
+                                &nbsp;&nbsp;例2：主题体现绝代双骄。有梅西有c罗，是观众的福气。<br>
+                                <br>
+                                <b>• 避坑指南：</b><br>
+                                &nbsp;&nbsp;避免“给我最好的”这类空泛指令，越具体越好。
+                            </span>
                         </div>
-                        <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由AI自由发挥..."></textarea>
+                        <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
                     </div>
                 </div>
             </div>
@@ -438,9 +449,9 @@
             <div class="options-grid">
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">包含作者声音? <span class="required-star">*</span></span>
+                        <span class="option-label">客观上是否包含作者声音? <span class="required-star">*</span></span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">必选。标识原视频中是否包含人声解说或对话，便于AI分离背景音。</span>
+                        <span class="tooltip-text">标识原视频中是否包含原作者的声音。（客观真实的指出）</span>
                     </div>
                     <select class="input-styled select-voice">
                         <option value="" disabled selected>请选择...</option>
@@ -453,7 +464,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否包含广告或原作者画面?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入，以及是否包含真人出镜，便于AI剪辑时剔除并用于去重处理。</span>
+                        <span class="tooltip-text">标识视频中是否有硬广或植入或是否包含原作者信息，便于剔除（如果你选择了有,工具就一定会去找要删除的画面，多次都找不到整个视频创作就会失败）。</span>
                     </div>
                     <select class="input-styled select-ad-face">
                         <option value="auto" selected>自动检测</option>
@@ -475,9 +486,9 @@
                 </div>
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">需要保留文字?</span>
+                        <span class="option-label">自动配情绪引导文字?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">选择“是”保留原字幕；选择“否”将尝试自动消除原视频字幕。</span>
+                        <span class="tooltip-text">智能分析视频情绪，自动在画面内添加能够表达感情的文字</span>
                     </div>
                     <select class="input-styled select-text">
                         <option value="yes" selected>是</option>
@@ -488,7 +499,7 @@
                     <div class="label-wrap">
                         <span class="option-label">自动配表情包?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">AI智能分析视频情绪，自动添加趣味表情包。</span>
+                        <span class="tooltip-text">智能分析视频情绪，自动添加趣味表情包。</span>
                     </div>
                     <select class="input-styled select-emoji">
                         <option value="yes" selected>是</option>
@@ -499,7 +510,7 @@
                     <div class="label-wrap">
                         <span class="option-label">素材最多分解场景数</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">限制该素材最多能够被分解成多少个场景。</span>
+                        <span class="tooltip-text">限制该素材最多能够被分解成多少个场景（越多理论上就原创度可能更高，但是也会加大视频的创作难度，可能导致最后的视频反而不好）。</span>
                     </div>
                     <select class="input-styled select-max-scenes">
                         <option value="0" selected>自动分割</option>
@@ -513,7 +524,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否场景不能够改变顺序</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">锁定素材的时间线顺序，AI剪辑时将不会打乱片段前后关系。</span>
+                        <span class="tooltip-text">锁定素材的时间线顺序，剪辑时将不会打乱片段前后关系。</span>
                     </div>
                     <select class="input-styled select-scene-order-fixed">
                         <option value="auto" selected>智能判断</option>
@@ -576,9 +587,9 @@
         const audioReplaceSelect = document.getElementById('audio-replace');
 
         if (isOriginal && audioReplaceSelect.value === 'yes') {
-            const isAllNoVoice = vList.every(v => v.has_author_voice === false);
+            const isAllNoVoice = vList.every(v => v.is_contains_author_voice === false);
             if (isAllNoVoice) {
-                alert('⚠️ 设置冲突提醒：\n\n您开启了【AI 音频替换】，但素材列表中所有视频的【包含作者声音】均选择了【否】。\n\n逻辑说明：如果视频本身没有声音来源，系统无法执行音频替换。\n\n请修改：\n1. 将“AI 音频替换”改为“否”；\n2. 或者确保至少有一个素材“包含作者声音”为“是”。');
+                alert('⚠️ 设置冲突提醒：\n\n您开启了【原作者 音频替换】，但素材列表中所有视频的【包含作者声音】均选择了【否】。\n\n逻辑说明：如果视频本身没有原作者声音来源，系统无法执行音频替换。\n\n请修改：\n1. 将“原作者 音频替换”改为“否”；\n2. 或者确保至少有一个素材“包含作者声音”为“是”。');
                 audioReplaceSelect.focus();
                 return;
             }
