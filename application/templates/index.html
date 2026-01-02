@@ -345,7 +345,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">原作者音频替换</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">把原作者的语音进行替换</span>
+                                <span class="tooltip-text">把原作者的旁白进行重新创作并进行新音色替换</span>
                             </div>
                             <select id="audio-replace" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -380,7 +380,7 @@
                         <div class="label-wrap" style="margin-bottom: 8px;">
                             <label class="option-label">创作指导 (Prompt)</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">输入具体的创作指令...</span>
+                            <span class="tooltip-text">关键字：标题，主题，视频节奏，场景。<br>例1：标题中必须出现'C罗'这个关键字，然后整体的视频主题要是大夸特夸C罗。<br>例2：视频节奏应该先把高光的部分放在最前面<br>例3：视频主题是进球的集锦，选取精彩的进球场景进行拼接,严禁选择非进球的场景<br>例4：狠狠的贬低C罗，倒挂金钩纯粹是运气</span>
                         </div>
                         <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
                     </div>
@@ -573,7 +573,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否包含作者声音? <span class="required-star">*</span></span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识原视频中是否包含原作者的声音。</span>
+                        <span class="tooltip-text">客观的标识原视频中是否包含原作者的声音。</span>
                     </div>
                     <select class="input-styled select-voice">
                         <option value="" disabled selected>请选择...</option>
@@ -586,7 +586,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否包含广告/原作者画面?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入。</span>
+                        <span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。（如果选择了是，那么工具就一定会找到待删除的画面，多次尝试都没找到就会投稿失败）</span>
                     </div>
                     <select class="input-styled select-ad-face">
                         <option value="auto" selected>自动检测</option>
@@ -599,7 +599,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否实时视频?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">是否为新闻、直播切片等。</span>
+                        <span class="tooltip-text">是否为新闻、热点事件等强时效素材。</span>
                     </div>
                     <select class="input-styled select-realtime">
                         <option value="yes" selected>是</option>
@@ -636,7 +636,7 @@
                     </div>
                     <select class="input-styled select-max-scenes">
                         <option value="0" selected>自动分割</option>
-                        <option value="1">不超过1个场景</option>
+                        <option value="1">不超过1个场景（也就是不进行切分，整个视频就是一个场景）</option>
                         <option value="5">不超过5个场景</option>
                         <option value="10">不超过10个场景</option>
                     </select>
@@ -660,7 +660,7 @@
                 <div class="label-wrap">
                     <span class="option-label">场景划分指导</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">关键字:场景，划分。<br>例1：帮我划分为前期进攻，关键进球以及赛后回放三个场景。<br>例2:前期进攻铺垫和进球需要划分为一个场景</span>
+                    <span class="tooltip-text">关键字：场景，划分。<br>例1：帮我划分为前期进攻，关键进球以及赛后回放三个场景。<br>例2：前期进攻铺垫和进球需要划分为一个场景</span>
                 </div>
                 <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
             </div>
@@ -669,7 +669,7 @@
                 <div class="label-wrap">
                     <span class="option-label">待剔除画面时间段</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频中需要删除的时间范围（严格按照提供的时间进行删除）(00:01.1 和 00:01.100是同一个时间)</span>
+                    <span class="tooltip-text">指定视频中需要删除的时间范围（严格按照提供的时间进行删除，会自动找目标1s附近最好的时间点）(00:01.1 和 00:01.100是同一个时间)</span>
                 </div>
                 <div id="remove-segments-list-${id}" class="dynamic-list-container"></div>
                 <button type="button" class="btn-mini btn-add-row" onclick="addTimeSegmentRow(${id})">
