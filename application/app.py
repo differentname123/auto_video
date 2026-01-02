@@ -197,7 +197,6 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
 
     for idx, video_item in enumerate(input_video_list, start=1):
         url = video_item.get('original_url', '').strip()
-        video_item = fix_split_time_points(video_item)
         if not url:
             errors.append(f"第 {idx} 条记录错误: 视频链接为空")
             continue

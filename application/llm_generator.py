@@ -18,13 +18,14 @@ import numpy as np
 
 from application.video_common_config import correct_owner_timestamps
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
-from utils.common_utils import read_file_to_str, string_to_object, time_to_ms
+from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time
 from utils.gemini import get_llm_content_gemini_flash_video
 from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
 from utils.video_utils import probe_duration, get_scene, save_frames_around_timestamp
 
 
-def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames) -> tuple[bool, str]:
+def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames,
+                        split_time_ms_points) -> tuple[bool, str]:
     """
      检查 logical_scene_info 的有效性，并在检查过程中将时间字符串转换为毫秒整数（in-place-modification）。
 
@@ -32,6 +33,9 @@ def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_sc
          logical_scene_info (dict): 包含 'new_scene_info' 和 'deleted_scene' 的字典。
                                     此字典中的时间格式将被直接修改。
          video_duration_ms (int): 视频总时长（毫秒）。
+         max_scenes (int): 允许的最大场景数量。
+         need_remove_frames (str): 是否需要删除帧 ('yes'/'no')。
+         split_time_ms_points (list): 关键分割点时间戳列表（毫秒）。
 
      Returns:
          tuple[bool, str]: 一个元组，第一个元素是检查结果 (True/False)，
@@ -134,6 +138,23 @@ def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_sc
             return False, (f"检查失败：场景之间存在间隔。场景 "
                            f"[{current['original_start']} - {current['original_end']}] 之后与 "
                            f"[{next_s['original_start']} - {next_s['original_end']}] 之前有时间空缺。")
+
+    # 5. [新增] 检查 split_time_ms_points 中的时间戳是否在场景分割点附近
+    if split_time_ms_points:
+        # 提取当前所有逻辑场景的内部分割点（即每个场景的结束时间，排除视频本身的结束时间）
+        # 此时场景已排序且连续，current['end_ms'] 即为分割点
+        logical_split_points = [s['end_ms'] for s in all_scenes_for_sorting[:-1]]
+
+        for required_split in split_time_ms_points:
+            # 检查 required_split 是否在任意一个 logical_split_point 的 ±1000ms 范围内
+            found_match = False
+            for logical_pt in logical_split_points:
+                if abs(required_split - logical_pt) <= 1000:
+                    found_match = True
+                    break
+
+            if not found_match:
+                return False, f"检查失败：在 split_time_ms_points 中的时间点 {required_split}ms 附近（±1000ms）未找到对应的场景分割点。"
 
     # 为logical_scene_info增加一个字段，表示scene_number
     scene_number = 1
@@ -265,9 +286,8 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
     """
     # 【修改点 1】在函数最外层加入 try 块，包裹所有逻辑
     try:
-        dir_path = os.path.dirname(video_path)
-        output_dir = os.path.join(dir_path, "temp_scene_timestamp_frames")
-
+        video_filename = os.path.splitext(os.path.basename(video_path))[0]
+        output_dir = os.path.join(os.path.dirname(video_path), f'{video_filename}_scenes')
         # 1. 保存关键帧 (涉及IO，易报错)
         image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
@@ -339,82 +359,176 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         return timestamp
 
 
+def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_ms=1000):
+    """
+    输入一个目标时间戳和原始的时间戳列表，计算出修正后的时间戳。
+    该函数内部会自动清洗 merged_timestamps。
+    target_ts: ms
+    """
+    # 1. 数据清洗：在函数内部处理，对调用方透明
+    # 只保留有效的时间戳 (timestamp exists, count > 0)
+    valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
+
+    # 2. 筛选候选者
+    candidates = [
+        shot for shot in valid_camera_shots
+        if abs(shot[0] - target_ts) <= max_delta_ms
+    ]
+
+    # 3. 寻找最佳匹配 (Visual)
+    best_shot = None
+    if candidates:
+        def calculate_key(shot):
+            diff = abs(shot[0] - target_ts)
+            count = shot[1]
+            # 评分逻辑：Diff 越小越好，Count 越大越好
+            score = diff / count if count > 0 else float('inf')
+            return (score, diff)
+
+        best_shot = min(candidates, key=calculate_key)
+
+    # 4. 决策与执行
+    # 策略 A: 视觉对齐 (找到且 count >= 2)
+    if best_shot and best_shot[1] >= 2:
+        new_ts = int(best_shot[0])
+        count = best_shot[1]
+        diff = abs(new_ts - target_ts)
+        score = diff / count if count > 0 else 0
+
+        return new_ts, 'visual', {
+            'count': count,
+            'diff': diff,
+            'score': score
+        }
+
+    # 策略 B: 字幕对齐 (无候选 或 count < 2)
+    else:
+        reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot[1]}<2)"
+
+        # 调用字幕对齐函数
+        new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, target_ts)
+
+        if new_ts is not None:
+            return new_ts, 'subtitle', {'reason': reason}
+        else:
+            # 字幕对齐也失败，返回原始时间
+            return target_ts, 'failed', {'reason': reason}
+
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
-    """
-    将 logical_scene_info 中的每个 scene 的 start/end 对齐。
-    对齐策略：
-    1. 优先寻找高置信度 (count >= 2) 的 camera shot 进行视觉对齐。
-    2. 如果找不到 camera shot，或者找到的 camera shot 置信度低 (count < 2)，则统一使用字幕对齐。
-    """
-    time_map = {}
+    time_map = {}  # 用于缓存已处理的时间戳，避免重复计算
 
-    # 预处理有效镜头
-    camera_shots_with_counts = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
-
-    # 注意：即使没有 camera_shots，现在也应该继续执行，以便尝试字幕对齐
-    if not camera_shots_with_counts:
+    # 检查是否有数据（仅用于打印一条全局警告，不影响逻辑运行）
+    has_valid_data = any(c and c[0] is not None and c[1] > 0 for c in merged_timestamps)
+    if not has_valid_data:
         print("⚠️ 无有效 camera_shot 时间戳，后续将全部依赖字幕对齐逻辑。")
 
-    for i, scene in enumerate(logical_scene_info.get('new_scene_info', [])):
+    scenes = logical_scene_info.get('new_scene_info', [])
+
+    for i, scene in enumerate(scenes):
         for key in ('start', 'end'):
             orig_ts = scene.get(key)
             if orig_ts is None:
-                print(f"[Scene {i}] {key}: 无法解析原始时间 ({orig_ts})，跳过。")
+                print(f"[Scene {i}] {key}: 无法解析原始时间，跳过。")
                 continue
 
-            # 0. 缓存检查：如果该时间戳已经处理过，直接使用缓存结果
+            # 1. 查缓存
             if orig_ts in time_map:
                 scene[key] = time_map[orig_ts]
                 continue
 
-            # 1. 筛选候选者
-            candidates = [
-                shot for shot in camera_shots_with_counts
-                if abs(shot[0] - orig_ts) <= max_delta_ms
-            ]
+            # 2. 核心计算：直接传入原始 merged_timestamps，不用管怎么洗数据
+            new_ts, strategy, info = align_single_timestamp(
+                orig_ts, merged_timestamps, video_path, max_delta_ms
+            )
 
-            # 2. 尝试找到最佳匹配的 camera shot
-            best_shot = None
-            if candidates:
-                def calculate_key(shot):
-                    diff = abs(shot[0] - orig_ts)
-                    count = shot[1]
-                    # 评分逻辑：差值越小越好，次数越多越好 (这里 score 越小越好)
-                    score = diff / count if count > 0 else float('inf')
-                    return (score, diff)
+            # 3. 打印日志
+            if strategy == 'visual':
+                print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} "
+                      f"(✅ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
 
-                best_shot = min(candidates, key=calculate_key)
+            elif strategy == 'subtitle':
+                print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} "
+                      f"(🛠️ 字幕修正: {info['reason']})")
 
-            # 3. 统一决策逻辑
-            # 情况 A: 找到了 Camera Shot 且 置信度足够高 (count >= 2) -> 使用视觉对齐
-            if best_shot and best_shot[1] >= 2:
-                new_ts = int(best_shot[0])
-                count = best_shot[1]
-                diff = abs(new_ts - orig_ts)
-                score = diff / count if count > 0 else 0
-                print(
-                    f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (✅ 视觉修正: count={count}, diff={diff}ms, score={score:.2f})")
+            elif strategy == 'failed':
+                print(f"[Scene {i}] {key}: {orig_ts} (保持不变, 字幕对齐失败, 原因: {info['reason']})")
 
-            # 情况 B: 没找到候选 OR 找到了但置信度低 -> 统一使用字幕对齐
-            else:
-                # 生成日志原因
-                reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot[1]}<2)"
-
-                # 调用字幕对齐函数
-                new_ts = gen_precise_scene_timestamp_by_subtitle(video_path, orig_ts)
-
-                # 如果字幕函数返回 None 或者出错，保持原值（根据 gen_precise... 的实现，这里假设它返回数字）
-                if new_ts is None:
-                    new_ts = orig_ts
-                    print(f"[Scene {i}] {key}: {orig_ts} (保持不变, 字幕对齐失败, 原因: {reason})")
-                else:
-                    print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} (🛠️ 字幕修正: {reason})")
-
-            # 4. 更新并缓存
+            # 4. 更新与缓存
             time_map[orig_ts] = new_ts
             scene[key] = new_ts
 
     return logical_scene_info
+
+
+def append_segmentation_constraints(full_prompt, fixed_points, max_scenes, guidance_text):
+    # 如果没有任何动态约束，直接返回原提示词
+    if not any([fixed_points, max_scenes, guidance_text]):
+        return full_prompt
+
+    blocks = []
+
+    # ------------------------------------------------------------------
+    # 1. 强制分割点 (Fixed Points) - 解决“只切这几刀”的问题
+    # ------------------------------------------------------------------
+    if fixed_points:
+        # 格式化时间戳
+        points_str = " / ".join([f"[{ms_to_time(tp)}]" for tp in fixed_points])
+        blocks.append(f"""
+    **[指令A] 强制物理断点（Mandatory Breakpoints）**
+    *   **关键数据**：{points_str}
+    *   **操作逻辑**：
+        1.  **叠加原则**：这些时间点是必须执行的“硬性切刀”。
+        2.  **持续细分**：在执行完上述硬性切割后，**必须**继续在这些时间点形成的区间内部，依据原有的“语义/话题/动作”逻辑进行常规切分。
+        3.  **禁止偷懒**：严禁只输出由上述时间点构成的宽泛片段，必须保证常规的颗粒度。
+        4.  **对齐要求**：输出的JSON中，必须有场景的 `end` 和下一个场景的 `start` 精确落在这些时间点上。""")
+
+    # ------------------------------------------------------------------
+    # 2. 场景数量约束 (Quantity Constraint) - 保持专业术语
+    # ------------------------------------------------------------------
+    if max_scenes and max_scenes > 0:
+        if max_scenes == 1:
+            instruction = (
+                "**单场景聚合模式**：在严格执行完“删除判定（广告/作者身份）”后，"
+                "将剩余的所有保留内容合并为一个唯一的叙事单元，忽略内部的细微转折。"
+            )
+        else:
+            instruction = (
+                f"**目标场景量：约 {max_scenes} 个**。\n"
+                f"        请调整你的【剪辑颗粒度】。如果自然切分结果远超此数，请按“大事件/大篇章”进行合并；"
+                f"如果远少于此数，请按“微动作/单句台词”进行细分。"
+            )
+
+        blocks.append(f"""
+    **[指令B] 场景颗粒度控制（Granularity Control）**
+    *   **目标参数**：{max_scenes}
+    *   **操作逻辑**：{instruction}""")
+
+    # ------------------------------------------------------------------
+    # 3. 逻辑指导 (Guidance) - 融入“专家人设”
+    # ------------------------------------------------------------------
+    if guidance_text:
+        blocks.append(f"""
+    **[指令C] 特殊叙事策略（Special Narrative Strategy）**
+    *   **策略描述**："{guidance_text}"
+    *   **操作逻辑**：
+        1.  **优先级覆写**：在判断“场景边界”时，请优先采用上述策略（例如用户要求按情绪切分，则忽略物理位置变化）。
+        2.  **安全底线**：此策略仅影响“如何切分保留内容”，**绝不可**因此保留原定应删除的“广告”或“作者身份暴露”片段。
+        3.  **格式维持**：JSON输出结构与字段定义保持不变。""")
+
+    # ------------------------------------------------------------------
+    # 组合最终提示词 - 使用“补充协议”的口吻
+    # ------------------------------------------------------------------
+    if blocks:
+        # 这里用一种“附加备忘录”的风格，与你的主Prompt无缝衔接
+        header = (
+            "\n\n"
+            "----------------------------------------------------------------\n"
+            "### **特别剪辑任务增补 (Supplementary Editorial Mandates)**\n"
+            "注意：在执行上述标准流程前，收到即时更新的剪辑需求。请将以下指令**叠加**到你的分析逻辑中，若与默认切分逻辑冲突，以以下指令为准：\n"
+        )
+        return full_prompt + header + "\n".join(blocks)
+
+    return full_prompt
 
 def gen_logical_scene_llm(video_path, video_info, all_path_info):
     """
@@ -423,7 +537,6 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
     need_remove_frames = video_info.get('extra_info', {}).get('has_ad_or_face', 'auto')
     static_cut_video_path = all_path_info.get('static_cut_video_path', '')
     base_prompt = gen_base_prompt(video_path, video_info)
-    max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
     log_pre = f"{video_path} 逻辑性场景划分 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     try:
         video_duration = probe_duration(video_path)
@@ -437,8 +550,12 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
     prompt_file_path = './prompt/视频素材切分.txt'
     full_prompt = read_file_to_str(prompt_file_path)
     full_prompt += f'\n{base_prompt}'
-    if max_scenes > 0:
-        full_prompt += f'\n请将生成的场景数量控制在 {max_scenes} 个以内。'
+    extra = video_info.get('extra_info', {})
+
+    fixed_points = extra.get('fixed_split_time_points', [])
+    max_scenes = extra.get('max_scenes', 0)
+    guidance_text = extra.get('split_guidance', '')
+    full_prompt = append_segmentation_constraints(full_prompt, fixed_points, max_scenes, guidance_text)
 
     error_info = ""
     gen_error_info = ""
@@ -448,7 +565,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
             logical_scene_info = string_to_object(raw)
-            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes, need_remove_frames)
+            check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes, need_remove_frames, fixed_points)
             if not check_result:
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")

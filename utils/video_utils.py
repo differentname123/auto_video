@@ -555,7 +555,11 @@ def get_scene(video_path, min_final_scenes=20):
     adjustment_step = 10  # 每次调整的步长
     max_attempts = 3  # 最多尝试次数
     # output_dir的逻辑为和video_path同目录下面的scene
-    output_dir = os.path.join(os.path.dirname(video_path), 'scenes')
+    video_filename = os.path.splitext(os.path.basename(video_path))[0]
+
+    output_dir = os.path.join(os.path.dirname(video_path), f'{video_filename}_scenes')
+
+    # 获取video_path的文件名，不需要后缀
 
 
 
@@ -3000,3 +3004,35 @@ def get_average_volume(media_path: str) -> float | None:
 
     print(f"计算出的平均音量为: {average_dbfs:.2f} dBFS")
     return average_dbfs
+
+
+def clip_and_merge_segments(video_path, remaining_segments, output_path):
+    """
+    根据时间段截取视频并合并，处理完后自动清理临时文件。
+    remaining_segments 示例: [(1000, 30000), (60000, 90000)]
+    """
+    temp_files = []
+
+    try:
+        # 1. 遍历截取生成临时片段
+        for i, (start, end) in enumerate(remaining_segments):
+            # 构造临时文件名，放在输出目录，例如: temp_0_output.mp4
+            temp_name = f"temp_segment_{i}_{os.path.basename(output_path)}"
+            temp_path = os.path.join(os.path.dirname(output_path), temp_name)
+
+            # 调用你的截取函数
+            clip_video_ms(video_path, start, end, temp_path)
+
+            # 记录生成的临时文件路径
+            temp_files.append(temp_path)
+
+        # 2. 合并片段
+        if temp_files:
+            merge_videos_ffmpeg(temp_files, output_path)
+            print(f"处理完成，输出文件：{output_path}")
+
+    finally:
+        # 3. 清理临时文件 (无论成功或报错都会执行)
+        for path in temp_files:
+            if os.path.exists(path):
+                os.remove(path)

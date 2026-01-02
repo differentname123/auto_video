@@ -109,6 +109,9 @@ def build_video_paths(video_id):
     :return:
     """
     origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
+    origin_video_delete_part_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin_delete.mp4")  # 直接下载下来的原始视频，没有任何的加工
+
+
     low_origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin_low.mp4")  # 直接下载下来的原始视频，只进行了降分辨率和降帧率处理
     static_cut_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH,
                                          f"{video_id}/{video_id}_static_cut.mp4")  # 静态剪辑后的视频,也就是去除视频画面没有改变的部分，这个是用于后续的剪辑
@@ -125,6 +128,7 @@ def build_video_paths(video_id):
                                          f"{video_id}/{video_id}_image_text.mp4")  # 图片文字表情包等添加后的视频地址
     return {
         'origin_video_path': origin_video_path,
+        'origin_video_delete_part_path': origin_video_delete_part_path,
         'low_origin_video_path': low_origin_video_path,
         'static_cut_video_path': static_cut_video_path,
         'low_resolution_video_path': low_resolution_video_path,
@@ -253,7 +257,7 @@ def correct_owner_timestamps(asr_result, duration):
     return asr_result
 
 
-def fix_split_time_points(video_item):
+def fix_split_time_points(remove_time_segments_ms, split_time_points):
     """
     修复分割点，因为会移除一些时间段，就会影响到分割点的位置
     根据 remove_time_segments 计算 split_time_points 的新位置
@@ -261,23 +265,7 @@ def fix_split_time_points(video_item):
     :param video_item: 包含 remove_time_segments 和 split_time_points 的字典
     :return: 增加 fixed_split_time_points 字段后的 video_item
     """
-    remove_time_segments = video_item.get('remove_time_segments', [])
-    remove_time_segments_ms = []
-
-    split_time_points = video_item.get('split_time_points', [])
     split_time_points_ms = []
-
-    # 1. 解析移除时间段
-    for remove_time_segment in remove_time_segments:
-        # 简单校验格式，防止 crash
-        if '-' in remove_time_segment:
-            start_str, end_str = remove_time_segment.split('-')
-            # 确保转换为整数或浮点数
-            start_ms = time_to_ms(start_str)
-            end_ms = time_to_ms(end_str)
-            # 只有当结束时间大于开始时间才有效
-            if end_ms > start_ms:
-                remove_time_segments_ms.append((start_ms, end_ms))
 
     # 2. 关键步骤：按开始时间对移除段进行排序
     # 如果不排序，计算累计删除时长时会出错
@@ -318,11 +306,4 @@ def fix_split_time_points(video_item):
             if new_point >= 0:
                 fixed_split_time_points.append(new_point)
 
-    fixed_split_time_str_points = []
-    for fixed_split_time_point in fixed_split_time_points:
-        fixed_split_time_str_points.append(ms_to_time(fixed_split_time_point))
-
-    # 5. 将结果写回 video_item
-    video_item['fixed_split_time_points'] = fixed_split_time_str_points
-
-    return video_item
+    return fixed_split_time_points

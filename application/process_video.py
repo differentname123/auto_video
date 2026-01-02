@@ -17,17 +17,18 @@ import time
 import traceback
 
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
-    gen_hudong_by_llm, gen_video_script_llm
+    gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp
 from application.video_process import gen_video_by_script
-from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration
+from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
+    clip_and_merge_segments
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths, \
-    check_failure_details
+    check_failure_details, fix_split_time_points
 
 _configure_third_party_paths()
 
 from third_party.TikTokDownloader.douyin_downloader import download_douyin_video_sync, get_comment
-from utils.common_utils import is_valid_target_file_simple
+from utils.common_utils import is_valid_target_file_simple, time_to_ms, merge_intervals, get_remaining_segments
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -92,6 +93,75 @@ def run():
             task_info['failure_details'] = failure_details
             manager.upsert_tasks([task_info])
 
+def cutoff_target_segment(video_path, remove_time_segments, output_path):
+    """
+    按照期望的时间段，剔除指定时间段的视频
+    :param video_path:
+    :param remove_time_segments:
+    :param output_path:
+    :return:
+    """
+    all_timestamp_list = []
+    for remove_time_segment in remove_time_segments:
+        # 简单校验格式，防止 crash
+        if '-' in remove_time_segment:
+            start_str, end_str = remove_time_segment.split('-')
+            # 确保转换为整数或浮点数
+            start_ms = time_to_ms(start_str)
+            end_ms = time_to_ms(end_str)
+            all_timestamp_list.append(start_ms)
+            all_timestamp_list.append(end_ms)
+    # 对all_timestamp_list进行去重和排序
+    all_timestamp_list = sorted(set(all_timestamp_list))
+    if len(all_timestamp_list) > 0:
+        print(f"准备剔除视频 {video_path} 的时间段: {remove_time_segments}，对应的时间戳列表: {all_timestamp_list}")
+    else:
+        # 复制一份video_path到output_path
+        shutil.copy2(video_path, output_path)
+        return []
+    time_map = {}
+    merged_timestamps = get_scene(video_path)
+
+    for target_ts in all_timestamp_list:
+        new_ts, strategy, info = align_single_timestamp(target_ts, merged_timestamps, video_path)
+        # 3. 打印日志
+        if strategy == 'visual':
+            print(f"[Scene: {target_ts} -> {new_ts} "
+                  f"(✅ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
+
+        elif strategy == 'subtitle':
+            print(f": {target_ts} -> {new_ts} "
+                  f"(🛠️ 字幕修正: {info['reason']})")
+
+        elif strategy == 'failed':
+            print(f" {target_ts} (保持不变, 字幕对齐失败, 原因: {info['reason']})")
+        time_map[target_ts] = new_ts
+
+    # 根据时间映射生成新的剔除时间段
+
+    fixed_remove_time_segments = []
+    for remove_time_segment in remove_time_segments:
+        # 简单校验格式，防止 crash
+        if '-' in remove_time_segment:
+            start_str, end_str = remove_time_segment.split('-')
+            # 确保转换为整数或浮点数
+            start_ms = time_to_ms(start_str)
+            end_ms = time_to_ms(end_str)
+            fixed_start_ms = time_map.get(start_ms, start_ms)
+            fixed_end_ms = time_map.get(end_ms, end_ms)
+            fixed_remove_time_segments.append((fixed_start_ms, fixed_end_ms))
+
+    merged_fixed_remove_time_segments = merge_intervals(fixed_remove_time_segments)
+    duration_ms = probe_duration(video_path) * 1000
+
+    remaining_segments = get_remaining_segments(duration_ms, merged_fixed_remove_time_segments)
+
+    # 使用ffmpeg命令行工具进行视频剪辑
+    clip_and_merge_segments(video_path, remaining_segments, output_path)
+    return fixed_remove_time_segments
+
+
+
 
 def process_origin_video(video_id, video_info):
     """
@@ -101,18 +171,42 @@ def process_origin_video(video_id, video_info):
     """
     video_path_info = build_video_paths(video_id)
     origin_video_path = video_path_info['origin_video_path']
+    origin_video_delete_part_path = video_path_info['origin_video_delete_part_path']
     low_origin_video_path = video_path_info['low_origin_video_path']
     static_cut_video_path = video_path_info['static_cut_video_path']
     low_resolution_video_path = video_path_info['low_resolution_video_path']
 
+
     if not is_valid_target_file_simple(origin_video_path):
         raise FileNotFoundError(f"原始视频文件不存在: {origin_video_path}")
 
-    if not is_valid_target_file_simple(low_origin_video_path):
-        shutil.copy2(origin_video_path, low_origin_video_path)
+    # 使用一个变量标识文件状态是否发生变更，利用连锁反应触发后续更新
+    file_changed = False
+
+    # 1. 剪切片段处理
+    # 如果文件不存在，或者强制要求重剪，则执行
+    if not is_valid_target_file_simple(origin_video_delete_part_path) or video_info['extra_info'].get('need_recut', True):
+        remove_time_segments = video_info.get('extra_info', {}).get('remove_time_segments', [])
+        fixed_remove_time_segments = cutoff_target_segment(origin_video_path, remove_time_segments, origin_video_delete_part_path)
+        video_info['extra_info']['fixed_remove_time_segments'] = fixed_remove_time_segments
+        video_info['extra_info']['need_recut'] = False
+        split_time_points = video_info.get('extra_info', {}).get('split_time_points', [])
+        fixed_split_time_points = fix_split_time_points(fixed_remove_time_segments, split_time_points)
+        video_info['extra_info']['fixed_split_time_points'] = fixed_split_time_points
+        # 标记变动，后续步骤将强制执行
+        file_changed = True
 
 
-    if not is_valid_target_file_simple(static_cut_video_path):
+    # 2. 生成 low_origin_video
+    # 如果文件不存在，或者上一步发生了变动(file_changed为True)，则执行
+    if not is_valid_target_file_simple(low_origin_video_path) or file_changed:
+        shutil.copy2(origin_video_delete_part_path, low_origin_video_path)
+        file_changed = True
+
+
+    # 3. 生成 static_cut_video
+    # 如果文件不存在，或者上一步发生了变动，则执行
+    if not is_valid_target_file_simple(static_cut_video_path) or file_changed:
         # 第一步先进行降低分辨率和帧率(初步)
         params = {
             'crf': 23,
@@ -124,13 +218,17 @@ def process_origin_video(video_id, video_info):
         # 第二步进行静态背景去除
         crop_result, crop_path = remove_static_background_video(low_origin_video_path)
         shutil.copy2(crop_path, static_cut_video_path)
+        file_changed = True
 
-    if not is_valid_target_file_simple(low_resolution_video_path):
+    # 4. 生成 low_resolution_video
+    # 如果文件不存在，或者上一步发生了变动，则执行
+    if not is_valid_target_file_simple(low_resolution_video_path) or file_changed:
         # 第三步进行降低分辨率和帧率（超级压缩）
         shutil.copy2(static_cut_video_path, low_resolution_video_path)
         reduce_and_replace_video(low_resolution_video_path)
-    print(f"视频 {video_id} 的原始视频处理完成。")
+        file_changed = True
 
+    print(f"视频 {video_id} 的原始视频处理完成。")
 
 
 def gen_extra_info(video_info_dict, manager):
@@ -395,7 +493,7 @@ def process_single_task(task_info, manager):
     if check_failure_details(failure_details):
         return failure_details, video_info_dict
 
-    # 生成后续需要处理的派生视频，主要是静态去除以及降低分辨率后的视频
+    # 生成后续需要处理的派生视频，删除指定片段主要是静态去除以及降低分辨率后的视频
     failure_details = gen_derive_videos(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='gen_derive_error')
     if check_failure_details(failure_details):

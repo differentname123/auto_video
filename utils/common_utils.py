@@ -380,3 +380,68 @@ def check_timestamp(all_timestamps, duration):
             error_info += f"时间戳 {ts} 超出视频范围 (0 - {duration})。\n"
             return error_info
     return ""
+
+
+def get_remaining_segments(duration_ms, remove_segments):
+    """
+    计算删除指定时间段后的视频保留区间（左闭右开区间 [start, end)）。
+
+    约定：
+      - 视频范围为 [0, duration_ms)
+      - remove_segments 是一组 (start, end)，可能无序、重叠或超出边界
+      - 返回值为按时间升序的非重叠保留区间列表 [(start, end), ...]
+
+    参数：
+      duration_ms    - 视频总时长（毫秒），应为非负整数
+      remove_segments - 要删除的时间段列表，例如 [(1000, 30000), (60000, 90000)]
+    """
+    # 边界与空输入处理
+    if duration_ms <= 0:
+        return []
+    if not remove_segments:
+        return [(0, duration_ms)]
+
+    # 1) 规范化并裁剪删除区间到视频范围内，丢弃无效区间
+    cleaned = []
+    for s, e in remove_segments:
+        # 裁剪到 [0, duration_ms]
+        if s < 0:
+            s = 0
+        if e > duration_ms:
+            e = duration_ms
+        # 只保留有效区间（开始 < 结束）
+        if s < e:
+            cleaned.append((s, e))
+
+    if not cleaned:
+        return [(0, duration_ms)]
+
+    # 2) 按起点排序
+    cleaned.sort(key=lambda seg: seg[0])
+
+    # 3) 合并重叠或相邻的删除区间
+    merged = []
+    cur_start, cur_end = cleaned[0]
+    for s, e in cleaned[1:]:
+        if s <= cur_end:        # 重叠或相邻（s == cur_end 也当作合并处理）
+            # 扩展当前区间右端点
+            if e > cur_end:
+                cur_end = e
+        else:
+            merged.append((cur_start, cur_end))
+            cur_start, cur_end = s, e
+    merged.append((cur_start, cur_end))
+
+    # 4) 计算补集：保留区间
+    remaining = []
+    prev_end = 0
+    for s, e in merged:
+        if prev_end < s:
+            remaining.append((prev_end, s))
+        prev_end = e
+
+    # 视频末尾还有剩余
+    if prev_end < duration_ms:
+        remaining.append((prev_end, duration_ms))
+
+    return remaining
