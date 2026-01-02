@@ -10,6 +10,10 @@
 """
 import os
 import sys
+
+from utils.common_utils import time_to_ms, ms_to_time
+
+
 class ResponseStatus:
     """API响应状态常量"""
     SUCCESS = 'success'
@@ -247,3 +251,78 @@ def correct_owner_timestamps(asr_result, duration):
                     current_segment['fix_end'] = current_segment['end'] + movement
 
     return asr_result
+
+
+def fix_split_time_points(video_item):
+    """
+    修复分割点，因为会移除一些时间段，就会影响到分割点的位置
+    根据 remove_time_segments 计算 split_time_points 的新位置
+    如果 split_time_point 在某个 remove_time_segment 内，则移除该 split_time_point
+    :param video_item: 包含 remove_time_segments 和 split_time_points 的字典
+    :return: 增加 fixed_split_time_points 字段后的 video_item
+    """
+    remove_time_segments = video_item.get('remove_time_segments', [])
+    remove_time_segments_ms = []
+
+    split_time_points = video_item.get('split_time_points', [])
+    split_time_points_ms = []
+
+    # 1. 解析移除时间段
+    for remove_time_segment in remove_time_segments:
+        # 简单校验格式，防止 crash
+        if '-' in remove_time_segment:
+            start_str, end_str = remove_time_segment.split('-')
+            # 确保转换为整数或浮点数
+            start_ms = time_to_ms(start_str)
+            end_ms = time_to_ms(end_str)
+            # 只有当结束时间大于开始时间才有效
+            if end_ms > start_ms:
+                remove_time_segments_ms.append((start_ms, end_ms))
+
+    # 2. 关键步骤：按开始时间对移除段进行排序
+    # 如果不排序，计算累计删除时长时会出错
+    remove_time_segments_ms.sort(key=lambda x: x[0])
+
+    # 3. 解析原始分割点
+    for split_time_point in split_time_points:
+        split_time_points_ms.append(time_to_ms(split_time_point))
+
+    # 对原始分割点排序（可选，但推荐，方便逻辑处理）
+    split_time_points_ms.sort()
+
+    fixed_split_time_points = []
+
+    # 4. 计算新的分割点位置
+    for point in split_time_points_ms:
+        deleted_duration_before = 0  # 在当前点之前累计被删除的时长
+        is_inside_removed_segment = False  # 标记当前点是否在被删除的片段内
+
+        for r_start, r_end in remove_time_segments_ms:
+            if point < r_start:
+                # 移除段在分割点之后，不影响当前分割点的位置，且由于已排序，后续的移除段也一定在之后
+                break
+            elif point > r_end:
+                # 移除段完全在分割点之前，累加被删除的时长
+                deleted_duration_before += (r_end - r_start)
+            else:
+                # r_start <= point <= r_end
+                # 分割点正好落在被移除的时间段内（包含边界），该点应被丢弃
+                is_inside_removed_segment = True
+                break
+
+        # 只有未落入移除区间的点才保留
+        if not is_inside_removed_segment:
+            # 新位置 = 原始位置 - 之前所有被删掉的时长
+            new_point = point - deleted_duration_before
+            # 只有当新位置大于等于0才有效（理论上一定是>=0）
+            if new_point >= 0:
+                fixed_split_time_points.append(new_point)
+
+    fixed_split_time_str_points = []
+    for fixed_split_time_point in fixed_split_time_points:
+        fixed_split_time_str_points.append(ms_to_time(fixed_split_time_point))
+
+    # 5. 将结果写回 video_item
+    video_item['fixed_split_time_points'] = fixed_split_time_str_points
+
+    return video_item

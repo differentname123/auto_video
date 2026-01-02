@@ -56,7 +56,7 @@
         }
         .user-action:hover { opacity: 0.8; text-decoration: underline; }
 
-        /* --- 3. 提示气泡 (Tooltip) 静态版 --- */
+        /* --- 3. 提示气泡 (Tooltip) --- */
         .label-wrap { display: flex; align-items: center; gap: 6px; position: relative; width: fit-content; }
 
         .info-icon {
@@ -91,7 +91,7 @@
             visibility: visible; opacity: 1;
         }
 
-        /* --- 4. 视频卡片 (视觉核心) --- */
+        /* --- 4. 视频卡片 --- */
         .video-item-card {
             background: #fff;
             border: 1px solid var(--border-color);
@@ -137,7 +137,7 @@
         }
         .btn-remove-card:hover { transform: scale(1.1) rotate(90deg); background: #ff7875; }
 
-        /* --- 5. 选项网格 (紧凑布局) --- */
+        /* --- 5. 选项网格 --- */
         .options-grid {
             display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px;
             padding-top: 5px;
@@ -146,119 +146,109 @@
         .option-label { font-size: 0.85rem; color: #555; font-weight: 500; }
         .required-star { color: #ff4d4f; }
 
-        /* --- 新增样式: 动态时间段 --- */
+        /* --- 动态时间段样式 (新修改) --- */
         .dynamic-section {
-            margin-top: 20px;
-            padding-top: 15px;
-            border-top: 1px dashed #eee;
+            margin-top: 20px; padding-top: 15px; border-top: 1px dashed #eee;
         }
-        .dynamic-list-container {
-            margin-top: 8px;
-        }
+        .dynamic-list-container { margin-top: 8px; }
+
+        /* 组合时间选择器样式 */
         .dynamic-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 8px;
+            display: flex; align-items: flex-end; /* 底部对齐 */
+            gap: 10px; margin-bottom: 12px;
+            background: #fafafa; padding: 8px; border-radius: 6px; border: 1px solid #f0f0f0;
         }
-        .time-picker-input {
-            flex: 1;
-            padding: 6px 10px;
-            border: 1px solid #d9d9d9;
-            border-radius: 4px;
-            font-family: monospace; /* 时间对齐 */
+
+        .time-group {
+            display: flex; align-items: flex-end; gap: 4px;
         }
+        .time-cell {
+            display: flex; flex-direction: column; align-items: center;
+        }
+        .time-cell label {
+            font-size: 10px; color: #888; margin-bottom: 2px;
+        }
+
+        /* 时间输入框基础样式 */
+        .time-cell input {
+            width: 48px; padding: 4px; text-align: center;
+            border: 1px solid #d9d9d9; border-radius: 4px;
+            font-family: monospace; font-size: 0.9rem;
+            /* 去掉默认样式 */
+            -moz-appearance: textfield;
+        }
+
+        /* 毫秒框稍微宽一点 */
+        .time-cell input.t-ms { width: 56px; }
+
+        /* 针对非法输入的高亮 */
+        .time-cell input:invalid {
+            border-color: #ff4d4f; background-color: #fff1f0;
+        }
+
+        .time-sep {
+            font-weight: bold; color: #333; padding-bottom: 6px; font-size: 1.1rem;
+        }
+
+        .range-sep {
+            padding-bottom: 8px; color: #999; font-weight: bold;
+        }
+
         .btn-mini {
-            padding: 5px 10px;
-            font-size: 0.85rem;
-            border-radius: 4px;
-            cursor: pointer;
-            border: 1px solid transparent;
-            transition: all 0.2s;
+            padding: 5px 10px; font-size: 0.85rem; border-radius: 4px;
+            cursor: pointer; border: 1px solid transparent; transition: all 0.2s;
         }
         .btn-add-row {
-            background-color: #f6ffed;
-            border-color: #b7eb8f;
-            color: #389e0d;
-            margin-top: 5px;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
+            background-color: #f6ffed; border-color: #b7eb8f; color: #389e0d;
+            margin-top: 5px; display: inline-flex; align-items: center; gap: 4px;
         }
-        .btn-add-row:hover {
-            background-color: #d9f7be;
-        }
+        .btn-add-row:hover { background-color: #d9f7be; }
         .btn-del-row {
-            background-color: #fff1f0;
-            border-color: #ffa39e;
-            color: #f5222d;
-            padding: 6px 10px;
+            background-color: #fff1f0; border-color: #ffa39e; color: #f5222d;
+            margin-bottom: 1px; /* 对齐微调 */
         }
-        .btn-del-row:hover {
-            background-color: #ffccc7;
-        }
-        .time-separator {
-            color: #999;
-            font-weight: bold;
-        }
+        .btn-del-row:hover { background-color: #ffccc7; }
 
         /* --- 6. 全局设置区域 --- */
         .global-settings-box {
-            border: none;
-            border-radius: 12px;
-            margin-top: 35px;
+            border: none; border-radius: 12px; margin-top: 35px;
             box-shadow: 0 0 0 1px #e6f7ff, 0 4px 15px rgba(24, 144, 255, 0.05);
-            overflow: visible; position: relative;
             background: #fff;
         }
-
         .advanced-options { padding: 24px; }
-
         .settings-header {
-            padding: 0 0 15px 0;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #f0f0f0;
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #003a8c;
+            padding: 0 0 15px 0; margin-bottom: 20px;
+            border-bottom: 1px solid #f0f0f0; font-size: 1.1rem;
+            font-weight: 700; color: #003a8c;
         }
-
         .form-row {
             display: grid; grid-template-columns: 140px 1fr;
             align-items: center; margin-bottom: 18px;
         }
-
         textarea { resize: vertical; min-height: 80px; font-family: inherit; }
 
         /* --- 7. 按钮交互 --- */
         .btn {
             width: 100%; padding: 15px; border: none; border-radius: 10px;
-            font-size: 1.05rem; letter-spacing: 0.5px;
-            cursor: pointer; font-weight: 600; margin-top: 15px; color: white;
+            font-size: 1.05rem; cursor: pointer; font-weight: 600; margin-top: 15px; color: white;
             transition: all 0.2s;
         }
         .btn:active { transform: scale(0.98); }
-
         .btn-primary {
             background: linear-gradient(135deg, #1890ff, #096dd9);
             box-shadow: 0 4px 15px rgba(24, 144, 255, 0.35);
         }
         .btn-primary:hover {
             background: linear-gradient(135deg, #40a9ff, #1890ff);
-            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.45);
         }
-
         .btn-secondary {
             background: #fff; border: 1px dashed #d9d9d9; color: var(--text-sub);
             width: auto; padding: 12px 30px; margin: 0 auto; display: block;
         }
         .btn-secondary:hover {
-            border-color: var(--primary-color); color: var(--primary-color);
-            background: #f0f9ff;
+            border-color: var(--primary-color); color: var(--primary-color); background: #f0f9ff;
         }
-
         .hidden { display: none !important; }
-
         .loader {
             width: 24px; height: 24px; border: 3px solid #f3f3f3;
             border-top: 3px solid var(--primary-color); border-radius: 50%;
@@ -333,7 +323,7 @@
                         <div class="label-wrap">
                             <label class="option-label">素材保留比例</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">• 无要求: 自动创作符合创作指导的方案<br>• 全量保留: 所有场景都会被保留<br>• 较多保留: 要求最终的视频会用到一半以上的场景</span>
+                            <span class="tooltip-text">• 无要求: 自动智能方案<br>• 全量保留: 所有场景保留<br>• 较多保留: 保留一半以上</span>
                         </div>
                         <select id="retention-ratio" class="input-styled">
                             <option value="free" selected>无要求 (智能推荐)</option>
@@ -356,7 +346,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">原作者音频替换</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">也就是把原作者的语音进行替换</span>
+                                <span class="tooltip-text">把原作者的语音进行替换</span>
                             </div>
                             <select id="audio-replace" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -367,7 +357,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">场景标题与摘要</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">视频画面上方增加视频摘要以及相应的场景标题</span>
+                                <span class="tooltip-text">画面上方增加摘要及标题</span>
                             </div>
                             <select id="scene-title" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -378,7 +368,7 @@
                             <div class="label-wrap">
                                 <span class="option-label">是否增加过渡解说</span>
                                 <i class="info-icon">?</i>
-                                <span class="tooltip-text">在场景切换的时候增加衔接语</span>
+                                <span class="tooltip-text">场景切换时增加衔接语</span>
                             </div>
                             <select id="allow-commentary" class="input-styled">
                                 <option value="yes" selected>是</option>
@@ -391,18 +381,7 @@
                         <div class="label-wrap" style="margin-bottom: 8px;">
                             <label class="option-label">创作指导 (Prompt)</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">
-                                <b>• 定制标题：</b><br>
-                                &nbsp;&nbsp;例1：标题中必须出现“梅西”“c罗”。<br>
-                                &nbsp;&nbsp;例2：标题需要有反转效果，比如“我曾经讨厌梅西，但现在我喜欢他了”等。<br>
-                                <br>
-                                <b>• 视频主题（表达意思或节奏）：</b><br>
-                                &nbsp;&nbsp;例1：主题是贬低c罗。先夸梅西，后踩c罗。如：“把c罗和梅西相提并论都是侮辱梅西了”。<br>
-                                &nbsp;&nbsp;例2：主题体现绝代双骄。有梅西有c罗，是观众的福气。<br>
-                                <br>
-                                <b>• 避坑指南：</b><br>
-                                &nbsp;&nbsp;避免“给我最好的”这类空泛指令，越具体越好。
-                            </span>
+                            <span class="tooltip-text">输入具体的创作指令...</span>
                         </div>
                         <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
                     </div>
@@ -487,34 +466,83 @@
         } catch(e) {}
     }
 
-    /* --- 新增辅助函数：动态添加时间段行 --- */
+    /* --- 辅助函数：生成时间输入组件HTML (含强校验) --- */
+    function generateTimeInputGroup(classNamePrefix) {
+        // 1. 分/秒：限制最大值 59，输入实时校验
+        // 2. 毫秒：最大值 999，步长 100，失焦自动取整到100ms
+
+        return `
+            <div class="time-group ${classNamePrefix}">
+                <div class="time-cell">
+                    <label>分</label>
+                    <input type="number" min="0" max="59" value="0" class="t-min" placeholder="00"
+                        onkeydown="return event.keyCode !== 69"
+                        oninput="if(parseInt(value) > 59) value = 59; if(value.length > 2) value = value.slice(0,2);">
+                </div>
+                <div class="time-sep">:</div>
+                <div class="time-cell">
+                    <label>秒</label>
+                    <input type="number" min="0" max="59" value="0" class="t-sec" placeholder="00"
+                        onkeydown="return event.keyCode !== 69"
+                        oninput="if(parseInt(value) > 59) value = 59; if(value.length > 2) value = value.slice(0,2);">
+                </div>
+                <div class="time-sep">.</div>
+                <div class="time-cell">
+                    <label>毫秒</label>
+                    <input type="number" min="0" max="999" step="100" value="0" class="t-ms" placeholder="000"
+                        onkeydown="return event.keyCode !== 69"
+                        oninput="if(parseInt(value) > 999) value = 999; if(value.length > 3) value = value.slice(0,3);"
+                        onchange="this.value = Math.round(this.value / 100) * 100;">
+                </div>
+            </div>
+        `;
+    }
+
+    /* --- 辅助函数：从输入组件提取时间字符串 (格式: 00:MM:SS.mmm) --- */
+    function getCompositeTime(containerElement) {
+        if (!containerElement) return null;
+        const min = containerElement.querySelector('.t-min').value || '0';
+        const sec = containerElement.querySelector('.t-sec').value || '0';
+        const ms = containerElement.querySelector('.t-ms').value || '0';
+
+        const pad = (num, size) => num.toString().padStart(size, '0');
+        // 后端需要 00:MM:SS.mmm 格式，因此小时位强制补 00
+        return `00:${pad(min, 2)}:${pad(sec, 2)}.${pad(ms, 3)}`;
+    }
+
+    function compareTimeStrings(t1, t2) {
+        return t1.localeCompare(t2);
+    }
+
+    /* --- 动态添加时间段行 --- */
     window.addTimeSegmentRow = function(cardId) {
         const container = document.getElementById(`remove-segments-list-${cardId}`);
         const row = document.createElement('div');
         row.className = 'dynamic-row time-segment-row';
-        // 使用 type="time" step="0.001" 支持毫秒
+
         row.innerHTML = `
-            <input type="time" step="0.001" class="time-picker-input start-time" required>
-            <span class="time-separator">-</span>
-            <input type="time" step="0.001" class="time-picker-input end-time" required>
+            ${generateTimeInputGroup('start-group')}
+            <span class="range-sep">-</span>
+            ${generateTimeInputGroup('end-group')}
             <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
         `;
         container.appendChild(row);
     }
 
-    /* --- 新增辅助函数：动态添加分割点行 --- */
+    /* --- 动态添加分割点行 --- */
     window.addSplitPointRow = function(cardId) {
         const container = document.getElementById(`split-points-list-${cardId}`);
         const row = document.createElement('div');
         row.className = 'dynamic-row split-point-row';
+
         row.innerHTML = `
-            <input type="time" step="0.001" class="time-picker-input split-point" required>
+            ${generateTimeInputGroup('point-group')}
             <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
         `;
         container.appendChild(row);
     }
 
-    /* --- 新增辅助函数：删除行 --- */
+    /* --- 删除行 --- */
     window.removeDynamicRow = function(btn) {
         btn.parentElement.remove();
     }
@@ -535,9 +563,9 @@
             <div class="options-grid">
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">客观上是否包含作者声音? <span class="required-star">*</span></span>
+                        <span class="option-label">是否包含作者声音? <span class="required-star">*</span></span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识原视频中是否包含原作者的声音。（客观真实的指出）</span>
+                        <span class="tooltip-text">标识原视频中是否包含原作者的声音。</span>
                     </div>
                     <select class="input-styled select-voice">
                         <option value="" disabled selected>请选择...</option>
@@ -548,9 +576,9 @@
 
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">是否包含广告或原作者画面?</span>
+                        <span class="option-label">是否包含广告/原作者画面?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入或是否包含原作者信息，便于剔除（如果你选择了有,工具就一定会去找要删除的画面，多次都找不到整个视频创作就会失败）。</span>
+                        <span class="tooltip-text">标识视频中是否有硬广或植入。</span>
                     </div>
                     <select class="input-styled select-ad-face">
                         <option value="auto" selected>自动检测</option>
@@ -563,7 +591,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否实时视频?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">是否为新闻、直播切片等强时效内容。</span>
+                        <span class="tooltip-text">是否为新闻、直播切片等。</span>
                     </div>
                     <select class="input-styled select-realtime">
                         <option value="yes" selected>是</option>
@@ -572,9 +600,9 @@
                 </div>
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">自动配情绪引导文字?</span>
+                        <span class="option-label">自动配情绪文字?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">智能分析视频情绪，自动在画面内添加能够表达感情的文字</span>
+                        <span class="tooltip-text">自动在画面内添加文字</span>
                     </div>
                     <select class="input-styled select-text">
                         <option value="yes" selected>是</option>
@@ -585,7 +613,7 @@
                     <div class="label-wrap">
                         <span class="option-label">自动配表情包?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">智能分析视频情绪，自动添加趣味表情包。</span>
+                        <span class="tooltip-text">自动添加趣味表情包。</span>
                     </div>
                     <select class="input-styled select-emoji">
                         <option value="yes" selected>是</option>
@@ -594,13 +622,13 @@
                 </div>
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">素材最多分解场景数</span>
+                        <span class="option-label">最多分解场景数</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">限制该素材最多能够被分解成多少个场景（越多理论上就原创度可能更高，但是也会加大视频的创作难度，可能导致最后的视频反而不好）。</span>
+                        <span class="tooltip-text">限制分解数量。</span>
                     </div>
                     <select class="input-styled select-max-scenes">
                         <option value="0" selected>自动分割</option>
-                        <option value="1">不超过1个场景(也就是不分割)</option>
+                        <option value="1">不超过1个场景</option>
                         <option value="5">不超过5个场景</option>
                         <option value="10">不超过10个场景</option>
                     </select>
@@ -608,9 +636,9 @@
 
                 <div class="option-item">
                     <div class="label-wrap">
-                        <span class="option-label">是否场景不能够改变顺序</span>
+                        <span class="option-label">场景顺序是否固定</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">锁定素材的时间线顺序，剪辑时将不会打乱片段前后关系。</span>
+                        <span class="tooltip-text">锁定素材的时间线顺序。</span>
                     </div>
                     <select class="input-styled select-scene-order-fixed">
                         <option value="auto" selected>智能判断</option>
@@ -624,16 +652,16 @@
                 <div class="label-wrap">
                     <span class="option-label">场景划分指导</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">按照你的方案来划分场景，例如：帮我划分为三个场景分别是前期进攻，关键进球以及赛后回放这三个场景</span>
+                    <span class="tooltip-text">例：帮我划分为前期进攻，关键进球以及赛后回放三个场景</span>
                 </div>
-                <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
+                <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
             </div>
 
             <div class="dynamic-section">
                 <div class="label-wrap">
                     <span class="option-label">待剔除画面时间段</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频中需要删除的时间范围，支持毫秒。会严格按照提供的时间段来进行切分</span>
+                    <span class="tooltip-text">指定视频中需要删除的时间范围 (分:秒.毫秒)</span>
                 </div>
                 <div id="remove-segments-list-${id}" class="dynamic-list-container"></div>
                 <button type="button" class="btn-mini btn-add-row" onclick="addTimeSegmentRow(${id})">
@@ -645,7 +673,7 @@
                 <div class="label-wrap">
                     <span class="option-label">分割点时间段</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频的强制分割点。至少一定会在提供的时间点上进行切割</span>
+                    <span class="tooltip-text">指定视频的强制分割点 (分:秒.毫秒)</span>
                 </div>
                 <div id="split-points-list-${id}" class="dynamic-list-container"></div>
                 <button type="button" class="btn-mini btn-add-row" onclick="addSplitPointRow(${id})">
@@ -670,7 +698,7 @@
             const url = urlInput.value.trim();
 
             if(!url) {
-                err = `第 ${idx + 1} 个视频卡片的链接为空！\n如果不使用，请点击右上角红色按钮删除该卡片。`;
+                err = `第 ${idx + 1} 个视频卡片的链接为空！`;
                 urlInput.focus();
                 return;
             }
@@ -681,32 +709,32 @@
             const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
             const adFaceVal = card.querySelector('.select-ad-face').value;
             const sceneOrderFixedVal = card.querySelector('.select-scene-order-fixed').value;
-
-            // 获取新增字段：剪辑指导
             const splitGuidanceVal = card.querySelector('.textarea-split-guidance').value.trim();
 
-            // 获取新增字段：待剔除时间段
+            // --- 获取并处理 待剔除时间段 ---
             const removeSegments = [];
             const segmentRows = card.querySelectorAll('.time-segment-row');
             for (let row of segmentRows) {
-                const start = row.querySelector('.start-time').value;
-                const end = row.querySelector('.end-time').value;
-                if (start && end) {
-                    if (start >= end) {
-                        err = `第 ${idx + 1} 个视频的剔除时间段有误：\n结束时间 (${end}) 必须大于 开始时间 (${start})`;
+                const startStr = getCompositeTime(row.querySelector('.start-group'));
+                const endStr = getCompositeTime(row.querySelector('.end-group'));
+
+                // 只有当两个时间不完全相同时才认为是有效输入
+                if (startStr !== endStr) {
+                    if (compareTimeStrings(startStr, endStr) >= 0) {
+                        err = `第 ${idx + 1} 个视频的剔除时间段有误：\n结束时间必须大于开始时间`;
                         return;
                     }
-                    removeSegments.push(`${start}-${end}`);
+                    removeSegments.push(`${startStr}-${endStr}`);
                 }
             }
 
-            // 获取新增字段：分割点时间点
+            // --- 获取并处理 分割点时间点 ---
             const splitPoints = [];
             const pointRows = card.querySelectorAll('.split-point-row');
             for (let row of pointRows) {
-                const point = row.querySelector('.split-point').value;
-                if (point) {
-                    splitPoints.push(point);
+                const pointStr = getCompositeTime(row.querySelector('.point-group'));
+                if (pointStr !== "00:00:00.000") {
+                    splitPoints.push(pointStr);
                 }
             }
 
@@ -719,7 +747,6 @@
                 max_scenes: maxScenesVal,
                 has_ad_or_face: adFaceVal,
                 scene_order_fixed: sceneOrderFixedVal,
-                // 新增字段 Payload
                 split_guidance: splitGuidanceVal,
                 remove_time_segments: removeSegments,
                 split_time_points: splitPoints
@@ -735,7 +762,7 @@
         if (isOriginal && audioReplaceSelect.value === 'yes') {
             const isAllNoVoice = vList.every(v => v.is_contains_author_voice === false);
             if (isAllNoVoice) {
-                alert('⚠️ 设置冲突提醒：\n\n您开启了【原作者 音频替换】，但素材列表中所有视频的【包含作者声音】均选择了【否】。\n\n逻辑说明：如果视频本身没有原作者声音来源，系统无法执行音频替换。\n\n请修改：\n1. 将“原作者 音频替换”改为“否”；\n2. 或者确保至少有一个素材“包含作者声音”为“是”。');
+                alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
                 audioReplaceSelect.focus();
                 return;
             }
@@ -757,9 +784,7 @@
             video_list: vList
         };
 
-        console.log('Payload:', payload);
-
-        // 1. 锁定按钮并显示加载中
+        // 提交逻辑
         els.submitBtn.disabled = true;
         els.submitBtn.innerHTML = '处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
@@ -767,35 +792,23 @@
         try {
             const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
             const d = await res.json();
-
-            // 2. 提前隐藏加载动画，以便 alert 不会阻塞UI更新
             document.getElementById('loading-mask').classList.add('hidden');
 
-            // 3. 详细解析响应结果
             if(res.ok) {
-                // HTTP 200 成功 (含正常创建 和 重复任务提示)
-                // 后端返回结构: { status: "success", message: "xxx" }
                 alert(`✅ 提交结果：\n\n${d.message}`);
                 fetchUploadStats();
             } else {
-                // HTTP 400/500 错误
-                // 后端返回结构: { status: "error", message: "xxx", errors: ["..."] }
                 let errorDetails = d.message || '未知错误';
-
-                // 如果有详细的错误列表（例如部分解析失败），追加显示
                 if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
                     errorDetails += '\n\n----------------\n❌ 详细错误列表：\n' + d.errors.join('\n');
                 }
-
                 alert(`❌ 提交失败：\n\n${errorDetails}`);
             }
         } catch(e) {
             document.getElementById('loading-mask').classList.add('hidden');
             alert('❌ 网络请求发生错误，请检查网络连接。');
-            console.error(e);
         }
         finally {
-            // 4. 恢复按钮状态
             els.submitBtn.disabled = false;
             els.submitBtn.innerHTML = '提交创作任务';
         }

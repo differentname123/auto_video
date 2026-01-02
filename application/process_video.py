@@ -93,7 +93,7 @@ def run():
             manager.upsert_tasks([task_info])
 
 
-def process_origin_video(video_id):
+def process_origin_video(video_id, video_info):
     """
     处理原始视频生成后续需要处理的视频
     :param video_id:
@@ -339,7 +339,7 @@ def gen_derive_videos(video_info_dict):
     failure_details = {}
     for video_id, video_info in video_info_dict.items():
         try:
-            process_origin_video(video_id)
+            process_origin_video(video_id, video_info)
         except Exception as e:
             error_info = f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {str(e)}"
             print(error_info)

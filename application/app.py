@@ -21,7 +21,7 @@ from flask import Flask, request, jsonify, render_template, Response
 from utils.common_utils import read_json, save_json, check_timestamp
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
-    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH
+    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points
 
 _configure_third_party_paths()
 
@@ -197,6 +197,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
 
     for idx, video_item in enumerate(input_video_list, start=1):
         url = video_item.get('original_url', '').strip()
+        video_item = fix_split_time_points(video_item)
         if not url:
             errors.append(f"第 {idx} 条记录错误: 视频链接为空")
             continue
@@ -205,7 +206,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         local_video_id = original_url_id_info.get(url)
         meta_data = None # 临时存储元数据
         current_video_id = None # 临时存储 ID
-        duration = 0 # 临时存储时长
+        duration = "00:01" # 临时存储时长
 
         # 1. 尝试从缓存获取
         if local_video_id:
@@ -218,7 +219,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
                 cached_material['extra_info'] = video_item
                 current_video_id = cached_material.get('video_id')
                 # 从缓存中获取时长
-                duration = cached_material.get('base_info', {}).get('duration', 0)
+                duration = cached_material.get('base_info', {}).get('duration')
 
         # 2. 如果缓存未命中，执行解析
         if not cached_material:
