@@ -113,13 +113,35 @@
             box-shadow: var(--shadow-hover);
         }
 
-        /* --- 字段同步高亮 --- */
+        /* --- 字段同步高亮与历史记录样式 --- */
         .field-synced {
             border-color: var(--warning-color) !important;
             background-color: #fffbe6 !important;
             box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.2) !important;
             transition: all 0.5s;
         }
+
+        /* 新增：历史记录行特定样式 */
+        .history-row {
+            background-color: #fffbe6 !important; /* 浅黄色背景 */
+            border: 1px dashed #ffe58f !important;     /* 深黄色虚线边框 */
+            position: relative;
+            margin-top: 8px;
+        }
+        /* 新增：历史记录标签 */
+        .history-badge {
+            position: absolute;
+            top: -8px;
+            left: 10px;
+            background-color: #faad14;
+            color: white;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
         .sync-tip {
             display: block;
             font-size: 11px;
@@ -722,44 +744,112 @@
         resetSubmitButtonState(); // 删除卡片，列表变动，强制重新检查
     };
 
+    /**
+     * 更新并高亮显示差异
+     * 针对 TEXTAREA 做了特殊处理：追加而不是覆盖
+     */
     function updateAndHighlight(element, newValue) {
         if (!element) return;
+
+        // 如果值完全一样，不做处理
         if (element.value === String(newValue)) return;
-        element.value = String(newValue);
+
+        // 【关键修改】如果是文本域，不覆盖，而是追加
+        if (element.tagName === 'TEXTAREA') {
+            const currentVal = element.value.trim();
+            // 如果当前是空的，直接赋值
+            if (!currentVal) {
+                element.value = String(newValue);
+            } else if (!currentVal.includes(newValue)) {
+                // 如果不为空且不包含历史值，追加显示
+                element.value = `${currentVal}\n\n[⬇️ 历史配置参考 ⬇️]\n${newValue}`;
+            }
+        } else {
+            // 普通下拉框等，保持覆盖逻辑
+            element.value = String(newValue);
+        }
+
         element.classList.add('field-synced');
         const parent = element.parentElement;
         if (parent && !parent.querySelector('.sync-tip')) {
             const tip = document.createElement('span');
             tip.className = 'sync-tip';
-            tip.innerText = '⚠️ 已自动同步数据库历史配置';
+            tip.innerText = '⚠️ 发现历史配置差异';
             parent.appendChild(tip);
         }
     }
 
-    function rebuildDynamicRows(cardId, containerId, dataList, type) {
-        const container = document.getElementById(`${containerId}-${cardId}`);
-        container.innerHTML = '';
-        if (!dataList || dataList.length === 0) return;
-        dataList.forEach(item => {
-            if (type === 'segment') {
-                const row = window.addTimeSegmentRow(cardId);
-                const [start, end] = item.split('-');
-                fillTimeGroup(row.querySelector('.start-group'), start);
-                fillTimeGroup(row.querySelector('.end-group'), end);
-                row.classList.add('field-synced');
-            } else if (type === 'point') {
-                const row = window.addSplitPointRow(cardId);
-                fillTimeGroup(row.querySelector('.point-group'), item);
-                row.classList.add('field-synced');
-            }
-        });
+    /**
+     * 重建动态行
+     * 【关键修改】不清除现有行，而是追加带有黄色背景的“历史记录”行
+     */
+/**
+ * 重建动态行 (带去重功能)
+ * 1. 扫描当前界面已有的时间数据，存入 Set。
+ * 2. 遍历历史数据，只有当 Set 中不存在时，才添加新行。
+ */
+function rebuildDynamicRows(cardId, containerId, dataList, type) {
+    const container = document.getElementById(`${containerId}-${cardId}`);
+    if (!dataList || dataList.length === 0) return;
+
+    // --- 第一步：获取当前界面已存在的“值集合”，用于去重 ---
+    const existingSet = new Set();
+    const currentRows = container.querySelectorAll('.dynamic-row');
+
+    currentRows.forEach(row => {
+        let val = '';
+        if (type === 'segment') {
+            // 必须要用 getCompositeTime 获取标准格式 (00:00:00.000) 以便对比
+            const s = getCompositeTime(row.querySelector('.start-group'));
+            const e = getCompositeTime(row.querySelector('.end-group'));
+            val = `${s}-${e}`;
+        } else {
+            val = getCompositeTime(row.querySelector('.point-group'));
+        }
+        existingSet.add(val);
+    });
+
+    // --- 第二步：遍历历史数据，排除重复项后追加 ---
+    let addedCount = 0;
+
+    dataList.forEach(item => {
+        // 【核心去重逻辑】如果界面上已经有了这个时间，直接跳过
+        if (existingSet.has(item)) return;
+
+        let row;
+        if (type === 'segment') {
+            row = window.addTimeSegmentRow(cardId);
+            const [start, end] = item.split('-');
+            fillTimeGroup(row.querySelector('.start-group'), start);
+            fillTimeGroup(row.querySelector('.end-group'), end);
+        } else if (type === 'point') {
+            row = window.addSplitPointRow(cardId);
+            fillTimeGroup(row.querySelector('.point-group'), item);
+        }
+
+        // 添加历史记录标识样式
+        if (row) {
+            row.classList.add('history-row');
+
+            const badge = document.createElement('span');
+            badge.className = 'history-badge';
+            badge.innerText = '历史记录';
+            row.appendChild(badge);
+
+            addedCount++;
+        }
+    });
+
+    // 只有确实新增了数据才提示
+    if (addedCount > 0) {
         if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
              const tip = document.createElement('span');
              tip.className = 'sync-tip';
-             tip.innerText = '⚠️ 时间轴已自动同步';
+             tip.innerText = `⚠️ 已追加 ${addedCount} 条缺失的历史记录`;
              container.previousElementSibling.appendChild(tip);
         }
     }
+}
 
     function collectFormData() {
         const cards = document.querySelectorAll('.video-item-card');
@@ -921,7 +1011,6 @@
                 }
             } else {
                 alert('检查状态失败：' + (d.message || '未知错误'));
-                // 检查失败，停留在当前界面，不允许进入下一步
                 resetSubmitButtonState();
             }
         } catch (e) {
@@ -946,27 +1035,26 @@
         try {
             const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(finalPayload) });
             const d = await res.json();
-            document.getElementById('loading-mask').classList.add('hidden');
 
             if(res.ok) {
                 alert(`✅ 提交结果：\n\n${d.message}`);
                 fetchUploadStats();
-                resetSubmitButtonState();
+                // 成功后由 finally 块负责恢复按钮
             } else {
                 let errorDetails = d.message || '未知错误';
                 if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
                     errorDetails += '\n\n----------------\n❌ 详细错误列表：\n' + d.errors.join('\n');
                 }
                 alert(`❌ 提交失败：\n\n${errorDetails}`);
-
-                // 【核心修改】：提交失败，强制状态回滚
-                // 用户必须修改数据（如无效URL），这会使之前的检查失效，必须重新Check
-                resetSubmitButtonState();
             }
         } catch(e) {
-            document.getElementById('loading-mask').classList.add('hidden');
             alert('❌ 网络请求发生错误，请检查网络连接。');
+        } finally {
+            // 【核心修复】无论 Try 成功了，还是 Catch 报错了，这里永远会执行
+            // 确保 Loading 消失，按钮恢复可点击
+            document.getElementById('loading-mask').classList.add('hidden');
             resetSubmitButtonState();
+            els.submitBtn.disabled = false;
         }
     }
 </script>
