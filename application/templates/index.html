@@ -498,11 +498,33 @@
         } catch(e) {}
     }
 
-    // --- 状态重置函数 (已修复) ---
+    // --- 新增：清除所有高亮和历史标记的函数 ---
+    function clearSyncHighlights() {
+        // 1. 清除输入框的黄色背景高亮
+        document.querySelectorAll('.field-synced').forEach(el => {
+            el.classList.remove('field-synced');
+        });
+
+        // 2. 移除所有的文字提示 (如 "⚠️ 发现历史配置差异")
+        document.querySelectorAll('.sync-tip').forEach(el => {
+            el.remove();
+        });
+
+        // 3. 处理历史记录行 (移除特殊样式和角标，但保留行数据)
+        document.querySelectorAll('.history-row').forEach(row => {
+            row.classList.remove('history-row');
+            // 移除行内的 "历史记录" 标签
+            const badge = row.querySelector('.history-badge');
+            if (badge) badge.remove();
+        });
+
+        // 4. (注) 文本域中追加的历史文本内容按要求保留，不做删除，避免误删用户可能已修改的内容
+    }
+
+    // --- 状态重置函数 (已修改) ---
     // forceReset: 当请求结束（无论成功失败）时传入 true，强制把按钮变回原样
     function resetSubmitButtonState(forceReset = false) {
         // 如果不是强制重置，且当前并没有处于“待确认(isConfigConfirmed=true)”状态，则跳过
-        // 这样可以避免用户在普通输入时频繁触发 DOM 操作
         if (!forceReset && !isConfigConfirmed) return;
 
         // 重置核心标记
@@ -515,7 +537,10 @@
         els.submitBtn.style.borderColor = '';
         els.submitBtn.disabled = false;
 
-        console.log("状态已重置为：初始状态");
+        // 【关键修改】状态回归时，清除页面上的高亮标记
+        clearSyncHighlights();
+
+        console.log("状态已重置为：初始状态，已清除高亮样式");
     }
 
     /* --- 辅助函数：生成时间输入组件 --- */
