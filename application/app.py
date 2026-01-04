@@ -249,6 +249,15 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
 # 2. 业务流程控制层 - 串联逻辑与数据库
 # =============================================================================
 
+def check_cached_material(cached_material, video_item):
+    """
+    判断单个视频传入的信息是否改变，如果改变则报错
+    :param cached_material:
+    :param video_item:
+    :return:
+    """
+    return cached_material['extra_info'] == video_item
+
 def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
     """
     处理一键生成请求的核心业务流程
@@ -310,6 +319,9 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
                 current_video_id = cached_material.get('video_id')
                 # 从缓存中获取时长
                 duration = cached_material.get('base_info', {}).get('duration')
+                if not check_cached_material(cached_material, video_item):
+                    errors.append(f"第 {idx} 条素材配置当前不允许改变 (URL: {url})")
+                    continue
 
         # 2. 如果缓存未命中，执行解析
         if not cached_material:
