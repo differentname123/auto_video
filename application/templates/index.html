@@ -607,6 +607,17 @@
                 </div>
                 <div class="option-item">
                     <div class="label-wrap">
+                        <span class="option-label">是否包含BGM?</span>
+                        <i class="info-icon">?</i>
+                        <span class="tooltip-text">标识原视频是否全局都包含背景音乐。</span>
+                    </div>
+                    <select class="input-styled select-bgm">
+                        <option value="yes" selected>是</option>
+                        <option value="no">否</option>
+                    </select>
+                </div>
+                <div class="option-item">
+                    <div class="label-wrap">
                         <span class="option-label">是否包含广告/原作者画面?</span>
                         <i class="info-icon">?</i>
                         <span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span>
@@ -835,6 +846,7 @@
                 _cardDomId: card.id,
                 original_url: url,
                 is_contains_author_voice: voice === 'yes',
+                is_contains_bgm: card.querySelector('.select-bgm').value === 'yes', // 新增字段
                 is_realtime_video: card.querySelector('.select-realtime').value === 'yes',
                 is_requires_text: card.querySelector('.select-text').value === 'yes',
                 is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
@@ -912,6 +924,11 @@
                             const dbVoice = dbConfig.is_contains_author_voice ? 'yes' : 'no';
                             const currVoice = currentInput.is_contains_author_voice ? 'yes' : 'no';
                             if (dbVoice !== currVoice) { updateAndHighlight(cardDom.querySelector('.select-voice'), dbVoice); hasChanges = true; }
+
+                            // 新增：BGM 字段的同步逻辑
+                            const dbBgm = dbConfig.is_contains_bgm ? 'yes' : 'no';
+                            const currBgm = currentInput.is_contains_bgm ? 'yes' : 'no';
+                            if (dbBgm !== currBgm) { updateAndHighlight(cardDom.querySelector('.select-bgm'), dbBgm); hasChanges = true; }
 
                             const dbReal = dbConfig.is_realtime_video ? 'yes' : 'no';
                             const currReal = currentInput.is_realtime_video ? 'yes' : 'no';
