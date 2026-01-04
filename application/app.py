@@ -121,6 +121,97 @@ def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
     }
 
 
+# =============================================================================
+# 新增业务逻辑：检查视频状态并返回已有配置
+# =============================================================================
+
+def process_check_video_status(request_data: Dict) -> Tuple[Dict, int]:
+    """
+    检查视频列表的状态：
+    1. 解析 URL 获取 video_id
+    2. 检查 DB 是否存在该 video_id
+    3. 如果存在，返回 DB 中的配置信息供前端同步
+    """
+    if not request_data or not request_data.get('video_list'):
+        return {'status': ResponseStatus.ERROR, 'message': '参数缺失', 'errors': []}, 400
+
+    input_video_list = request_data['video_list']
+    original_url_id_info = read_json(LOCAL_ORIGIN_URL_ID_INFO_PATH)
+    is_url_mapping_updated = False
+
+    check_results = []
+
+    # 临时错误收集，不阻断整体流程，只标记单个失败
+
+    for idx, video_item in enumerate(input_video_list):
+        url = video_item.get('original_url', '').strip()
+        if not url:
+            check_results.append({'index': idx, 'status': 'error', 'msg': 'URL为空'})
+            continue
+
+        local_video_id = original_url_id_info.get(url)
+        current_video_id = local_video_id
+
+        # 1. 尝试获取 video_id (缓存 -> 解析)
+        if not current_video_id:
+            success, meta, err_msg = parse_douyin_video(url)
+            if success:
+                current_video_id = meta.get('id')
+                original_url_id_info[url] = current_video_id
+                is_url_mapping_updated = True
+            else:
+                check_results.append({'index': idx, 'status': 'error', 'msg': f'解析失败: {err_msg}'})
+                continue
+
+        # 2. 查询数据库
+        db_results = mongo_manager.find_materials_by_ids([current_video_id])
+
+        if db_results and len(db_results) > 0:
+            # 找到已有素材，提取配置信息
+            existing_material = db_results[0]
+            # 这里我们返回 extra_info，这是之前存进去的配置
+            stored_config = existing_material.get('extra_info', {})
+
+            check_results.append({
+                'index': idx,
+                'status': 'exists',
+                'video_id': current_video_id,
+                'original_url': url,  # 返回 URL 方便前端对应
+                'stored_config': stored_config,  # 核心：返回已有的配置
+                'msg': '发现历史配置'
+            })
+        else:
+            # 这是一个全新的视频
+            check_results.append({
+                'index': idx,
+                'status': 'new',
+                'video_id': current_video_id,
+                'msg': '新素材'
+            })
+
+    if is_url_mapping_updated:
+        save_json(LOCAL_ORIGIN_URL_ID_INFO_PATH, original_url_id_info)
+
+    return {
+        'status': ResponseStatus.SUCCESS,
+        'data': check_results,
+        'message': '检查完成'
+    }, 200
+
+
+# ... (在 Flask 路由区域添加) ...
+
+@app.route('/check-video-status', methods=['POST'])
+def check_video_status() -> Tuple[Response, int]:
+    """检查视频状态接口"""
+    try:
+        data = request.get_json()
+        response_data, status_code = process_check_video_status(data)
+        return jsonify(response_data), status_code
+    except Exception as e:
+        app.logger.exception("check_video_status 接口异常")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 def build_publish_task_data(user_name: str, global_settings: Dict, materials: List[Dict],
                             original_video_list: List[Dict]) -> Dict:
     """构建发布任务的存库数据结构"""
@@ -302,8 +393,8 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         print(f"用户 {user_name} 提交的任务完全重复，跳过。")
         response_structure['status'] = ResponseStatus.SUCCESS # 业务上算成功处理（已存在）
         response_structure['message'] = ErrorMessage.TASK_ALREADY_EXISTS
-        response_structure['errors'] = [] # 无错误，只是提示已存在
-        return response_structure, 200
+        response_structure['errors'] = ['可尝试采用不同的素材或者调整创作指导也能创建新任务'] # 无错误，只是提示已存在
+        return response_structure, 500
 
     # --- Step 4 & 5: 保存数据 ---
     try:

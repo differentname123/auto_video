@@ -42,7 +42,7 @@ class MongoManager:
         query = {
             "video_id_list": video_id_list
         }
-        return self.db.find_one(self.tasks_collection, query)
+        return self.db.find_many(self.tasks_collection, query)
 
     def _ensure_indexes(self):
         """
@@ -150,23 +150,9 @@ class MongoManager:
     def upsert_tasks(self, data_list: list):
         """
         2. 批量插入或更新发布任务记录。
-           - 基于 'video_id_list' 字段进行匹配。
-           - 如果存在具有完全相同 video_id_list 的任务，则更新。
+           - 基于 ['video_id_list', 'userName', 'creation_guidance_info'] 联合字段进行匹配。
+           - 如果三者都完全相同，则更新。
            - 否则，插入新任务。
-           - 自动维护 'update_time' 字段。
-
-        Args:
-            data_list (list): 包含多个任务文档的列表。
-                              每个文档必须包含 'video_id_list' 字段。
-
-        *** 重要提示 ***
-        使用一个数组（如 video_id_list）作为唯一键进行 upsert 操作需要特别小心：
-        1. 顺序敏感：['id1', 'id2'] 和 ['id2', 'id1'] 会被视为两个不同的键，导致插入重复任务。
-           => 解决方案：在入库前，始终对 video_id_list 进行排序。
-        2. 性能考量：为数组创建唯一索引比为单个字符串开销更大。
-
-        更稳妥的设计是为每个任务生成一个唯一的 'task_id' (例如使用 UUID)，
-        并使用 'task_id' 作为 upsert 的唯一键。但此处我们按你的要求实现。
         """
         if not data_list:
             print("警告: 传入的 data_list 为空，无需操作。")
@@ -182,15 +168,16 @@ class MongoManager:
             if not video_ids or not isinstance(video_ids, list) or len(video_ids) == 0:
                 raise ValueError(f"第 {i + 1} 条任务数据校验失败: 'video_id_list' 不能为空数组。")
 
-
         now = datetime.now()
         for item in data_list:
             item['update_time'] = now
-            # ** 最佳实践：对 video_id_list 排序，确保键的唯一性 **
+            # 对 video_id_list 排序，确保列表比较时的唯一性
             if 'video_id_list' in item and isinstance(item['video_id_list'], list):
                 item['video_id_list'].sort()
 
-        self.db.bulk_upsert(self.tasks_collection, data_list, "video_id_list")
+        # 修改点：将唯一键改为由三个字段组成的列表
+        unique_keys = ["video_id_list", "userName", "creation_guidance_info"]
+        self.db.bulk_upsert(self.tasks_collection, data_list, unique_keys)
 
 
 # ==========================================

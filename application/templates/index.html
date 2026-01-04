@@ -16,6 +16,7 @@
             --border-color: #e8e8e8;
             --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
             --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
+            --warning-color: #faad14;
         }
 
         body {
@@ -112,6 +113,23 @@
             box-shadow: var(--shadow-hover);
         }
 
+        /* --- 字段同步高亮 --- */
+        .field-synced {
+            border-color: var(--warning-color) !important;
+            background-color: #fffbe6 !important;
+            box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.2) !important;
+            transition: all 0.5s;
+        }
+        .sync-tip {
+            display: block;
+            font-size: 11px;
+            color: var(--warning-color);
+            margin-top: 4px;
+            font-weight: bold;
+            animation: fadeIn 0.5s;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
         .input-styled {
             width: 100%; padding: 10px 12px;
             border: 1px solid #d9d9d9; border-radius: 6px;
@@ -152,10 +170,8 @@
         }
         .dynamic-list-container { margin-top: 8px; }
 
-        /* 组合时间选择器样式 */
         .dynamic-row {
-            display: flex; align-items: flex-end; /* 底部对齐 */
-            gap: 10px; margin-bottom: 12px;
+            display: flex; align-items: flex-end; gap: 10px; margin-bottom: 12px;
             background: #fafafa; padding: 8px; border-radius: 6px; border: 1px solid #f0f0f0;
         }
 
@@ -168,27 +184,19 @@
         .time-cell label {
             font-size: 10px; color: #888; margin-bottom: 2px;
         }
-
-        /* 时间输入框基础样式 */
         .time-cell input {
             width: 48px; padding: 4px; text-align: center;
             border: 1px solid #d9d9d9; border-radius: 4px;
             font-family: monospace; font-size: 0.9rem;
             -moz-appearance: textfield;
         }
-
-        /* 修改：小数位输入框加宽，以容纳文字 */
         .time-cell input.t-ms { width: 70px; }
-
-        /* 针对非法输入的高亮 */
         .time-cell input:invalid {
             border-color: #ff4d4f; background-color: #fff1f0;
         }
-
         .time-sep {
             font-weight: bold; color: #333; padding-bottom: 6px; font-size: 1.1rem;
         }
-
         .range-sep {
             padding-bottom: 8px; color: #999; font-weight: bold;
         }
@@ -204,7 +212,7 @@
         .btn-add-row:hover { background-color: #d9f7be; }
         .btn-del-row {
             background-color: #fff1f0; border-color: #ffa39e; color: #f5222d;
-            margin-bottom: 1px; /* 对齐微调 */
+            margin-bottom: 1px;
         }
         .btn-del-row:hover { background-color: #ffccc7; }
 
@@ -380,9 +388,9 @@
                         <div class="label-wrap" style="margin-bottom: 8px;">
                             <label class="option-label">创作指导 (Prompt)</label>
                             <i class="info-icon">?</i>
-                            <span class="tooltip-text">关键字：标题，主题，视频节奏，场景。<br>例1：标题中必须出现'C罗'这个关键字，然后整体的视频主题要是大夸特夸C罗。<br>例2：视频节奏应该先把高光的部分放在最前面<br>例3：视频主题是进球的集锦，选取精彩的进球场景进行拼接,严禁选择非进球的场景<br>例4：狠狠的贬低C罗，倒挂金钩纯粹是运气</span>
+                            <span class="tooltip-text">关键字：标题，主题，视频节奏，场景。</span>
                         </div>
-                        <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求，留空则由工具按照提供的素材合理发挥..."></textarea>
+                        <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求..."></textarea>
                     </div>
                 </div>
             </div>
@@ -391,7 +399,7 @@
         </form>
 
         <div id="loading-mask" class="hidden" style="margin-top: 25px; text-align: center; color: var(--primary-color);">
-            <div class="loader"></div> <span id="loading-text" style="font-weight: 500;">正在上传素材并创建任务...</span>
+            <div class="loader"></div> <span id="loading-text" style="font-weight: 500;">正在处理中...</span>
         </div>
     </div>
 </div>
@@ -411,6 +419,9 @@
         dateSelect: document.getElementById('schedule-date'),
         stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
     };
+
+    // 状态标记
+    let isConfigConfirmed = false;
 
     document.addEventListener('DOMContentLoaded', () => {
         if (APP.currentUser) initMainApp();
@@ -465,9 +476,22 @@
         } catch(e) {}
     }
 
-    /* --- 辅助函数：生成时间输入组件HTML (修改后) --- */
+    // --- 状态重置函数 (关键逻辑) ---
+    // 只要有任何可能导致检查失效的操作（加减卡片、修改URL、提交报错），都必须调用此函数
+    function resetSubmitButtonState() {
+        if (!isConfigConfirmed) return; // 如果本来就是第一阶段，就不需要操作
+
+        isConfigConfirmed = false;
+        els.submitBtn.innerHTML = '提交创作任务';
+        els.submitBtn.classList.add('btn-primary');
+        els.submitBtn.style.background = '';
+        els.submitBtn.style.borderColor = '';
+        els.submitBtn.disabled = false;
+        console.log("状态已重置为：待检查");
+    }
+
+    /* --- 辅助函数：生成时间输入组件 --- */
     function generateTimeInputGroup(classNamePrefix) {
-        // 修改点：placeholder 改为 "0"，视觉上更简洁，避免误导必须输入3位数
         return `
             <div class="time-group ${classNamePrefix}">
                 <div class="time-cell">
@@ -494,40 +518,38 @@
         `;
     }
 
-    /* --- 辅助函数：从输入组件提取时间字符串 (逻辑保持不变) --- */
     function getCompositeTime(containerElement) {
         if (!containerElement) return null;
         const min = containerElement.querySelector('.t-min').value || '0';
         const sec = containerElement.querySelector('.t-sec').value || '0';
-
-        // 修改点：处理小数位逻辑
         let msRaw = containerElement.querySelector('.t-ms').value || '0';
-
-        // 1. 确保不超过3位（容错）
         if (msRaw.length > 3) msRaw = msRaw.slice(0, 3);
-
-        // 2. 后端补0逻辑：
-        // 视觉上用户看到的是 0.1 (输入1)，后端逻辑处理为 100ms
-        // 输入 "1" -> padEnd(3, '0') -> "100"
-        // 输入 "01" -> padEnd(3, '0') -> "010"
         const ms = msRaw.padEnd(3, '0');
-
         const pad = (num, size) => num.toString().padStart(size, '0');
-
-        // 拼接格式： 00:MM:SS.xxx (固定3位小数)
         return `00:${pad(min, 2)}:${pad(sec, 2)}.${ms}`;
+    }
+
+    function fillTimeGroup(groupEl, timeStr) {
+        if (!timeStr || !groupEl) return;
+        const parts = timeStr.split(':');
+        if (parts.length < 3) return;
+        const min = parseInt(parts[1], 10);
+        const secParts = parts[2].split('.');
+        const sec = parseInt(secParts[0], 10);
+        const ms = secParts[1] ? parseInt(secParts[1], 10) : 0;
+        groupEl.querySelector('.t-min').value = min;
+        groupEl.querySelector('.t-sec').value = sec;
+        groupEl.querySelector('.t-ms').value = ms;
     }
 
     function compareTimeStrings(t1, t2) {
         return t1.localeCompare(t2, undefined, { numeric: true, sensitivity: 'base' });
     }
 
-    /* --- 动态添加时间段行 --- */
     window.addTimeSegmentRow = function(cardId) {
         const container = document.getElementById(`remove-segments-list-${cardId}`);
         const row = document.createElement('div');
         row.className = 'dynamic-row time-segment-row';
-
         row.innerHTML = `
             ${generateTimeInputGroup('start-group')}
             <span class="range-sep">-</span>
@@ -535,25 +557,22 @@
             <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
         `;
         container.appendChild(row);
+        return row;
     }
 
-    /* --- 动态添加分割点行 --- */
     window.addSplitPointRow = function(cardId) {
         const container = document.getElementById(`split-points-list-${cardId}`);
         const row = document.createElement('div');
         row.className = 'dynamic-row split-point-row';
-
         row.innerHTML = `
             ${generateTimeInputGroup('point-group')}
             <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
         `;
         container.appendChild(row);
+        return row;
     }
 
-    /* --- 删除行 --- */
-    window.removeDynamicRow = function(btn) {
-        btn.parentElement.remove();
-    }
+    window.removeDynamicRow = function(btn) { btn.parentElement.remove(); }
 
     function addVideoCard() {
         APP.videoCounter++;
@@ -567,7 +586,7 @@
 
         card.innerHTML = `
             ${delBtn}
-            <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
+            <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required oninput="resetSubmitButtonState()">
             <div class="options-grid">
                 <div class="option-item">
                     <div class="label-wrap">
@@ -586,7 +605,7 @@
                     <div class="label-wrap">
                         <span class="option-label">是否包含广告/原作者画面?</span>
                         <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。（如果选择了是，那么工具就一定会找到待删除的画面，多次尝试都没找到就会投稿失败）</span>
+                        <span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span>
                     </div>
                     <select class="input-styled select-ad-face">
                         <option value="auto" selected>自动检测</option>
@@ -636,7 +655,7 @@
                     </div>
                     <select class="input-styled select-max-scenes">
                         <option value="0" selected>自动分割</option>
-                        <option value="1">不超过1个场景（也就是不进行切分，整个视频就是一个场景）</option>
+                        <option value="1">不超过1个场景</option>
                         <option value="5">不超过5个场景</option>
                         <option value="10">不超过10个场景</option>
                     </select>
@@ -660,7 +679,7 @@
                 <div class="label-wrap">
                     <span class="option-label">场景划分指导</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">关键字：场景，划分。<br>例1：帮我划分为前期进攻，关键进球以及赛后回放三个场景。<br>例2：前期进攻铺垫和进球需要划分为一个场景</span>
+                    <span class="tooltip-text">关键字：场景，划分。</span>
                 </div>
                 <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
             </div>
@@ -669,7 +688,7 @@
                 <div class="label-wrap">
                     <span class="option-label">待剔除画面时间段</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频中需要删除的时间范围（严格按照提供的时间进行删除，会自动找目标1s附近最好的时间点）(00:01.1 和 00:01.100是同一个时间)</span>
+                    <span class="tooltip-text">指定视频中需要删除的时间范围。</span>
                 </div>
                 <div id="remove-segments-list-${id}" class="dynamic-list-container"></div>
                 <button type="button" class="btn-mini btn-add-row" onclick="addTimeSegmentRow(${id})">
@@ -681,7 +700,7 @@
                 <div class="label-wrap">
                     <span class="option-label">场景分割点时间点</span>
                     <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频的强制分割点 (会自动找目标1s附近最好的分割点)(00:01.1 和 00:01.100是同一个时间)</span>
+                    <span class="tooltip-text">指定视频的强制分割点。</span>
                 </div>
                 <div id="split-points-list-${id}" class="dynamic-list-container"></div>
                 <button type="button" class="btn-mini btn-add-row" onclick="addSplitPointRow(${id})">
@@ -692,10 +711,57 @@
         els.videoList.appendChild(card);
     }
 
-    els.addVideoBtn.addEventListener('click', addVideoCard);
-    window.removeCard = (id) => document.getElementById(`video-card-${id}`)?.remove();
+    els.addVideoBtn.addEventListener('click', () => {
+        // 先重置状态，再添加新卡片
+        resetSubmitButtonState();
+        addVideoCard();
+    });
 
-    els.submitBtn.addEventListener('click', async () => {
+    window.removeCard = (id) => {
+        document.getElementById(`video-card-${id}`)?.remove();
+        resetSubmitButtonState(); // 删除卡片，列表变动，强制重新检查
+    };
+
+    function updateAndHighlight(element, newValue) {
+        if (!element) return;
+        if (element.value === String(newValue)) return;
+        element.value = String(newValue);
+        element.classList.add('field-synced');
+        const parent = element.parentElement;
+        if (parent && !parent.querySelector('.sync-tip')) {
+            const tip = document.createElement('span');
+            tip.className = 'sync-tip';
+            tip.innerText = '⚠️ 已自动同步数据库历史配置';
+            parent.appendChild(tip);
+        }
+    }
+
+    function rebuildDynamicRows(cardId, containerId, dataList, type) {
+        const container = document.getElementById(`${containerId}-${cardId}`);
+        container.innerHTML = '';
+        if (!dataList || dataList.length === 0) return;
+        dataList.forEach(item => {
+            if (type === 'segment') {
+                const row = window.addTimeSegmentRow(cardId);
+                const [start, end] = item.split('-');
+                fillTimeGroup(row.querySelector('.start-group'), start);
+                fillTimeGroup(row.querySelector('.end-group'), end);
+                row.classList.add('field-synced');
+            } else if (type === 'point') {
+                const row = window.addSplitPointRow(cardId);
+                fillTimeGroup(row.querySelector('.point-group'), item);
+                row.classList.add('field-synced');
+            }
+        });
+        if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
+             const tip = document.createElement('span');
+             tip.className = 'sync-tip';
+             tip.innerText = '⚠️ 时间轴已自动同步';
+             container.previousElementSibling.appendChild(tip);
+        }
+    }
+
+    function collectFormData() {
         const cards = document.querySelectorAll('.video-item-card');
         const vList = [];
         let err = null;
@@ -704,86 +770,68 @@
             if(err) return;
             const urlInput = card.querySelector('.video-url-input');
             const url = urlInput.value.trim();
-
             if(!url) {
                 err = `第 ${idx + 1} 个视频卡片的链接为空！`;
                 urlInput.focus();
                 return;
             }
-
             const voice = card.querySelector('.select-voice').value;
             if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
-
             const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
-            const adFaceVal = card.querySelector('.select-ad-face').value;
-            const sceneOrderFixedVal = card.querySelector('.select-scene-order-fixed').value;
-            const splitGuidanceVal = card.querySelector('.textarea-split-guidance').value.trim();
 
-            // --- 获取并处理 待剔除时间段 ---
             const removeSegments = [];
-            const segmentRows = card.querySelectorAll('.time-segment-row');
-            for (let row of segmentRows) {
-                const startStr = getCompositeTime(row.querySelector('.start-group'));
-                const endStr = getCompositeTime(row.querySelector('.end-group'));
-
-                // 只有当两个时间不完全相同时才认为是有效输入
-                if (startStr !== endStr) {
+            card.querySelectorAll('.time-segment-row').forEach(row => {
+                 const startStr = getCompositeTime(row.querySelector('.start-group'));
+                 const endStr = getCompositeTime(row.querySelector('.end-group'));
+                 if (startStr !== endStr) {
                     if (compareTimeStrings(startStr, endStr) >= 0) {
-                        err = `第 ${idx + 1} 个视频的剔除时间段有误：\n结束时间必须大于开始时间`;
+                        err = `第 ${idx + 1} 个视频的剔除时间段有误：结束时间必须大于开始时间`;
                         return;
                     }
                     removeSegments.push(`${startStr}-${endStr}`);
-                }
-            }
+                 }
+            });
 
-            // --- 获取并处理 分割点时间点 ---
             const splitPoints = [];
-            const pointRows = card.querySelectorAll('.split-point-row');
-            for (let row of pointRows) {
-                const pointStr = getCompositeTime(row.querySelector('.point-group'));
-                // 默认 00:00:00.000 被认为是空，但如果用户填了非零则保留
-                if (pointStr !== "00:00:00.000") {
-                    splitPoints.push(pointStr);
-                }
-            }
+            card.querySelectorAll('.split-point-row').forEach(row => {
+                const p = getCompositeTime(row.querySelector('.point-group'));
+                if(p !== "00:00:00.000") splitPoints.push(p);
+            });
 
             vList.push({
+                _cardDomId: card.id,
                 original_url: url,
                 is_contains_author_voice: voice === 'yes',
                 is_realtime_video: card.querySelector('.select-realtime').value === 'yes',
                 is_requires_text: card.querySelector('.select-text').value === 'yes',
                 is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
                 max_scenes: maxScenesVal,
-                has_ad_or_face: adFaceVal,
-                scene_order_fixed: sceneOrderFixedVal,
-                split_guidance: splitGuidanceVal,
+                has_ad_or_face: card.querySelector('.select-ad-face').value,
+                scene_order_fixed: card.querySelector('.select-scene-order-fixed').value,
+                split_guidance: card.querySelector('.textarea-split-guidance').value.trim(),
                 remove_time_segments: removeSegments,
                 split_time_points: splitPoints
             });
         });
 
-        if(err) return alert(err);
-        if(!vList.length) return alert('请至少添加一个有效的视频链接');
+        if(err) { alert(err); return null; }
+        if(!vList.length) { alert('请至少添加一个有效的视频链接'); return null; }
 
         const isOriginal = true;
         const audioReplaceSelect = document.getElementById('audio-replace');
-
         if (isOriginal && audioReplaceSelect.value === 'yes') {
             const isAllNoVoice = vList.every(v => v.is_contains_author_voice === false);
             if (isAllNoVoice) {
                 alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
-                audioReplaceSelect.focus();
-                return;
+                return null;
             }
         }
 
-        const retentionVal = document.getElementById('retention-ratio').value;
-
-        const payload = {
+        return {
             userName: APP.currentUser,
             global_settings: {
                 video_type: document.getElementById('video-type').value,
-                retention_ratio: retentionVal,
+                retention_ratio: document.getElementById('retention-ratio').value,
                 is_need_audio_replace: (document.getElementById('audio-replace').value === 'yes'),
                 is_need_scene_title: (document.getElementById('scene-title').value === 'yes'),
                 is_need_commentary: (document.getElementById('allow-commentary').value === 'yes'),
@@ -792,36 +840,135 @@
             },
             video_list: vList
         };
+    }
 
-        // 提交逻辑
+    els.submitBtn.addEventListener('click', async () => {
+        const payload = collectFormData();
+        if (!payload) return;
+
+        if (isConfigConfirmed) {
+            await performFinalSubmit(payload);
+        } else {
+            await performCheckPhase(payload);
+        }
+    });
+
+    async function performCheckPhase(payload) {
+        els.submitBtn.disabled = true;
+        els.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 正在检查已存在配置...';
+
+        try {
+            const res = await fetch('/check-video-status', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(payload)
+            });
+            const d = await res.json();
+
+            if (res.ok && d.status === 'success') {
+                let hasChanges = false;
+                const results = d.data;
+
+                results.forEach((item, index) => {
+                    if (item.status === 'exists') {
+                        const currentInput = payload.video_list[index];
+                        const cardDom = document.getElementById(currentInput._cardDomId);
+                        const dbConfig = item.stored_config;
+
+                        if (cardDom && dbConfig) {
+                            const dbVoice = dbConfig.is_contains_author_voice ? 'yes' : 'no';
+                            const currVoice = currentInput.is_contains_author_voice ? 'yes' : 'no';
+                            if (dbVoice !== currVoice) { updateAndHighlight(cardDom.querySelector('.select-voice'), dbVoice); hasChanges = true; }
+
+                            const dbReal = dbConfig.is_realtime_video ? 'yes' : 'no';
+                            const currReal = currentInput.is_realtime_video ? 'yes' : 'no';
+                            if (dbReal !== currReal) { updateAndHighlight(cardDom.querySelector('.select-realtime'), dbReal); hasChanges = true; }
+
+                            if (String(dbConfig.has_ad_or_face) !== String(currentInput.has_ad_or_face)) { updateAndHighlight(cardDom.querySelector('.select-ad-face'), dbConfig.has_ad_or_face); hasChanges = true; }
+
+                            if (parseInt(dbConfig.max_scenes) !== currentInput.max_scenes) { updateAndHighlight(cardDom.querySelector('.select-max-scenes'), dbConfig.max_scenes); hasChanges = true; }
+
+                            if ((dbConfig.split_guidance || '') !== currentInput.split_guidance) { updateAndHighlight(cardDom.querySelector('.textarea-split-guidance'), dbConfig.split_guidance || ''); hasChanges = true; }
+
+                            let dbOrder = dbConfig.scene_order_fixed;
+                            if (typeof dbOrder === 'boolean') dbOrder = dbOrder ? 'yes' : 'no';
+                            if (String(dbOrder) !== String(currentInput.scene_order_fixed)) { updateAndHighlight(cardDom.querySelector('.select-scene-order-fixed'), dbOrder); hasChanges = true; }
+
+                            const cardIdNum = currentInput._cardDomId.split('-')[2];
+                            if (JSON.stringify(dbConfig.remove_time_segments) !== JSON.stringify(currentInput.remove_time_segments)) {
+                                rebuildDynamicRows(cardIdNum, 'remove-segments-list', dbConfig.remove_time_segments, 'segment');
+                                hasChanges = true;
+                            }
+                            if (JSON.stringify(dbConfig.split_time_points) !== JSON.stringify(currentInput.split_time_points)) {
+                                rebuildDynamicRows(cardIdNum, 'split-points-list', dbConfig.split_time_points, 'point');
+                                hasChanges = true;
+                            }
+                        }
+                    }
+                });
+
+                if (hasChanges) {
+                    isConfigConfirmed = true;
+                    els.submitBtn.innerHTML = '已同步历史配置，确认无误并提交';
+                    els.submitBtn.classList.remove('btn-primary');
+                    els.submitBtn.style.background = '#faad14';
+                    els.submitBtn.style.borderColor = '#d48806';
+                    els.submitBtn.disabled = false;
+                    alert('⚠️ 检测到部分素材在数据库中已存在配置。\n\n系统已自动将页面上的选项同步为历史配置，并进行了高亮标记。\n\n请检查无误后，再次点击按钮进行提交。');
+                } else {
+                    // 没有不一致，直接下一步
+                    await performFinalSubmit(payload);
+                }
+            } else {
+                alert('检查状态失败：' + (d.message || '未知错误'));
+                // 检查失败，停留在当前界面，不允许进入下一步
+                resetSubmitButtonState();
+            }
+        } catch (e) {
+            console.error(e);
+            alert('网络错误，无法连接服务器检查状态');
+            resetSubmitButtonState();
+        }
+    }
+
+    async function performFinalSubmit(oldPayload) {
+        // 重要：重新收集数据，防止DOM在Check阶段被修改后数据不同步
+        const finalPayload = collectFormData();
+        if (!finalPayload) {
+            els.submitBtn.disabled = false;
+            return;
+        }
+
         els.submitBtn.disabled = true;
         els.submitBtn.innerHTML = '处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
 
         try {
-            const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+            const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(finalPayload) });
             const d = await res.json();
             document.getElementById('loading-mask').classList.add('hidden');
 
             if(res.ok) {
                 alert(`✅ 提交结果：\n\n${d.message}`);
                 fetchUploadStats();
+                resetSubmitButtonState();
             } else {
                 let errorDetails = d.message || '未知错误';
                 if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
                     errorDetails += '\n\n----------------\n❌ 详细错误列表：\n' + d.errors.join('\n');
                 }
                 alert(`❌ 提交失败：\n\n${errorDetails}`);
+
+                // 【核心修改】：提交失败，强制状态回滚
+                // 用户必须修改数据（如无效URL），这会使之前的检查失效，必须重新Check
+                resetSubmitButtonState();
             }
         } catch(e) {
             document.getElementById('loading-mask').classList.add('hidden');
             alert('❌ 网络请求发生错误，请检查网络连接。');
+            resetSubmitButtonState();
         }
-        finally {
-            els.submitBtn.disabled = false;
-            els.submitBtn.innerHTML = '提交创作任务';
-        }
-    });
+    }
 </script>
 </body>
 </html>

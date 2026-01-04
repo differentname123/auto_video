@@ -188,6 +188,7 @@ class MongoBase:
     def bulk_upsert(self, collection_name, data_list, unique_key_field):
         """
         批量 Upsert（高性能）：
+        支持单字段唯一键 (str) 或 多字段联合唯一键 (list)
         """
         if not data_list:
             return
@@ -195,35 +196,44 @@ class MongoBase:
         collection = self.get_collection(collection_name)
         operations = []
 
-        for item in data_list:
-            # 1. 复制数据，避免修改原始传入的列表
-            update_data = item.copy()
+        # 统一将 unique_key_field 转为列表处理，兼容传入单个字符串的情况
+        unique_keys = unique_key_field if isinstance(unique_key_field, list) else [unique_key_field]
 
-            # 2. 提取用于查询的键值，并从更新数据中移除它
-            #    这样 $set 就不会尝试更新键本身了
-            key_value = update_data.pop(unique_key_field, None)
-            if key_value is None:
-                # 如果关键字段不存在，可以跳过或抛出异常
-                print(f"警告: 数据项 {item} 缺少关键字段 '{unique_key_field}'，已跳过。")
+        for item in data_list:
+            # 1. 复制数据
+            update_data = item.copy()
+            query = {}
+
+            # 2. 构建复合查询条件 (Query) 并从更新数据 ($set) 中移除这些键
+            missing_key = False
+            for key in unique_keys:
+                # 尝试从数据中获取并移除 key
+                val = update_data.pop(key, None)
+                if val is None:
+                    # 如果缺少构成唯一键的任何一个字段，则无法进行准确的 upsert
+                    missing_key = True
+                    break
+                query[key] = val
+
+            if missing_key:
+                print(f"警告: 数据项缺少关键字段 {unique_keys} 中的某一项，已跳过: {item}")
                 continue
 
-            # 3. 构建查询部分
-            query = {unique_key_field: key_value}
-
-            # 4. 构建更新部分，将所有待更新字段放入 $set
-            #    对于不存在的文档 (upsert=True)，MongoDB 会将 query 和 $set 的内容合并创建新文档
+            # 3. 构建更新部分 ($set)
+            # MongoDB Upsert 逻辑：如果没找到，会合并 query 和 $set 插入；如果找到了，只执行 $set 更新
             update_instruction = {"$set": update_data}
 
-            # 5. 创建一个 UpdateOne 操作，并设置 upsert=True
+            # 4. 创建 UpdateOne 操作
             operations.append(UpdateOne(query, update_instruction, upsert=True))
 
-        # 6. 如果有操作，就执行批量写入
+        # 5. 执行批量写入
         if operations:
             try:
+                # ordered=False 提高性能，单条失败不影响其他
                 result = collection.bulk_write(operations, ordered=False)
-                # print(f"批量 $set 更新完成: {result.bulk_api_result}")
+                # print(f"批量 Upsert 完成: 匹配 {result.matched_count}, 修改 {result.modified_count}, 插入 {result.upserted_count}")
             except Exception as e:
-                print(f"批量 $set 更新时发生错误: {e}")
+                print(f"批量 Upsert 时发生错误: {e}")
                 raise
 
     def create_index(self, collection_name, keys, unique=False):
