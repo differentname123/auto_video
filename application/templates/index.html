@@ -498,18 +498,24 @@
         } catch(e) {}
     }
 
-    // --- 状态重置函数 (关键逻辑) ---
-    // 只要有任何可能导致检查失效的操作（加减卡片、修改URL、提交报错），都必须调用此函数
-    function resetSubmitButtonState() {
-        if (!isConfigConfirmed) return; // 如果本来就是第一阶段，就不需要操作
+    // --- 状态重置函数 (已修复) ---
+    // forceReset: 当请求结束（无论成功失败）时传入 true，强制把按钮变回原样
+    function resetSubmitButtonState(forceReset = false) {
+        // 如果不是强制重置，且当前并没有处于“待确认(isConfigConfirmed=true)”状态，则跳过
+        // 这样可以避免用户在普通输入时频繁触发 DOM 操作
+        if (!forceReset && !isConfigConfirmed) return;
 
+        // 重置核心标记
         isConfigConfirmed = false;
+
+        // 重置按钮外观
         els.submitBtn.innerHTML = '提交创作任务';
-        els.submitBtn.classList.add('btn-primary');
+        els.submitBtn.className = 'btn btn-primary'; // 直接重置 class，防止残留
         els.submitBtn.style.background = '';
         els.submitBtn.style.borderColor = '';
         els.submitBtn.disabled = false;
-        console.log("状态已重置为：待检查");
+
+        console.log("状态已重置为：初始状态");
     }
 
     /* --- 辅助函数：生成时间输入组件 --- */
@@ -783,73 +789,68 @@
      * 重建动态行
      * 【关键修改】不清除现有行，而是追加带有黄色背景的“历史记录”行
      */
-/**
- * 重建动态行 (带去重功能)
- * 1. 扫描当前界面已有的时间数据，存入 Set。
- * 2. 遍历历史数据，只有当 Set 中不存在时，才添加新行。
- */
-function rebuildDynamicRows(cardId, containerId, dataList, type) {
-    const container = document.getElementById(`${containerId}-${cardId}`);
-    if (!dataList || dataList.length === 0) return;
+    function rebuildDynamicRows(cardId, containerId, dataList, type) {
+        const container = document.getElementById(`${containerId}-${cardId}`);
+        if (!dataList || dataList.length === 0) return;
 
-    // --- 第一步：获取当前界面已存在的“值集合”，用于去重 ---
-    const existingSet = new Set();
-    const currentRows = container.querySelectorAll('.dynamic-row');
+        // --- 第一步：获取当前界面已存在的“值集合”，用于去重 ---
+        const existingSet = new Set();
+        const currentRows = container.querySelectorAll('.dynamic-row');
 
-    currentRows.forEach(row => {
-        let val = '';
-        if (type === 'segment') {
-            // 必须要用 getCompositeTime 获取标准格式 (00:00:00.000) 以便对比
-            const s = getCompositeTime(row.querySelector('.start-group'));
-            const e = getCompositeTime(row.querySelector('.end-group'));
-            val = `${s}-${e}`;
-        } else {
-            val = getCompositeTime(row.querySelector('.point-group'));
-        }
-        existingSet.add(val);
-    });
+        currentRows.forEach(row => {
+            let val = '';
+            if (type === 'segment') {
+                // 必须要用 getCompositeTime 获取标准格式 (00:00:00.000) 以便对比
+                const s = getCompositeTime(row.querySelector('.start-group'));
+                const e = getCompositeTime(row.querySelector('.end-group'));
+                val = `${s}-${e}`;
+            } else {
+                val = getCompositeTime(row.querySelector('.point-group'));
+            }
+            existingSet.add(val);
+        });
 
-    // --- 第二步：遍历历史数据，排除重复项后追加 ---
-    let addedCount = 0;
+        // --- 第二步：遍历历史数据，排除重复项后追加 ---
+        let addedCount = 0;
 
-    dataList.forEach(item => {
-        // 【核心去重逻辑】如果界面上已经有了这个时间，直接跳过
-        if (existingSet.has(item)) return;
+        dataList.forEach(item => {
+            // 【核心去重逻辑】如果界面上已经有了这个时间，直接跳过
+            if (existingSet.has(item)) return;
 
-        let row;
-        if (type === 'segment') {
-            row = window.addTimeSegmentRow(cardId);
-            const [start, end] = item.split('-');
-            fillTimeGroup(row.querySelector('.start-group'), start);
-            fillTimeGroup(row.querySelector('.end-group'), end);
-        } else if (type === 'point') {
-            row = window.addSplitPointRow(cardId);
-            fillTimeGroup(row.querySelector('.point-group'), item);
-        }
+            let row;
+            if (type === 'segment') {
+                row = window.addTimeSegmentRow(cardId);
+                const [start, end] = item.split('-');
+                fillTimeGroup(row.querySelector('.start-group'), start);
+                fillTimeGroup(row.querySelector('.end-group'), end);
+            } else if (type === 'point') {
+                row = window.addSplitPointRow(cardId);
+                fillTimeGroup(row.querySelector('.point-group'), item);
+            }
 
-        // 添加历史记录标识样式
-        if (row) {
-            row.classList.add('history-row');
+            // 添加历史记录标识样式
+            if (row) {
+                row.classList.add('history-row');
 
-            const badge = document.createElement('span');
-            badge.className = 'history-badge';
-            badge.innerText = '历史记录';
-            row.appendChild(badge);
+                const badge = document.createElement('span');
+                badge.className = 'history-badge';
+                badge.innerText = '历史记录';
+                row.appendChild(badge);
 
-            addedCount++;
-        }
-    });
+                addedCount++;
+            }
+        });
 
-    // 只有确实新增了数据才提示
-    if (addedCount > 0) {
-        if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
-             const tip = document.createElement('span');
-             tip.className = 'sync-tip';
-             tip.innerText = `⚠️ 已追加 ${addedCount} 条缺失的历史记录`;
-             container.previousElementSibling.appendChild(tip);
+        // 只有确实新增了数据才提示
+        if (addedCount > 0) {
+            if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
+                 const tip = document.createElement('span');
+                 tip.className = 'sync-tip';
+                 tip.innerText = `⚠️ 已追加 ${addedCount} 条缺失的历史记录`;
+                 container.previousElementSibling.appendChild(tip);
+            }
         }
     }
-}
 
     function collectFormData() {
         const cards = document.querySelectorAll('.video-item-card');
@@ -1028,12 +1029,17 @@ function rebuildDynamicRows(cardId, containerId, dataList, type) {
             return;
         }
 
+        // 1. 锁定界面状态
         els.submitBtn.disabled = true;
-        els.submitBtn.innerHTML = '处理中...';
+        els.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
 
         try {
-            const res = await fetch('/one-click-generate', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(finalPayload) });
+            const res = await fetch('/one-click-generate', {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify(finalPayload)
+            });
             const d = await res.json();
 
             if(res.ok) {
@@ -1048,12 +1054,13 @@ function rebuildDynamicRows(cardId, containerId, dataList, type) {
                 alert(`❌ 提交失败：\n\n${errorDetails}`);
             }
         } catch(e) {
+            console.error(e);
             alert('❌ 网络请求发生错误，请检查网络连接。');
         } finally {
             // 【核心修复】无论 Try 成功了，还是 Catch 报错了，这里永远会执行
-            // 确保 Loading 消失，按钮恢复可点击
+            // 确保 Loading 消失，并强制重置按钮
             document.getElementById('loading-mask').classList.add('hidden');
-            resetSubmitButtonState();
+            resetSubmitButtonState(true); // 传入 true，强制重置
             els.submitBtn.disabled = false;
         }
     }
