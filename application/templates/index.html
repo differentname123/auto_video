@@ -121,34 +121,24 @@
             transition: all 0.5s;
         }
 
-        /* 新增：历史记录行特定样式 */
         .history-row {
-            background-color: #fffbe6 !important; /* 浅黄色背景 */
-            border: 1px dashed #ffe58f !important;     /* 深黄色虚线边框 */
+            background-color: #fffbe6 !important;
+            border: 1px dashed #ffe58f !important;
             position: relative;
             margin-top: 8px;
         }
-        /* 新增：历史记录标签 */
         .history-badge {
             position: absolute;
-            top: -8px;
-            left: 10px;
-            background-color: #faad14;
-            color: white;
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 4px;
-            z-index: 10;
+            top: -8px; left: 10px;
+            background-color: #faad14; color: white;
+            font-size: 10px; padding: 1px 6px;
+            border-radius: 4px; z-index: 10;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .sync-tip {
-            display: block;
-            font-size: 11px;
-            color: var(--warning-color);
-            margin-top: 4px;
-            font-weight: bold;
-            animation: fadeIn 0.5s;
+            display: block; font-size: 11px; color: var(--warning-color);
+            margin-top: 4px; font-weight: bold; animation: fadeIn 0.5s;
         }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
@@ -197,15 +187,9 @@
             background: #fafafa; padding: 8px; border-radius: 6px; border: 1px solid #f0f0f0;
         }
 
-        .time-group {
-            display: flex; align-items: flex-end; gap: 4px;
-        }
-        .time-cell {
-            display: flex; flex-direction: column; align-items: center;
-        }
-        .time-cell label {
-            font-size: 10px; color: #888; margin-bottom: 2px;
-        }
+        .time-group { display: flex; align-items: flex-end; gap: 4px; }
+        .time-cell { display: flex; flex-direction: column; align-items: center; }
+        .time-cell label { font-size: 10px; color: #888; margin-bottom: 2px; }
         .time-cell input {
             width: 48px; padding: 4px; text-align: center;
             border: 1px solid #d9d9d9; border-radius: 4px;
@@ -213,15 +197,9 @@
             -moz-appearance: textfield;
         }
         .time-cell input.t-ms { width: 70px; }
-        .time-cell input:invalid {
-            border-color: #ff4d4f; background-color: #fff1f0;
-        }
-        .time-sep {
-            font-weight: bold; color: #333; padding-bottom: 6px; font-size: 1.1rem;
-        }
-        .range-sep {
-            padding-bottom: 8px; color: #999; font-weight: bold;
-        }
+        .time-cell input:invalid { border-color: #ff4d4f; background-color: #fff1f0; }
+        .time-sep { font-weight: bold; color: #333; padding-bottom: 6px; font-size: 1.1rem; }
+        .range-sep { padding-bottom: 8px; color: #999; font-weight: bold; }
 
         .btn-mini {
             padding: 5px 10px; font-size: 0.85rem; border-radius: 4px;
@@ -267,9 +245,7 @@
             background: linear-gradient(135deg, #1890ff, #096dd9);
             box-shadow: 0 4px 15px rgba(24, 144, 255, 0.35);
         }
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #40a9ff, #1890ff);
-        }
+        .btn-primary:hover { background: linear-gradient(135deg, #40a9ff, #1890ff); }
         .btn-secondary {
             background: #fff; border: 1px dashed #d9d9d9; color: var(--text-sub);
             width: auto; padding: 12px 30px; margin: 0 auto; display: block;
@@ -437,7 +413,6 @@
         videoList: document.getElementById('video-list-container'),
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
-        advancedOptions: document.getElementById('advanced-options'),
         dateSelect: document.getElementById('schedule-date'),
         stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
     };
@@ -498,48 +473,25 @@
         } catch(e) {}
     }
 
-    // --- 新增：清除所有高亮和历史标记的函数 ---
     function clearSyncHighlights() {
-        // 1. 清除输入框的黄色背景高亮
-        document.querySelectorAll('.field-synced').forEach(el => {
-            el.classList.remove('field-synced');
-        });
-
-        // 2. 移除所有的文字提示 (如 "⚠️ 发现历史配置差异")
-        document.querySelectorAll('.sync-tip').forEach(el => {
-            el.remove();
-        });
-
-        // 3. 处理历史记录行 (移除特殊样式和角标，但保留行数据)
+        document.querySelectorAll('.field-synced').forEach(el => el.classList.remove('field-synced'));
+        document.querySelectorAll('.sync-tip').forEach(el => el.remove());
         document.querySelectorAll('.history-row').forEach(row => {
             row.classList.remove('history-row');
-            // 移除行内的 "历史记录" 标签
             const badge = row.querySelector('.history-badge');
             if (badge) badge.remove();
         });
-
-        // 4. (注) 文本域中追加的历史文本内容按要求保留，不做删除，避免误删用户可能已修改的内容
     }
 
-    // --- 状态重置函数 (已修改) ---
-    // forceReset: 当请求结束（无论成功失败）时传入 true，强制把按钮变回原样
     function resetSubmitButtonState(forceReset = false) {
-        // 如果不是强制重置，且当前并没有处于“待确认(isConfigConfirmed=true)”状态，则跳过
         if (!forceReset && !isConfigConfirmed) return;
-
-        // 重置核心标记
         isConfigConfirmed = false;
-
-        // 重置按钮外观
         els.submitBtn.innerHTML = '提交创作任务';
-        els.submitBtn.className = 'btn btn-primary'; // 直接重置 class，防止残留
+        els.submitBtn.className = 'btn btn-primary';
         els.submitBtn.style.background = '';
         els.submitBtn.style.borderColor = '';
         els.submitBtn.disabled = false;
-
-        // 【关键修改】状态回归时，清除页面上的高亮标记
         clearSyncHighlights();
-
         console.log("状态已重置为：初始状态，已清除高亮样式");
     }
 
@@ -578,8 +530,8 @@
         let msRaw = containerElement.querySelector('.t-ms').value || '0';
         if (msRaw.length > 3) msRaw = msRaw.slice(0, 3);
         const ms = msRaw.padEnd(3, '0');
-        const pad = (num, size) => num.toString().padStart(size, '0');
-        return `00:${pad(min, 2)}:${pad(sec, 2)}.${ms}`;
+        // 优化：直接使用原生 padStart
+        return `00:${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${ms}`;
     }
 
     function fillTimeGroup(groupEl, timeStr) {
@@ -653,7 +605,6 @@
                         <option value="no">否</option>
                     </select>
                 </div>
-
                 <div class="option-item">
                     <div class="label-wrap">
                         <span class="option-label">是否包含广告/原作者画面?</span>
@@ -666,7 +617,6 @@
                         <option value="no">否</option>
                     </select>
                 </div>
-
                 <div class="option-item">
                     <div class="label-wrap">
                         <span class="option-label">是否实时视频?</span>
@@ -713,7 +663,6 @@
                         <option value="10">不超过10个场景</option>
                     </select>
                 </div>
-
                 <div class="option-item">
                     <div class="label-wrap">
                         <span class="option-label">场景顺序是否固定</span>
@@ -727,7 +676,6 @@
                     </select>
                 </div>
             </div>
-
             <div style="margin-top: 15px;">
                 <div class="label-wrap">
                     <span class="option-label">场景划分指导</span>
@@ -736,7 +684,6 @@
                 </div>
                 <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
             </div>
-
             <div class="dynamic-section">
                 <div class="label-wrap">
                     <span class="option-label">待剔除画面时间段</span>
@@ -748,7 +695,6 @@
                     <span>+</span> 添加时间段
                 </button>
             </div>
-
             <div class="dynamic-section">
                 <div class="label-wrap">
                     <span class="option-label">场景分割点时间点</span>
@@ -765,41 +711,28 @@
     }
 
     els.addVideoBtn.addEventListener('click', () => {
-        // 先重置状态，再添加新卡片
         resetSubmitButtonState();
         addVideoCard();
     });
 
     window.removeCard = (id) => {
         document.getElementById(`video-card-${id}`)?.remove();
-        resetSubmitButtonState(); // 删除卡片，列表变动，强制重新检查
+        resetSubmitButtonState();
     };
 
-    /**
-     * 更新并高亮显示差异
-     * 针对 TEXTAREA 做了特殊处理：追加而不是覆盖
-     */
     function updateAndHighlight(element, newValue) {
         if (!element) return;
-
-        // 如果值完全一样，不做处理
         if (element.value === String(newValue)) return;
-
-        // 【关键修改】如果是文本域，不覆盖，而是追加
         if (element.tagName === 'TEXTAREA') {
             const currentVal = element.value.trim();
-            // 如果当前是空的，直接赋值
             if (!currentVal) {
                 element.value = String(newValue);
             } else if (!currentVal.includes(newValue)) {
-                // 如果不为空且不包含历史值，追加显示
                 element.value = `${currentVal}\n\n[⬇️ 历史配置参考 ⬇️]\n${newValue}`;
             }
         } else {
-            // 普通下拉框等，保持覆盖逻辑
             element.value = String(newValue);
         }
-
         element.classList.add('field-synced');
         const parent = element.parentElement;
         if (parent && !parent.querySelector('.sync-tip')) {
@@ -810,22 +743,15 @@
         }
     }
 
-    /**
-     * 重建动态行
-     * 【关键修改】不清除现有行，而是追加带有黄色背景的“历史记录”行
-     */
     function rebuildDynamicRows(cardId, containerId, dataList, type) {
         const container = document.getElementById(`${containerId}-${cardId}`);
         if (!dataList || dataList.length === 0) return;
-
-        // --- 第一步：获取当前界面已存在的“值集合”，用于去重 ---
         const existingSet = new Set();
         const currentRows = container.querySelectorAll('.dynamic-row');
 
         currentRows.forEach(row => {
             let val = '';
             if (type === 'segment') {
-                // 必须要用 getCompositeTime 获取标准格式 (00:00:00.000) 以便对比
                 const s = getCompositeTime(row.querySelector('.start-group'));
                 const e = getCompositeTime(row.querySelector('.end-group'));
                 val = `${s}-${e}`;
@@ -835,13 +761,9 @@
             existingSet.add(val);
         });
 
-        // --- 第二步：遍历历史数据，排除重复项后追加 ---
         let addedCount = 0;
-
         dataList.forEach(item => {
-            // 【核心去重逻辑】如果界面上已经有了这个时间，直接跳过
             if (existingSet.has(item)) return;
-
             let row;
             if (type === 'segment') {
                 row = window.addTimeSegmentRow(cardId);
@@ -852,21 +774,16 @@
                 row = window.addSplitPointRow(cardId);
                 fillTimeGroup(row.querySelector('.point-group'), item);
             }
-
-            // 添加历史记录标识样式
             if (row) {
                 row.classList.add('history-row');
-
                 const badge = document.createElement('span');
                 badge.className = 'history-badge';
                 badge.innerText = '历史记录';
                 row.appendChild(badge);
-
                 addedCount++;
             }
         });
 
-        // 只有确实新增了数据才提示
         if (addedCount > 0) {
             if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
                  const tip = document.createElement('span');
@@ -933,9 +850,9 @@
         if(err) { alert(err); return null; }
         if(!vList.length) { alert('请至少添加一个有效的视频链接'); return null; }
 
-        const isOriginal = true;
+        // 优化：移除了 const isOriginal = true; 直接执行判断逻辑
         const audioReplaceSelect = document.getElementById('audio-replace');
-        if (isOriginal && audioReplaceSelect.value === 'yes') {
+        if (audioReplaceSelect.value === 'yes') {
             const isAllNoVoice = vList.every(v => v.is_contains_author_voice === false);
             if (isAllNoVoice) {
                 alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
@@ -1001,9 +918,7 @@
                             if (dbReal !== currReal) { updateAndHighlight(cardDom.querySelector('.select-realtime'), dbReal); hasChanges = true; }
 
                             if (String(dbConfig.has_ad_or_face) !== String(currentInput.has_ad_or_face)) { updateAndHighlight(cardDom.querySelector('.select-ad-face'), dbConfig.has_ad_or_face); hasChanges = true; }
-
                             if (parseInt(dbConfig.max_scenes) !== currentInput.max_scenes) { updateAndHighlight(cardDom.querySelector('.select-max-scenes'), dbConfig.max_scenes); hasChanges = true; }
-
                             if ((dbConfig.split_guidance || '') !== currentInput.split_guidance) { updateAndHighlight(cardDom.querySelector('.textarea-split-guidance'), dbConfig.split_guidance || ''); hasChanges = true; }
 
                             let dbOrder = dbConfig.scene_order_fixed;
@@ -1032,7 +947,6 @@
                     els.submitBtn.disabled = false;
                     alert('⚠️ 检测到部分素材在数据库中已存在配置。\n\n系统已自动将页面上的选项同步为历史配置，并进行了高亮标记。\n\n请检查无误后，再次点击按钮进行提交。');
                 } else {
-                    // 没有不一致，直接下一步
                     await performFinalSubmit(payload);
                 }
             } else {
@@ -1047,14 +961,12 @@
     }
 
     async function performFinalSubmit(oldPayload) {
-        // 重要：重新收集数据，防止DOM在Check阶段被修改后数据不同步
         const finalPayload = collectFormData();
         if (!finalPayload) {
             els.submitBtn.disabled = false;
             return;
         }
 
-        // 1. 锁定界面状态
         els.submitBtn.disabled = true;
         els.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
@@ -1070,7 +982,6 @@
             if(res.ok) {
                 alert(`✅ 提交结果：\n\n${d.message}`);
                 fetchUploadStats();
-                // 成功后由 finally 块负责恢复按钮
             } else {
                 let errorDetails = d.message || '未知错误';
                 if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
@@ -1082,10 +993,8 @@
             console.error(e);
             alert('❌ 网络请求发生错误，请检查网络连接。');
         } finally {
-            // 【核心修复】无论 Try 成功了，还是 Catch 报错了，这里永远会执行
-            // 确保 Loading 消失，并强制重置按钮
             document.getElementById('loading-mask').classList.add('hidden');
-            resetSubmitButtonState(true); // 传入 true，强制重置
+            resetSubmitButtonState(true);
             els.submitBtn.disabled = false;
         }
     }
