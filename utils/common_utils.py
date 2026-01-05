@@ -6,7 +6,7 @@
 :last_date:
     2025/12/5 12:28
 :description:
-    
+
 """
 import ast
 import json
@@ -576,3 +576,37 @@ def init_config():
         }
 
     return config_map
+
+
+def get_top_comments(video_info_dict, target_limit=20, min_guarantee=2):
+    """
+    从视频字典中筛选评论：
+    1. 每个视频保底选择 min_guarantee 条（不足则全选）。
+    2. 剩余名额从所有视频剩下的评论中，按点赞量由高到低补齐。
+    """
+    selected_comments = []
+    candidate_pool = []
+
+    for info in video_info_dict.values():
+        # 提取评论数据: [(内容, 点赞), ...]
+        comments = [(c[0], c[1]) for c in info.get('comment_list', [])]
+
+        # 当前视频评论按点赞倒序排列
+        comments.sort(key=lambda x: x[1], reverse=True)
+
+        # 核心逻辑：切分保底区和候选区
+        selected_comments.extend(comments[:min_guarantee])
+        candidate_pool.extend(comments[min_guarantee:])
+
+    # 计算剩余需要填充的名额
+    slots_needed = target_limit - len(selected_comments)
+
+    if slots_needed > 0:
+        # 候选池按点赞倒序，取前 N 个补齐
+        candidate_pool.sort(key=lambda x: x[1], reverse=True)
+        selected_comments.extend(candidate_pool[:slots_needed])
+
+    # 最终结果按点赞数再次整理（可选，为了列表有序）
+    selected_comments.sort(key=lambda x: x[1], reverse=True)
+
+    return selected_comments

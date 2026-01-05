@@ -12,14 +12,16 @@ import copy
 import os
 import re
 import time
+import traceback
 from collections import Counter
 
 import numpy as np
 
 from application.video_common_config import correct_owner_timestamps
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
-from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time
-from utils.gemini import get_llm_content_gemini_flash_video
+from utils.bilibili.find_paid_topics import get_all_paid_topics
+from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json
+from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
 from utils.video_utils import probe_duration, get_scene, save_frames_around_timestamp
 
@@ -1237,7 +1239,7 @@ def gen_video_script_llm(task_info, video_info_dict):
         raw_response = ""
         error_info = ""
         try:
-            gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
+            gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
 
 
             # 解析和校验
@@ -1258,7 +1260,195 @@ def gen_video_script_llm(task_info, video_info_dict):
                 return error_str, None, None  # 达到最大重试次数后返回 None
 
 
+def get_top_topics(topic_info_list, top_n=20):
+    """
+    处理topic列表：去重 -> 按播放量降序排序 -> 取Top N -> 格式化字段
+    """
+    if not topic_info_list:
+        return []
 
+    # 1. 按照 topic_id 进行去重
+    seen_ids = set()
+    deduplicated_list = []
+
+    for topic in topic_info_list:
+        t_id = topic.get('topic_id')
+        # 如果没有topic_id或者已经存在，则跳过
+        if t_id is not None and t_id not in seen_ids:
+            seen_ids.add(t_id)
+            deduplicated_list.append(topic)
+
+    # 2. 按照 arc_play_vv 进行降序排序 (处理可能缺失该字段的情况，默认为0)
+    deduplicated_list.sort(key=lambda x: x.get('arc_play_vv', 0), reverse=True)
+
+    # 3. 获取前 top_n 个 topic
+    top_topics = deduplicated_list[:top_n]
+
+    # 4. 构建最终结果，保留 topic_name 和 拼接后的 topic_desc
+    result = []
+    for topic in top_topics:
+        # 获取字段，如果为None则转为空字符串，防止拼接报错
+        t_name = topic.get('topic_name') or ""
+        t_desc = topic.get('topic_description') or ""
+        a_text = topic.get('activity_text') or ""
+        a_desc = topic.get('activity_description') or ""
+
+        # 拼接字段。这里使用列表推导式过滤掉空字符串，并用空格连接，
+        # 避免出现 "名字  描述" 这种中间有多个空格的情况。
+        # 如果你需要无缝拼接（不加空格），可以将 " ".join 改为 "".join
+        parts = [str(t_name), str(t_desc), str(a_text), str(a_desc)]
+        topic_desc_str = " ".join([p for p in parts if p])
+
+        result.append({
+            "topic_id": topic.get('topic_id'),
+            "topic_desc": topic_desc_str
+        })
+
+    return result
+
+
+def get_proper_topics(video_info_dict):
+    """
+    生成合适的topic数据
+    :param video_info_dict:
+    :return:
+    """
+    paid_topic_all, category_data_all = get_all_paid_topics()
+    category_name_list = []
+    for video_id, video_info in video_info_dict.items():
+        hudong_info = video_info.get('hudong_info', {})
+        category_id_list = hudong_info.get('视频分析', []).get('category_id_list', [])
+        for category_id in category_id_list:
+            if str(category_id) in category_data_all.keys():
+                category_name = category_data_all[str(category_id)]['name']
+                if category_name not in category_name_list:
+                    category_name_list.append(category_name)
+
+
+    if category_name_list == []:
+        category_name_list = paid_topic_all.keys()
+
+    # 获取category_name_list对应的paid_topic
+    proper_topics = []
+    for category_name in category_name_list:
+        if category_name in paid_topic_all.keys():
+            proper_topics.extend(paid_topic_all[category_name])
+
+    proper_topics = get_top_topics(proper_topics, top_n=40)
+    return proper_topics
+
+
+
+
+def build_upload_info_prompt(prompt, task_info, video_info_dict):
+    """
+    组织好最终的数据，不同的选项有不同的组织方式
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    full_prompt = prompt
+    video_script_info = task_info.get('video_script_info', {})
+    full_prompt += f"\n视频方案信息如下：\n{video_script_info}"
+
+
+    selected_comments = get_top_comments(video_info_dict)
+    full_prompt += f"\n评论列表信息如下:\n{selected_comments}"
+
+    proper_topics = get_proper_topics(video_info_dict)
+
+    full_prompt += f"\n话题列表信息如下:\n{proper_topics}"
+    return full_prompt
+
+def check_upload_info(upload_info_list, video_script_info, full_prompt):
+
+    origin_title_list = []
+    for video_script in video_script_info:
+        title = video_script.get('title', '')
+        origin_title_list.append(title)
+
+    for upload_info in upload_info_list:
+        title = upload_info.get('title')
+        if title not in origin_title_list:
+            error_info = f"上传信息 校验未通过: 生成的标题 '{title}' 不在原始脚本标题列表中 {origin_title_list}"
+            return False, error_info
+
+        topic_id = upload_info.get('topic_id')
+        # 要求topic_id必须是整数
+        if not isinstance(topic_id, int):
+            error_info = f"上传信息 校验未通过: 生成的话题ID '{topic_id}' 不是整数类型"
+            return False, error_info
+
+        if str(topic_id) not in str(full_prompt):
+            error_info = f"上传信息 校验未通过: 生成的话题ID '{topic_id}' 不在提供的话题列表中"
+            return False, error_info
+
+
+        category_id = upload_info.get('category_id')
+        if str(category_id) not in str(full_prompt):
+            error_info = f"上传信息 校验未通过: 生成的分类ID '{category_id}' 不在提供的分类列表中"
+            return False, error_info
+
+        tags = upload_info.get('tags')
+        if not isinstance(tags, list) or len(tags) == 0:
+            error_info = f"上传信息 校验未通过: 生成的标签 '{tags}' 不能是一个非空列表"
+            return False, error_info
+
+        introduction = upload_info.get('introduction')
+        if not introduction:
+            error_info = f"上传信息 校验未通过: 生成的视频简介不能为空"
+            return False, error_info
+    return True, ""
+
+
+
+
+def gen_upload_info_llm(task_info, video_info_dict):
+    """
+    生成上传信息
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    log_pre = f"生成上传信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    MAX_RETRIES = 3  # 设置最大重试次数
+    prompt_file_path = './prompt/投稿相关信息的生成.txt'
+    prompt = read_file_to_str(prompt_file_path)
+    full_prompt = build_upload_info_prompt(prompt, task_info, video_info_dict)
+    model_name = "gemini-3-flash-preview"
+    video_script_info = task_info.get('video_script_info', [])
+
+    error_info = ""
+    # 开始重试循环
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"\n--- [第 {attempt}/{MAX_RETRIES} 次尝试] ---  {log_pre}")
+        try:
+            # 1. 调用 LLM 获取原始文本
+            raw = get_llm_content(prompt=full_prompt, model_name=model_name)
+
+            # 2. 尝试解析文本为对象
+            try:
+                upload_info_list = string_to_object(raw)
+                check_result, check_info = check_upload_info(upload_info_list,video_script_info, full_prompt)
+                if not check_result:
+                    raise ValueError(f"生成上传信息 结果验证未通过: {check_info} {raw} {log_pre}")
+                return error_info, upload_info_list
+            except Exception as e:
+                traceback.print_exc()
+                error_info = f"生成上传信息 解析返回结果时出错: {str(e)}"
+                print(f"生成上传信息 解析返回结果时出错: {str(e)}")
+                return error_info, None
+
+        except Exception as e:
+            traceback.print_exc()
+
+            error_info = f"生成上传信息 解析返回结果时出错: {str(e)}"
+            print(f"生成上传信息 在第 {attempt} 次调用 LLM API 时发生严重错误: {e}")
+            # 如果API调用本身就失败了，也计为一次失败的尝试
+            if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
+                print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
+                break  # 使用 break 更清晰地跳出循环
+            return error_info, None
 
 
 

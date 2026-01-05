@@ -17,7 +17,7 @@ import time
 import traceback
 
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
-    gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp
+    gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp, gen_upload_info_llm
 from application.video_process import gen_video_by_script
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
     clip_and_merge_segments
@@ -90,7 +90,7 @@ def run():
                 # task_info['status'] = TaskStatus.COMPLETED
                 pass
 
-            task_info['failure_details'] = failure_details
+            task_info['failure_details'] = str(failure_details)
             manager.upsert_tasks([task_info])
 
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
@@ -463,13 +463,37 @@ def gen_video_script(task_info, video_info_dict, manager):
         if not error_info:
             task_info['video_script_info'] = video_script_info
             task_info['final_scene_info'] = final_scene_info
-            task_info['status'] = TaskStatus.PLAN_GENERATED
         else:
             failure_details[task_id] = {
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.ERROR
             }
             task_info["script_error"] = error_info
+        manager.upsert_tasks([task_info])
+    return failure_details
+
+
+def gen_upload_info(task_info, video_info_dict, manager):
+    """
+    生成投稿需要的信息
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
+    failure_details = {}
+    upload_info = task_info.get('upload_info', {})
+    if not upload_info:
+        error_info, upload_info = gen_upload_info_llm(task_info, video_info_dict)
+        if not error_info:
+            task_info['upload_info'] = upload_info
+            task_info['status'] = TaskStatus.PLAN_GENERATED
+        else:
+            failure_details[task_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.ERROR
+            }
+            task_info["upload_info_error"] = error_info
         manager.upsert_tasks([task_info])
     return failure_details
 
@@ -514,11 +538,17 @@ def process_single_task(task_info, manager):
     print(f"任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
-    # 根据方案生成最终视频
-    failure_details = gen_video_by_script(task_info, video_info_dict)
+    # 生成投稿所需的信息
+    failure_details = gen_upload_info(task_info, video_info_dict, manager)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict
-    print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # # 根据方案生成最终视频
+    # failure_details = gen_video_by_script(task_info, video_info_dict)
+    # if check_failure_details(failure_details):
+    #     return failure_details, video_info_dict
+    # print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     return failure_details, video_info_dict
 

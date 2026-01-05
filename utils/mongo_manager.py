@@ -53,11 +53,34 @@ class MongoManager:
         self.db.create_index(self.materials_collection, [('video_id', 1)], unique=True)
         # 为 publish_tasks 的 video_id_list 创建索引，加速查询
         self.db.create_index(self.tasks_collection, [('video_id_list', 1)], unique=False)
+        self.db.create_index(self.tasks_collection, [('status', 1)], unique=False)
+
         # print("✅ 核心索引已确保存在。")
 
     # ==========================================
     # video_materials 表相关操作
     # ==========================================
+
+    def find_tasks_by_status(self, status_list: list):
+        """
+        查询 publish_tasks 表中指定状态的数据。
+
+        Args:
+            status_list (list): 状态字符串列表。
+                                例如: ['pending', 'processing', 'failed']
+
+        Returns:
+            list: 只要 task 的 status 在 status_list 中，就会被返回。
+        """
+        if not status_list:
+            return []
+
+        query = {
+            "status": {
+                "$in": status_list
+            }
+        }
+        return self.db.find_many(self.tasks_collection, query)
 
     def find_unfinished_tasks(self):
         """

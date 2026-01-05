@@ -172,6 +172,7 @@ def login_and_save_session(model_name: str = "gemini-2.5-pro"):
             headless=False,  # 必须为 False 以便用户可以看到和操作浏览器
             args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu',
                   '--disk-cache-size=1',
+                  '--window-position=0,0',
                   '--media-cache-size=1',
                   '--disable-application-cache',
                   '--disable-component-update', ],
