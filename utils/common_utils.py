@@ -445,3 +445,134 @@ def get_remaining_segments(duration_ms, remove_segments):
         remaining.append((prev_end, duration_ms))
 
     return remaining
+
+def distribute_by_counts(accounts, allocation, default=None):
+    """
+    按顺序分配：
+    - accounts: 可迭代（例如 list(accounts.keys())）
+    - allocation: [(count, proxy), ...], count 可为 None 表示“剩下的全部”
+    - default: allocation 没覆盖到时的填充值
+    返回：与 accounts 等长的 proxy 列表
+    """
+    n = len(accounts)
+    proxies = []
+    assigned = 0
+    for count, proxy in allocation:
+        if count is None:
+            proxies += [proxy] * (n - assigned)
+            assigned = n
+            break
+        if count <= 0:
+            continue
+        take = min(count, n - assigned)
+        proxies += [proxy] * take
+        assigned += take
+        if assigned >= n:
+            break
+    if assigned < n:
+        proxies += [default] * (n - assigned)
+    return proxies
+
+
+
+def init_config():
+    config_map = {}
+
+    # 账号配置：key 是 config_map 中的 UID，value 是账号的前缀（name）
+    accounts = {
+        # '3546973573482600': 'shuijun3',
+        '3690972783315441': 'mama',
+        # '3546717871934392': 'nana',
+        # '3546979686681114': 'ruru',
+        # '3546973825141556': 'tao',
+        '437687603': 'taoxiao',
+
+        # '3546977480477153': 'hong',
+        # '3546977184778261': 'yan',
+        # '3546947566700892': 'su',
+
+
+        '3546977048463920': 'jie',
+        # '3546977369328324': 'qiqi',
+        # '3632304865937878': 'xue',
+        # '3546977600014812': 'cai',
+        '3632311899786168':'xiaosu',
+        '3494364332427809':'xiaoxiaosu',
+        '3546978046708266':'jun',
+        # '3632306801609223': 'shuijun2',
+        # '3632301781026991': 'junxiao',
+        '3632319661344845': 'junda',
+        '3632315397834763':'lin',
+        # '3632317008447555': 'jj',
+        # '3546913316014394':'xiaohao',
+        # '196823511': 'hao',
+        '3546965935655696': 'danzhu',
+        '3632300566776371': 'dan',
+        '3546982253595619': 'ning',
+        '3546970725550911': 'yiyi',
+        '3546981674781282': 'qiqixiao',
+        # '3690979349498713': 'mu',
+        # '3690989401147694': 'yang',
+        # '3690982356814585': 'ruruxiao',
+        # '3632306870814900': 'xiaodan',
+        '3632309148322699': 'xiaoxue',
+
+        # '3690973307603884': 'dahao',
+        '3632313749473288': 'shun',
+        # '3632314758203558': 'xiaocai',
+        '1516147639': 'qizhu',
+        '3632318595991783': 'xiaomu',
+        "3546971140786786": 'ping',
+        # "3690972028340306": 'xiu',
+        "3690971298531782": 'zhong'
+
+        # '3546909677455941': 'base'  # 如果需要恢复 base 账号，取消注释即可
+    }
+
+    # 三段代理：
+    # - 前5个账户使用 proxy_A
+    # - 中间5个账户为 None
+    # - 剩下的账户使用 last_proxy
+    proxy_A = {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"}
+    no_proxy = {"http": None, "https": None}
+    proxy_B = {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"}
+
+    account_items = list(accounts.items())
+    keys = [k for k, _ in account_items]
+
+    # 一个常见策略：前5个 no_proxy，接2个 proxy_B，剩下用 proxy_A
+    proxies_values = distribute_by_counts(
+        keys,
+        allocation=[
+            (10, proxy_A),
+            (5, proxy_B),
+            (None, no_proxy),  # None 表示“其余全部”
+        ],
+        default=None
+    )
+
+    for idx in range(len(account_items)):
+        uid, name = account_items[idx]
+        sessdata = get_config(f"{name}_bilibili_sessdata_cookie")
+        bili_jct = get_config(f"{name}_bilibili_csrf_token")
+        total_cookie = get_config(f"{name}_bilibili_total_cookie")
+        proxies = proxies_values[idx] if idx < len(proxies_values) else no_proxy
+
+        all_params = {
+            "uid": uid,
+            "name": name,
+            "SESSDATA": sessdata,
+            "BILI_JCT": bili_jct,
+            "total_cookie": total_cookie,
+            "proxies": proxies
+        }
+
+        config_map[uid] = {
+            "name": name,
+            "SESSDATA": sessdata,
+            "BILI_JCT": bili_jct,
+            "total_cookie": total_cookie,
+            "all_params": all_params
+        }
+
+    return config_map

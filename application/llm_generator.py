@@ -171,7 +171,7 @@ def gen_base_prompt(video_path, video_info):
     """
     duration = probe_duration(video_path)
     video_title = video_info.get('base_info', {}).get('video_title', '')
-
+    temp_comment = [(c[0], c[1]) for c in video_info.get('comment_list')][:10]
     base_prompt = f"\n视频相关信息如下:\n视频时长为: {duration}"
     if video_title:
         base_prompt += f"\n视频描述为: {video_title}"
