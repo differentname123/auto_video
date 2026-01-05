@@ -589,15 +589,21 @@ def one_click_generate() -> Tuple[Response, int]:
 
         response_data, status_code = process_one_click_generate(data)
 
+        # 增加日志输出：打印返回给前端的信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] One-Click Response: {response_data}")
+
         return jsonify(response_data), status_code
 
     except Exception as e:
         app.logger.exception("one_click_generate 接口发生未处理异常")
-        return jsonify({
+        error_response = {
             'status': ResponseStatus.ERROR,
             'message': '内部服务器错误',
             'errors': [str(e)]
-        }), 500
+        }
+        # 增加日志输出：打印错误返回信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] One-Click Error Response: {error_response}")
+        return jsonify(error_response), 500
 
 
 @app.route('/check-video-status', methods=['POST'])
@@ -606,16 +612,23 @@ def check_video_status() -> Tuple[Response, int]:
     try:
         data = request.get_json()
         response_data, status_code = process_check_video_status(data)
+
+        # 增加日志输出：打印返回给前端的信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Check-Status Response: {response_data}")
+
         return jsonify(response_data), status_code
     except Exception as e:
         app.logger.exception("check_video_status 接口异常")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        error_response = {'status': 'error', 'message': str(e)}
+        # 增加日志输出：打印错误返回信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Check-Status Error Response: {error_response}")
+        return jsonify(error_response), 500
 
 
 @app.route('/get_user_upload_info', methods=['GET'])
 def get_user_upload_info() -> Response:
     """获取用户上传统计信息 (Mock)"""
-    return jsonify({
+    response_data = {
         'status': ResponseStatus.SUCCESS,
         'message': '获取成功',
         'errors': [],
@@ -624,7 +637,11 @@ def get_user_upload_info() -> Response:
             'unprocessed_count_today': 0,
             'remote_upload_count': 0
         }
-    })
+    }
+    # 增加日志输出：打印返回给前端的信息
+    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Upload-Info Response: {response_data}")
+
+    return jsonify(response_data)
 
 
 if __name__ == "__main__":

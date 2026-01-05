@@ -3,7 +3,7 @@ import time
 import requests
 import json
 
-from utils.common_utils import read_json
+from utils.common_utils import read_json, save_json
 
 
 def send_generate_request(video_id1, video_id2):
@@ -86,15 +86,26 @@ def send_generate_request(video_id1, video_id2):
 
     except requests.exceptions.RequestException as e:
         print(f"请求发送失败: {e}")
-        return None
     finally:
-        print(response.text)
+        # 如果有响应内容（比如 400 错误通常会带回错误原因），在这里打印
+        if response is not None:
+            try:
+                # 尝试解析 JSON 并以中文显示
+                error_json = response.json()
+                print("服务器返回的错误详情:")
+                print(json.dumps(error_json, ensure_ascii=False, indent=2))
+            except json.JSONDecodeError:
+                # 如果不是 JSON，直接打印文本
+                print(response.text)
+        return None
 
 
 # --- 使用示例 ---
 if __name__ == "__main__":
     video_content_plans_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_content_plans_similar_videos_back.json'
     video_play_comment_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_play_comment.json'
+    used_video_file = r'W:\project\python_project\auto_video\config\used_video.json'
+    used_video_list = read_json(used_video_file)
     plans_video = read_json(video_content_plans_file)
     video_play_comment_info = read_json(video_play_comment_file)
 
@@ -115,9 +126,15 @@ if __name__ == "__main__":
     sorted_videos = sorted(plans_video.items(), key=lambda x: x[1].get('score', 0), reverse=True)
 
     for sorted_video in sorted_videos:
+        video_key = sorted_video[0]
+        if video_key in used_video_list:
+            print(f"视频对 {video_key} 已使用，跳过。")
+            continue
+        used_video_list.append(video_key)
         value = sorted_video[1]
         video_keys = value.get('video_keys', [])
         id_1 = video_keys[0]
         id_2 = video_keys[1]
         print(f"当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 正在处理视频对: {id_1} 和 {id_2}，分数: {value.get('score', 0)}")
         result = send_generate_request(id_1, id_2)
+        save_json(used_video_file, used_video_list)
