@@ -172,8 +172,10 @@ def check_cached_material(cached_material, video_item):
 
     # 4. 生成过滤后的字典（只包含未被忽略的字段）
     # 使用字典推导式：遍历原字典，只有 key 不在 ignore_keys 中才保留
-    clean_db_info = {k: v for k, v in db_info.items() if k not in ignore_keys}
     clean_current_info = {k: v for k, v in current_info.items() if k not in ignore_keys}
+
+    # clean_db_info只保留clean_current_info中存在的key进行比较，避免db_info中有但current_info中没有的key影响结果
+    clean_db_info = {k: v for k, v in db_info.items() if k in clean_current_info}
 
     is_same = clean_db_info == clean_current_info
 
@@ -192,7 +194,7 @@ def check_cached_material(cached_material, video_item):
         cached_material['video_overlays_text_info'] = None
         cached_material['owner_asr_info'] = None
         cached_material['hudong_info'] = None
-
+        cached_material['need_recut'] = True
 
     return True
 

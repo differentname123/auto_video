@@ -185,11 +185,11 @@ def process_origin_video(video_id, video_info):
 
     # 1. 剪切片段处理
     # 如果文件不存在，或者强制要求重剪，则执行
-    if not is_valid_target_file_simple(origin_video_delete_part_path) or video_info['extra_info'].get('need_recut', True):
+    if not is_valid_target_file_simple(origin_video_delete_part_path) or video_info.get('need_recut', True):
         remove_time_segments = video_info.get('extra_info', {}).get('remove_time_segments', [])
         fixed_remove_time_segments = cutoff_target_segment(origin_video_path, remove_time_segments, origin_video_delete_part_path)
         video_info['extra_info']['fixed_remove_time_segments'] = fixed_remove_time_segments
-        video_info['extra_info']['need_recut'] = False
+        video_info['need_recut'] = False
         split_time_points = video_info.get('extra_info', {}).get('split_time_points', [])
         fixed_split_time_points = fix_split_time_points(fixed_remove_time_segments, split_time_points)
         video_info['extra_info']['fixed_split_time_points'] = fixed_split_time_points
@@ -400,6 +400,7 @@ def prepare_basic_video_info(video_info_dict):
                 print(f"视频 {video_id} 的评论需要获取或刷新...{log_pre}")
                 fetched_comments = get_comment(video_id, comment_limit=100)
                 video_info['comment_list'] = fetched_comments
+            print(f"视频 {video_id} 的基础信息准备完成。{log_pre}")
 
         except Exception as e:
             error_info = f"严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
