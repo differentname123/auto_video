@@ -21,7 +21,7 @@ import traceback  # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\xianyu1"
+USER_DATA_DIR = r"W:\temp\dahao"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 

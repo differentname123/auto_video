@@ -6,7 +6,7 @@ import json
 from utils.common_utils import read_json, save_json
 
 
-def send_generate_request(video_id1, video_id2):
+def send_generate_request(video_id1, video_id2, user_name='dahao'):
     """
     向指定接口发送生成视频的请求。
 
@@ -27,7 +27,7 @@ def send_generate_request(video_id1, video_id2):
     # 构造请求体 (Payload)
     # 注意：这里直接使用了Python的True/False，requests库在发送JSON时会自动转换为json格式的true/false
     payload = {
-        'userName': 'mama',
+        'userName': user_name,
         'global_settings': {
             'video_type': '通用',
             'retention_ratio': 'free',

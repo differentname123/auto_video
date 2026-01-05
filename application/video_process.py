@@ -763,7 +763,7 @@ def _calculate_bgm_ratio(new_script_scenes, video_info_dict):
     return need_bgm_count / len(new_script_scenes)
 
 
-def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_script_scenes):
+def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_script_scenes, tags):
     """
     尝试生成带有bgm的视频。
     如果需要BGM的场景超过50%，则合成新视频；否则直接使用原视频。
@@ -781,7 +781,7 @@ def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_scrip
         return failure_details, video_path
 
     # --- 2. 准备阶段：获取资源 ---
-    bgm_path = get_bgm_path()
+    bgm_path = get_bgm_path(tags)
 
     # 修复原代码Bug：如果需要BGM但找不到BGM文件，应该降级返回原视频
     if not bgm_path or not os.path.exists(bgm_path):
@@ -894,6 +894,29 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
 
     return failure_details, final_scene_output_path
 
+def add_watermark_and_ending(video_path, output_path, watermark_path, ending_video_path):
+    pass
+
+def merge_script_and_upload_info(video_script_info_list, upload_info_list):
+    """
+    合并视频脚本信息和上传信息
+    :param video_script_info:
+    :param upload_info:
+    :return:
+    """
+    upload_info_dict = {}
+    for upload_info in upload_info_list:
+        title = upload_info.get('title', '')
+        upload_info_dict[title] = upload_info
+
+    for video_script_info in video_script_info_list:
+        title = video_script_info.get('title')
+        upload_info = upload_info_dict.get(title)
+        if not upload_info:
+            raise ValueError(f"视频方案未找到对应的上传信息，标题: {title}")
+        video_script_info['upload_info'] = upload_info
+    return video_script_info_list
+
 
 def gen_new_video(task_info, video_info_dict):
     """
@@ -909,7 +932,6 @@ def gen_new_video(task_info, video_info_dict):
     os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
 
 
-    voice_info = get_voice_info()
 
     # if is_valid_target_file_simple(final_output_path):
     #     print(f"已存在最终生成视频，跳过生成: {final_output_path}")
@@ -917,9 +939,23 @@ def gen_new_video(task_info, video_info_dict):
 
     # 准备好一些数据
     final_scene_info = task_info.get('final_scene_info', {})
+    upload_info_list = task_info.get('upload_info', {})
+    final_scene_info = merge_script_and_upload_info(final_scene_info, upload_info_list)
+
     all_logical_scene_dict, all_owner_asr_info_dict = build_all_need_data_map(video_info_dict)
     video_script_info = task_info.get('video_script_info', {})
     best_script = find_best_solution(video_script_info)
+    upload_info = best_script.get('upload_info', {})
+    # 只保留upload_info的 mood_tags theme_tags pacing_tags 这三个字段
+    tags = {
+        'mood_tags': upload_info.get('mood_tags', []),
+        'theme_tags': upload_info.get('theme_tags', []),
+        'pacing_tags': upload_info.get('pacing_tags', [])
+    }
+
+
+    voice_info = get_voice_info(tags)
+
     new_script_scenes = best_script.get('场景顺序与新文案', [])
     all_scene_list = final_scene_info.get('all_scenes', [])
     all_final_scene_dict = {}
@@ -958,14 +994,15 @@ def gen_new_video(task_info, video_info_dict):
 
     # 生成带有bgm的视频
     video_with_bgm_output_path = all_task_video_path_info.get('video_with_bgm_output_path')
-    failure_details, current_video_path = gen_video_with_bgm(current_video_path, video_with_bgm_output_path, video_info_dict, new_script_scenes)
+    failure_details, current_video_path = gen_video_with_bgm(current_video_path, video_with_bgm_output_path, video_info_dict, new_script_scenes, tags)
     if check_failure_details(failure_details):
         return failure_details
+
+
 
     # 将current_video_path复制到final_output_path
     shutil.copyfile(current_video_path, final_output_path)
     return failure_details
-
 
 
 
@@ -980,21 +1017,24 @@ def gen_video_by_script(task_info, video_info_dict):
     :param video_info_dict:
     :return:
     """
-
+    chosen_script = {}
     # 生成字幕遮挡视频
     failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details
+        return failure_details, chosen_script
 
     # 生成有了图片文字的视频
     failure_details = add_image_to_video(video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details
+        return failure_details, chosen_script
 
 
-    failure_details = gen_new_video(task_info, video_info_dict)
+    failure_details, chosen_script = gen_new_video(task_info, video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details
+        return failure_details, chosen_script
 
-    return failure_details
+
+
+
+    return failure_details, chosen_script
 

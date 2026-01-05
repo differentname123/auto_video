@@ -63,15 +63,22 @@ def run():
     主运行函数，处理所有需要处理的任务
     :return:
     """
+    # 引入线程池执行器 (放在此处是为了不修改函数外部代码，也可移至文件顶部)
+    from concurrent.futures import ThreadPoolExecutor
+
     tasks_to_process = query_need_process_tasks()
     print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    for task_info in tasks_to_process:
+
+    def _task_worker(task_info):
+        """
+        线程工作函数，封装原本循环体内的逻辑
+        """
         failure_details = {}
         try:
-            failure_details, video_info_dict = process_single_task(task_info, manager)
+            failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager)
         except Exception as e:
             traceback.print_exc()
             error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
@@ -80,7 +87,7 @@ def run():
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.CRITICAL
             }
-            continue
+            # 原代码在循环中使用了 continue，此处函数执行完异常处理后会自动进入 finally，效果一致
         finally:
             if check_failure_details(failure_details):
                 failed_count = task_info.get('failed_count', 0)
@@ -92,6 +99,10 @@ def run():
 
             task_info['failure_details'] = str(failure_details)
             manager.upsert_tasks([task_info])
+
+    # 使用线程池并发处理，设置线程数量为 5
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(_task_worker, tasks_to_process)
 
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
     """
@@ -499,14 +510,14 @@ def gen_upload_info(task_info, video_info_dict, manager):
     return failure_details
 
 
-def process_single_task(task_info, manager):
+def process_single_task(task_info, manager, gen_video=False):
     """
     处理单个任务的逻辑，此函数经过了全面的健壮性和效率优化。
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
 
-
+    chosen_script = None
     # 准备好相应的视频数据
     failure_details, video_info_dict = gen_video_info_dict(task_info, manager)
     if check_failure_details(failure_details):
@@ -543,15 +554,17 @@ def process_single_task(task_info, manager):
     failure_details = gen_upload_info(task_info, video_info_dict, manager)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict
+    task_info['status'] = TaskStatus.PLAN_GENERATED
     print(f"任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # # 根据方案生成最终视频
-    # failure_details = gen_video_by_script(task_info, video_info_dict)
-    # if check_failure_details(failure_details):
-    #     return failure_details, video_info_dict
-    # print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    if gen_video:
+        # 根据方案生成最终视频
+        failure_details, chosen_script = gen_video_by_script(task_info, video_info_dict)
+        if check_failure_details(failure_details):
+            return failure_details, video_info_dict
+        print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    return failure_details, video_info_dict
+    return failure_details, video_info_dict, chosen_script
 
 
 

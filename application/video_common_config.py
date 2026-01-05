@@ -28,7 +28,7 @@ class ErrorMessage:
     TASK_ALREADY_EXISTS = '任务已存在，无需重复创建。'
     PARSE_NO_METADATA = '解析失败：未能从链接中提取到任何元数据'
 
-ALLOWED_USER_LIST = ['mama']
+ALLOWED_USER_LIST = ['danzhu', 'xiu', 'zhong', 'ping', 'qizhu', 'xiaomu', 'xiaocai', 'shun', 'mu', 'dan', 'ruruxiao', 'junda', 'junxiao', 'taoxiao', 'nana', 'qiqi', 'xue', 'chabian', 'hao', 'xiaohao', 'cai', 'ning', 'dahao', 'ruru', 'lin', 'yiyi', 'qiqixiao', 'tao', 'xiaoxue', 'yang', 'jie', 'hong', 'yan', 'mama', 'xiaosu', 'jun', 'jj']
 LOCAL_ORIGIN_URL_ID_INFO_PATH = r'W:/project/python_project/auto_video/videos/origin_url_id_info.json'
 
 class TaskStatus:

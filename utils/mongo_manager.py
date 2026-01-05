@@ -54,12 +54,47 @@ class MongoManager:
         # 为 publish_tasks 的 video_id_list 创建索引，加速查询
         self.db.create_index(self.tasks_collection, [('video_id_list', 1)], unique=False)
         self.db.create_index(self.tasks_collection, [('status', 1)], unique=False)
+        self.db.create_index(self.tasks_collection, [('status', 1), ('upload_time', 1)], unique=False)
 
         # print("✅ 核心索引已确保存在。")
 
     # ==========================================
     # video_materials 表相关操作
     # ==========================================
+
+    def find_tasks_after_time_with_status(self, target_time: datetime, status_list: list):
+        """
+        查询 publish_tasks 表中 upload_time 大于指定时间，且 status 在指定列表中的所有任务。
+
+        Args:
+            target_time (datetime): 指定的时间阈值（查询该时间之后的数据）。
+            status_list (list): 状态字符串列表（例如 ['pending', 'running']）。
+
+        Returns:
+            list: 匹配的任务文档列表。
+        """
+        # 1. 基础校验：如果状态列表为空，查询无意义，直接返回空列表
+        if not status_list:
+            return []
+
+        # 2. 校验 target_time 类型，确保与数据库存储类型一致
+        # 你的原有代码中使用 datetime.now() 存储时间，所以这里强制要求传入 datetime 对象
+        if not isinstance(target_time, datetime):
+            raise ValueError("target_time 参数必须是 datetime 类型")
+
+        # 3. 构建查询条件
+        # MongoDB 隐式的 AND 操作：同时满足 upload_time > target_time 和 status in status_list
+        query = {
+            "upload_time": {
+                "$gt": target_time  # $gt (greater than) 大于
+            },
+            "status": {
+                "$in": status_list  # $in 包含于
+            }
+        }
+
+        # 4. 执行查询
+        return self.db.find_many(self.tasks_collection, query)
 
     def find_tasks_by_status(self, status_list: list):
         """
