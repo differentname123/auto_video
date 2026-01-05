@@ -11,7 +11,7 @@
 4. [新增] 统一返回格式 {status, message, errors}。
 5. [新增] 批次内 video_id 查重，防止单次请求包含重复视频内容。
 6. [修复] 修复了 build_video_material_data 返回值解包错误，并正确集成了 validate_timestamp。
-7. [重构] 全面优化 process_one_click_generate 逻辑，分离解析、DB查询与校验逻辑。
+7. [重构] process_one_click_generate 逻辑完全重写：先解ID(含Meta缓存)->查库->补全缺失Meta。
 """
 
 import time
@@ -214,44 +214,58 @@ def _validate_request_basic(request_data: Dict) -> Tuple[bool, List[str]]:
 
     return True, errors
 
-def _resolve_video_ids(input_video_list: List[Dict]) -> Tuple[Dict[str, str], Dict[str, Dict], List[str]]:
+def _fetch_and_map_db_materials(video_ids: List[str]) -> Dict[str, Dict]:
+    """Helper: 根据 ID 列表批量查询数据库，返回 {video_id: material} 映射"""
+    if not video_ids:
+        return {}
+    db_results = mongo_manager.find_materials_by_ids(video_ids)
+    return {m['video_id']: m for m in db_results}
+
+def _resolve_ids_and_fetch_missing_meta(input_video_list: List[Dict]) -> Tuple[Dict[str, str], Dict[str, Dict], Dict[str, Dict], List[str]]:
     """
-    Step 2: 解析所有URL获取 video_id 和 meta_data
+    核心逻辑重构：
+    Step 1: 遍历列表，获取 video_id。
+            - 优先查本地文件缓存。
+            - 本地没有则联网解析，并【缓存 meta_data】。
+    Step 2: 拿着所有 video_id 查数据库。
+    Step 3: 补全缺失的 meta_data。
+            - 遍历所有 video_id，如果 DB 中没有，且 Step 1 中没解析过(即ID来自本地缓存)，
+              则此时必须联网解析以获取 meta_data。
 
     Returns:
         url_to_id_map: URL -> video_id
-        id_to_meta_map: video_id -> new_parsed_meta_data (本地有缓存则无此数据)
-        errors: 错误信息列表
+        id_to_meta_map: video_id -> meta_data (只包含数据库中缺失且已解析到的)
+        db_materials_map: video_id -> db_material
+        errors: 错误信息
     """
     original_url_id_info = read_json(LOCAL_ORIGIN_URL_ID_INFO_PATH)
     is_url_mapping_updated = False
 
     url_to_id_map = {}
-    id_to_meta_map = {} # 仅存储新解析的 meta
+    id_to_meta_map = {} # 暂存解析到的 meta，用于后续构建，避免二次请求
     errors = []
 
-    # 请求级缓存，防止单次请求中包含重复URL时重复解析
-    request_scope_parsed_cache = {}
+    request_scope_parsed_cache = {} # 防止同一次请求中同一个URL重复解析
 
+    # === Phase 1: 解析所有的 ID ===
     for idx, video_item in enumerate(input_video_list, start=1):
         url = video_item.get('original_url', '').strip()
         if not url:
             errors.append(f"第 {idx} 条记录错误: 视频链接为空")
             continue
 
-        # 优先从本地文件映射获取
+        # 1.1 尝试从本地缓存获取
         local_video_id = original_url_id_info.get(url)
 
         if local_video_id:
             url_to_id_map[url] = local_video_id
             continue
 
-        # 其次检查本次请求内是否已经解析过该URL
+        # 1.2 本地没有，必须网络解析
         if url in request_scope_parsed_cache:
             success, meta, err_msg = request_scope_parsed_cache[url]
         else:
-            # 否则进行网络解析 (耗时操作)
-            print(f"本地缓存未命中，执行解析: {url}")
+            print(f"本地无缓存，执行解析: {url}")
             success, meta, err_msg = parse_douyin_video(url)
             request_scope_parsed_cache[url] = (success, meta, err_msg)
 
@@ -264,27 +278,59 @@ def _resolve_video_ids(input_video_list: List[Dict]) -> Tuple[Dict[str, str], Di
             errors.append(f"第 {idx} 条记录解析成功但无ID (URL: {url})")
             continue
 
-        # 记录映射和元数据
+        # 记录结果
         url_to_id_map[url] = current_video_id
+        # 【关键点】：顺便保存 meta_data，防止后面发现 DB 没数据又要解析一次
         id_to_meta_map[current_video_id] = meta
 
-        # 更新本地映射表
+        # 更新本地缓存
         original_url_id_info[url] = current_video_id
         is_url_mapping_updated = True
+
+    # === Phase 2: 查询数据库 ===
+    all_resolved_ids = list(url_to_id_map.values())
+    # 去重
+    all_resolved_ids = list(set(all_resolved_ids))
+    db_materials_map = _fetch_and_map_db_materials(all_resolved_ids)
+
+    # === Phase 3: 补全数据库缺失的 Meta Data ===
+    # 此时，数据库没有的数据，我们需要确保 id_to_meta_map 里有。
+    # Phase 1 中网络解析的已经有了，唯独缺的是：ID来自本地缓存，但 DB 被清空了的情况。
+
+    # 建立 URL 到 ID 的反向查找或者直接遍历 input_video_list 对应的 URL
+    # 为了效率，我们直接遍历 map
+    for url, vid in url_to_id_map.items():
+        # 如果数据库有，不需要 meta
+        if vid in db_materials_map:
+            continue
+
+        # 如果数据库没有，检查 Phase 1 是否已经解析并存了 meta
+        if vid in id_to_meta_map:
+            continue
+
+        # 走到这里说明：DB无数据，且 Phase 1 没解析（说明走的本地ID缓存）
+        # 行动：现在解析
+        print(f"数据缺失补全：ID {vid} 在本地缓存但不在数据库，重新解析元数据...")
+
+        # 查缓存避免重复
+        if url in request_scope_parsed_cache:
+             success, meta, err_msg = request_scope_parsed_cache[url]
+        else:
+             success, meta, err_msg = parse_douyin_video(url)
+             request_scope_parsed_cache[url] = (success, meta, err_msg)
+
+        if success:
+            id_to_meta_map[vid] = meta
+        else:
+            # 这里记录个错误，但可能前面 Phase 1 没报错，这里报错了比较尴尬
+            # 不过一般来说 URL 之前能解析出 ID，现在大概率也能解析
+            errors.append(f"补全元数据失败 (URL: {url}): {err_msg}")
 
     if is_url_mapping_updated:
         save_json(LOCAL_ORIGIN_URL_ID_INFO_PATH, original_url_id_info)
 
-    return url_to_id_map, id_to_meta_map, errors
+    return url_to_id_map, id_to_meta_map, db_materials_map, errors
 
-def _fetch_and_map_db_materials(video_ids: List[str]) -> Dict[str, Dict]:
-    """Step 3: 根据 ID 列表批量查询数据库，返回 {video_id: material} 映射"""
-    if not video_ids:
-        return {}
-
-    # 需求1：对所有的 video_id 进行查询，无论来源是本地缓存还是新解析
-    db_results = mongo_manager.find_materials_by_ids(video_ids)
-    return {m['video_id']: m for m in db_results}
 
 def _process_material_construction(input_video_list: List[Dict],
                                  url_to_id_map: Dict[str, str],
@@ -305,7 +351,7 @@ def _process_material_construction(input_video_list: List[Dict],
     for idx, video_item in enumerate(input_video_list, start=1):
         url = video_item.get('original_url', '').strip()
         if not url:
-            continue # 已在 Step 2 报错，这里跳过
+            continue # 已在前面步骤报错，这里跳过
 
         video_id = url_to_id_map.get(url)
         if not video_id:
@@ -316,8 +362,7 @@ def _process_material_construction(input_video_list: List[Dict],
             errors.append(f"第 {idx} 条记录重复 (URL: {url}): ID {video_id} 已在当前任务列表中")
             continue
 
-
-        # A. 检查数据库中是否存在 (需求1：优先以DB为准，防止配置覆盖)
+        # A. 检查数据库中是否存在 (优先)
         if video_id in db_materials_map:
             db_material = db_materials_map[video_id]
 
@@ -333,15 +378,15 @@ def _process_material_construction(input_video_list: List[Dict],
             db_material['extra_info'] = video_item
             final_material = db_material
 
-        # B. 数据库无记录，使用新解析的数据
+        # B. 数据库无记录，使用 id_to_meta_map 中的数据构建
         elif video_id in id_to_meta_map:
             meta_data = id_to_meta_map[video_id]
             duration = meta_data.get('duration', 0)
             final_material = build_video_material_data(video_item, meta_data, video_id)
 
         else:
-            # 理论上不应该走到这里，除非 ID 既不在 DB 也不在 Meta Map
-            errors.append(f"第 {idx} 条记录数据异常，无法获取元数据 (URL: {url})")
+            # 理论上 Step 3 已经补全了所有情况。如果到这里还没数据，说明补全解析失败了。
+            # 错误信息已经在 Step 3 或 Phase 1 加入了 errors 列表
             continue
 
         # C. 统一校验时间戳
@@ -403,19 +448,16 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
 
     print(f"开始处理请求 | 用户: {user_name} | 视频数: {len(input_video_list)}")
 
-    # 2. 解析 ID (优先缓存，其次网络) - 需求3
-    url_to_id_map, id_to_meta_map, parse_errors = _resolve_video_ids(input_video_list)
+    # 2. 解析 ID 并确保数据完整性 (核心修改点)
+    # 流程：解析ID(存Meta) -> 查库 -> 补全缺失Meta
+    url_to_id_map, id_to_meta_map, db_materials_map, parse_errors = _resolve_ids_and_fetch_missing_meta(input_video_list)
+
     if parse_errors:
         response_structure['message'] = ErrorMessage.PARTIAL_PARSE_FAILURE
         response_structure['errors'] = parse_errors
         return response_structure, 400
 
-    # 3. 批量查询数据库 - 需求1
-    # 获取所有相关的 video_id 对应的 DB 记录
-    all_resolved_ids = list(url_to_id_map.values())
-    db_materials_map = _fetch_and_map_db_materials(all_resolved_ids)
-
-    # 4. 构建与校验素材对象
+    # 3. 构建与校验素材对象
     valid_materials, build_errors = _process_material_construction(
         input_video_list, url_to_id_map, id_to_meta_map, db_materials_map
     )
@@ -429,7 +471,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         response_structure['message'] = "无有效视频可处理"
         return response_structure, 400
 
-    # 5. 任务查重
+    # 4. 任务查重
     if _check_task_duplication(user_name, valid_materials, global_settings):
         print(f"用户 {user_name} 提交的任务完全重复，跳过。")
         response_structure['status'] = ResponseStatus.SUCCESS
@@ -437,7 +479,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         response_structure['errors'] = ['可尝试采用不同的素材或者调整创作指导也能创建新任务']
         return response_structure, 500
 
-    # 6. 保存数据
+    # 5. 保存数据
     try:
         mongo_manager.upsert_materials(valid_materials)
         task_data = build_publish_task_data(user_name, global_settings, valid_materials, input_video_list)
