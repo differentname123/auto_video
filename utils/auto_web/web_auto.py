@@ -21,7 +21,7 @@ import traceback  # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\dahao"
+USER_DATA_DIR = r"W:\temp\new_taobao6"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 
@@ -409,6 +409,27 @@ def _upload_attachment(page: Page, file_path: str):
     print("[+] 附件上传完毕。")
 
 
+def _remove_google_grounding(page: Page):
+    """
+    (内部调用) 检查是否存在 'Remove Grounding with Google Search' 按钮，
+    如果有则点击关闭。
+    """
+    try:
+        # 根据 HTML 中的 aria-label="Remove Grounding with Google Search" 定位按钮
+        grounding_close_btn = page.get_by_role("button", name="Remove Grounding with Google Search")
+
+        # 使用 short timeout (例如 1-2秒) 快速检查可见性
+        # 我们不希望因为按钮不存在而卡住脚本太久
+        if grounding_close_btn.is_visible(timeout=2000):
+            print("[*] 检测到 Google Grounding 关联，正在移除...")
+            grounding_close_btn.click()
+
+            # 可选：稍微等待一下确认点击生效，防止 UI 动画干扰
+            page.wait_for_timeout(500)
+    except Exception as e:
+        # 这是一个非阻塞操作，如果出错（比如元素刚好消失），打印日志但不中断流程
+        print(f"[!] 检查 Google Grounding 按钮时出现轻微异常 (已忽略): {e}")
+
 def _submit_prompt(page: Page, prompt: str):
     """(内部调用) 填写并提交Prompt (已升级为高兼容性定位器)"""
     print("[*] 正在提交Prompt...")
@@ -468,6 +489,7 @@ def _submit_prompt(page: Page, prompt: str):
     )
 
     expect(run_button).to_be_enabled(timeout=300000)
+    _remove_google_grounding(page)
     run_button.click()
 
 

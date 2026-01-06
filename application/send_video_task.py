@@ -102,7 +102,7 @@ def send_generate_request(video_id1, video_id2, user_name='dahao'):
 
 # --- 使用示例 ---
 if __name__ == "__main__":
-    video_content_plans_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_content_plans_similar_videos_back.json'
+    video_content_plans_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_content_plans_similar_videos.json'
     video_play_comment_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_play_comment.json'
     used_video_file = r'W:\project\python_project\auto_video\config\used_video.json'
     used_video_list = read_json(used_video_file)

@@ -102,7 +102,7 @@ def run():
             manager.upsert_tasks([task_info])
 
     # 使用线程池并发处理，设置线程数量为 5
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(_task_worker, tasks_to_process)
 
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
@@ -583,5 +583,17 @@ def process_single_task(task_info, manager, gen_video=False):
 
 
 if __name__ == '__main__':
-    run()
-
+    if __name__ == '__main__':
+        I = 3600  # 秒
+        while True:
+            t0 = time.monotonic()
+            try:
+                run()
+            except Exception:
+                traceback.print_exc()
+            dt = time.monotonic() - t0
+            if dt < I:
+                try:
+                    time.sleep(I - dt)
+                except KeyboardInterrupt:
+                    break
