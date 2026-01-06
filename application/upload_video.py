@@ -414,11 +414,11 @@ def auto_upload(manager):
     sort_tasks_to_upload = sort_tasks(tasks_to_upload, tobe_upload_video_info)
     failure_details = {}
     for task_info in sort_tasks_to_upload:
-        # check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
-        # if not check_result:
-        #     continue
-        if str(task_info.get('_id')) != '695c0131f0315fd8f1bc0583':
+        check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
+        if not check_result:
             continue
+        # if str(task_info.get('_id')) != '695c0131f0315fd8f1bc0583':
+        #     continue
 
         failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config, manager)
         print(upload_params)

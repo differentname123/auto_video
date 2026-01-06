@@ -886,7 +886,7 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
     return failure_details, final_scene_output_path
 
 
-def get_watermark_path(user_type: str, user_name: str) -> str:
+def get_watermark_path(user_name: str) -> str:
     """
     生成合适的水印图片路径。
     从 asset/ 目录中筛选包含 user_type 的 .png，按 user_name 的哈希稳定选择。
@@ -898,13 +898,14 @@ def get_watermark_path(user_type: str, user_name: str) -> str:
         print("⚠️ 未找到 asset 目录，使用默认水印。")
         return r"W:\project\python_project\auto_video\config\asset\default_watermark.png"
 
-    user_type_map = {
-        '娱乐': 'fun',
-        '体育': 'sport',
-        '游戏': 'game'}
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type = "fun"
+    user_type_info = user_config.get('user_type_info')
+    for user_type , user_list in user_type_info.items():
+        if user_name in user_list:
+            break
 
-    en_user_type = user_type_map.get(user_type, 'fun')
-    filtered_files = [f for f in all_files if en_user_type in f and f.endswith(".png")]
+    filtered_files = [f for f in all_files if user_type in f and f.endswith(".png")]
     if not filtered_files:
         print("⚠️ 未找到符合条件的水印图片，使用默认水印。")
         return r"W:\project\python_project\auto_video\config\asset\default_watermark.png"
@@ -939,7 +940,7 @@ def add_watermark_and_ending(video_path, watermark_path, ending_video_path, voic
         print(f"成功添加片尾视频，输出路径: {ending_video_path}")
         current_video_path = ending_video_path
 
-    wm_path = get_watermark_path(user_type, user_name)
+    wm_path = get_watermark_path(user_name)
     start_time = time.time()
     add_transparent_watermark(current_video_path, wm_path, watermark_path)
     print(f"添加水印完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {watermark_path}")

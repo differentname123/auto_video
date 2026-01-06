@@ -1073,8 +1073,8 @@ def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='globa
             'scene_summary': scene_summaries,
             'scene_number_list': scene_number_list,
             'tags': top_all_tags,
+            'narration_script_list': narration_script_list,
             'original_script_list': original_script_list,
-            'narration_script_list': narration_script_list
         }
 
     # --- 2. 根据模式构建 Segments ---

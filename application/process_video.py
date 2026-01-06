@@ -289,6 +289,7 @@ def gen_extra_info(video_info_dict, manager):
 
         if check_failure_details(failure_details):
             return failure_details
+        failure_details = {}
         print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 

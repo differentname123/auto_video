@@ -63,7 +63,7 @@ def send_generate_request(video_id1, video_id2, user_name='dahao'):
                 'is_realtime_video': True,
                 'is_requires_text': True,
                 'is_needs_stickers': True,
-                'max_scenes': 1,
+                'max_scenes': 0,
                 'has_ad_or_face': 'auto',
                 'scene_order_fixed': 'auto',
                 'split_guidance': '',
