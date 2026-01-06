@@ -18,7 +18,8 @@ from collections import defaultdict
 import cv2
 
 from application.process_video import process_single_task, query_need_process_tasks
-from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths
+from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths, \
+    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
@@ -170,7 +171,7 @@ def get_wait_minutes():
     else:  # 深夜 22:00 - 23:59，准备休息，等待时间最短
         return 0
 
-def check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map, max_count=20):
+def check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map, max_count=SINGLE_DAY_UPLOAD_COUNT):
     """
     总的来说就是检查该任务是否应该投稿
     :param task_info:
@@ -211,7 +212,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) > 5:
+    if len(already_upload_users) >= SINGLE_UPLOAD_COUNT:
         print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
@@ -248,7 +249,7 @@ def gen_video(task_info, config_map, user_config, manager):
         return failure_details, video_info_dict, chosen_script, upload_params
     except Exception as e:
         traceback.print_exc()
-        error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
+        error_info = f"❌  严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
         print(error_info)
         failure_details[str(task_info.get('_id', 'N/A'))] = {
             "error_info": error_info,

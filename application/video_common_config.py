@@ -44,6 +44,9 @@ class TaskStatus:
     UPLOADED = '已投稿'
 
 
+SINGLE_UPLOAD_COUNT = 10      #一轮循环最大投稿数量
+SINGLE_DAY_UPLOAD_COUNT = 20    #单账号单日最大投稿数量
+
 
 class ERROR_STATUS:
     """
