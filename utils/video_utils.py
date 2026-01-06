@@ -3036,3 +3036,266 @@ def clip_and_merge_segments(video_path, remaining_segments, output_path):
         for path in temp_files:
             if os.path.exists(path):
                 os.remove(path)
+
+
+def gen_ending_video(text, output_path, origin_ending_video_path, voice_info):
+    """
+    生成结尾视频（测试用），结尾语为txt
+    """
+    voice_name = "zh-CN-XiaoxiaoNeural"
+    rate = "+30%"
+    pitch = '+30Hz'
+    if voice_info is not None:
+        voice_name = voice_info.get('voice_name', voice_name)
+        rate = voice_info.get('rate', "+30%")
+        pitch = voice_info.get('pitch', '+30Hz')
+
+    output_path = pathlib.Path(output_path)
+    audio_path = output_path.with_suffix(".mp3")
+    duration = generate_audio_and_get_duration_sync(
+        text=text,
+        output_filename=str(audio_path),
+        voice_name=voice_name,
+        trim_silence=False,
+        rate=rate,
+        pitch=pitch,
+    )
+    video_duration = probe_duration(origin_ending_video_path)
+    segments_info = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(video_duration * 1000),
+        'outputPath': str(audio_path),
+        'trimmedDuration': duration,
+    }]
+    with_audio_path = output_path.with_name(output_path.stem + "_with_audio.mp4")
+    redub_video_with_ffmpeg(video_path=origin_ending_video_path, segments_info=segments_info, output_path=str(with_audio_path), keep_original_audio=True)
+
+    # 4. 添加字幕
+    subtitle_data = [{
+        'startTime': "00:00:00.000",
+        'endTime': ms_to_time(duration * 1000),
+        'optimizedText': text
+    }]
+    add_subtitles_to_video(
+        video_path=str(with_audio_path),
+        subtitles_info=subtitle_data,
+        output_path=str(output_path),
+        font_size=60,
+        bottom_margin=30
+    )
+
+
+    if os.path.exists(audio_path):
+        os.remove(audio_path)
+    if os.path.exists(with_audio_path):
+        os.remove(with_audio_path)
+    return str(output_path.resolve())
+
+def get_media_dimensions(file_path):
+    """使用 ffprobe 获取媒体文件的宽度和高度。"""
+    command = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height', '-of', 'json', file_path
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        data = json.loads(result.stdout)
+        return data['streams'][0]['width'], data['streams'][0]['height']
+    except Exception as e:
+        print(f"错误: 无法获取 '{file_path}' 的尺寸。错误信息: {e}")
+        return None, None
+
+
+def add_transparent_watermark(
+        video_path: str,
+        watermark_path: str,
+        output_path: str,
+        relative_width: float = 0.05,
+        opacity: float = 1,
+        position: str = "top_left"
+):
+    """
+    使用 ffmpeg 为视频添加一个圆形的、动态缩放的半透明水印。
+    它会取水印图片的内切圆部分。
+    """
+    position_map = {
+        "top_left": "10:10",
+        "top_right": "W-w-10:10",
+        "bottom_left": "10:H-h-10",
+        "bottom_right": "W-w-10:H-h-10"
+    }
+
+    if position not in position_map:
+        raise ValueError("位置参数无效。请从 'top_left', 'top_right', 'bottom_left', 'bottom_right' 中选择。")
+
+    try:
+        video_width, _ = get_media_dimensions(video_path)
+        watermark_scaled_width = int(video_width * relative_width)
+
+        # 这是修改的核心：构建一个新的 filter_complex 字符串
+        filter_complex = (
+            # 1. 缩放水印图片，并确保它有 RGBA 格式以便修改 alpha 通道
+            f"[1:v]scale={watermark_scaled_width}:-1,format=rgba,"
+            # 2. 使用 geq 滤镜创建圆形蒙版并应用透明度
+            #    r='r(X,Y)': 保持原始的 R, G, B 通道不变
+            #    a='...':     重写 Alpha (透明) 通道
+            #    pow(X-W/2,2)+pow(Y-H/2,2) <= pow(min(W,H)/2,2) : 这是圆的方程，判断像素是否在内切圆内
+            #    if(condition, true_val, false_val) : 三元表达式
+            #    true_val: opacity * 255 (Alpha通道范围是0-255)
+            #    false_val: 0 (完全透明)
+            "geq=r='r(X,Y)':a='if(lte(pow(X-W/2,2)+pow(Y-H/2,2),pow(min(W,H)/2,2)),"
+            f"{opacity}*255,0)'[wm];"
+            # 3. 将处理好的圆形水印 [wm] 叠加到主视频 [0:v] 上
+            f"[0:v][wm]overlay={position_map[position]}"
+        )
+
+        command = [
+            'ffmpeg',
+            '-i', video_path,
+            '-i', watermark_path,
+            '-filter_complex', filter_complex,
+            '-c:v', 'libx264',  # 显式指定编码器
+            '-crf', '23',  # 近无差别质量；需要更好则减小（比如16或0）
+            # '-preset', 'ultrafast',  # 均衡速度/质量；开发时可用 veryslow
+            '-y',
+            output_path
+        ]
+
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        print(f"圆形动态缩放水印添加成功，已保存至: {output_path}")
+
+    except (FileNotFoundError, ValueError) as e:
+        print(f"错误：{e}")
+        print("请确保您的系统中已经正确安装了 ffmpeg 和 ffprobe。")
+    except subprocess.CalledProcessError as e:
+        print("ffmpeg 或 ffprobe 在执行过程中返回了一个错误：")
+        print(e.stderr)
+
+
+def _get_image_dimensions(image_path: str) -> tuple[int, int] or None:
+    # (此辅助函数无需修改)
+    command = [
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height', '-of', 'json', image_path
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+        data = json.loads(result.stdout)
+        return data['streams'][0]['width'], data['streams'][0]['height']
+    except Exception as e:
+        print(f"错误: 无法获取图片尺寸 '{image_path}'.")
+        print(f"具体错误: {e}")
+        return None
+
+def create_enhanced_cover(
+        input_image_path: str,
+        output_image_path: str,
+        text_lines: list[str],
+        font_path='C:/Windows/Fonts/msyhbd.ttc',
+        position: str = 'top_third',
+        color_theme: str = 'auto',
+        font_size_ratio: float = 1.0,
+        line_spacing_ratio: float = 1.4,
+        overwrite: bool = True
+) -> str or None:
+    if not all([os.path.exists(input_image_path), os.path.exists(font_path)]):
+        print("错误: 输入文件或字体文件未找到。")
+        return None
+
+    dimensions = _get_image_dimensions(input_image_path)
+    if not dimensions: return None
+    img_w, img_h = dimensions
+    true_high = int(img_w * 9 / 16)
+
+    if not text_lines:
+        print("警告: 未提供任何文字，将直接复制图片。")
+        if overwrite or not os.path.exists(output_image_path):
+            shutil.copy(input_image_path, output_image_path)
+        return output_image_path
+
+    # !! 关键修改 1: 优化颜色主题，并增强阴影对比度 !!
+    color_themes = {
+        # # 主题1: 经典白字黑边 (最通用，最清晰)
+        'classic_white': {'fontcolor': 'White', 'shadowcolor': 'black@0.8'},
+        # # 主题2: 活力黄黑配 (最醒目，适合娱乐内容)
+        'vibrant_yellow': {'fontcolor': '#FFD700', 'shadowcolor': 'black@0.85'},
+        'cyber_cyan': {'fontcolor': '0x00FFFF', 'shadowcolor': 'black@0.4'},
+        'energetic_orange': {'fontcolor': '#FF6347', 'shadowcolor': 'white@0.8'},
+        'neon_magenta': {'fontcolor': '#FF00FF', 'shadowcolor': 'black@0.7'},  # 强烈、骚动感，适合潮流/娱乐
+        'electric_purple': {'fontcolor': '#8A2BE2', 'shadowcolor': 'black@0.6'},  # 科幻/科技风
+        'hot_pink': {'fontcolor': '#FF1493', 'shadowcolor': 'black@0.7'},  # 青年/时尚向
+        'neon_orange': {'fontcolor': '#FF4500', 'shadowcolor': 'black@0.75'},  # 活力火爆型（通知/CTA）
+        'lime_neon': {'fontcolor': '#CCFF00', 'shadowcolor': 'black@0.8'},  # 非常抓眼球的高亮绿
+        'teal_turquoise': {'fontcolor': '#00CED1', 'shadowcolor': 'black@0.5'},  # 清爽又醒目，适合科技/医疗类
+        'cobalt_blue': {'fontcolor': '#0047AB', 'shadowcolor': 'white@0.85'},  # 稳重但显眼，适合专业/财经
+        'crimson_red': {'fontcolor': '#DC143C', 'shadowcolor': 'black@0.6'},  # 强烈紧迫感（促销/警示）
+        'neon_blue': {'fontcolor': '#1E90FF', 'shadowcolor': 'black@0.6'},  # 网络感强，适合视频标题
+        'solar_gold': {'fontcolor': '#FFB400', 'shadowcolor': 'black@0.8'},  # 黄金感，传达价值/热度
+        'icy_cyan': {'fontcolor': '#B0F2FF', 'shadowcolor': 'black@0.9'},  # 冰爽高亮，适合科技/潮流背景
+        'pink_purple_gradient': {'fontcolor': '#FF6EC7', 'shadowcolor': 'black@0.6'},  # 单色代替：建议配合轻微渐变背景
+
+    }
+
+    # 如果指定的主题不存在，或为 'auto'，则从预设中随机选择
+    if color_theme not in color_themes or color_theme == 'auto':
+        # 默认随机选择，但可以优先选择最经典的
+        # chosen_theme = color_themes['classic_white']
+        chosen_theme = random.choice(list(color_themes.values()))
+    else:
+        chosen_theme = color_themes[color_theme]
+
+    longest_line = max(text_lines, key=len)
+    longest_line_size = max(8, len(longest_line))  # 避免极端短文本导致字体过大
+    target_text_width = img_w * 0.95
+    estimated_char_width_ratio = 1.0
+    font_size = int(min((target_text_width / longest_line_size), img_h / 4) * font_size_ratio)
+
+    # !! 关键修改 2: 增加阴影偏移量，模拟更厚的描边效果 !!
+    # 将偏移量从原来的5%提升到8%
+    shadow_offset = max(2, int(font_size * 0.06))
+
+    line_height = int(font_size * line_spacing_ratio)
+    total_text_height = line_height * (len(text_lines) - 1) + font_size
+
+    escaped_font_path = font_path.replace(':', '\\:') if os.name == 'nt' else font_path
+
+    position_map = {'center': img_h / 2, 'top_third': (img_h / 2 - true_high / 2 + font_size / 2),
+                    'bottom_third': img_h * 0.75}
+    block_y_center = position_map.get(position, img_h * 0.5)  # 默认居中
+    start_y = block_y_center - total_text_height / 2
+
+    filters = []
+    for i, line in enumerate(text_lines):
+        line_y = start_y + i * line_height
+        x_expr = '(w-text_w)/2'
+
+        drawtext_options = {
+            'fontfile': f"'{escaped_font_path}'",
+            'text': f"'{line.replace(':', '\\:').replace('%', '\\%').replace('\'', '')}'",
+            'fontsize': str(font_size),
+            'fontcolor': chosen_theme['fontcolor'],
+            'x': x_expr,
+            'y': str(line_y),
+            'shadowcolor': chosen_theme['shadowcolor'],
+            'shadowx': str(shadow_offset),
+            'shadowy': str(shadow_offset)
+        }
+        filters.append("drawtext=" + ":".join(f"{k}={v}" for k, v in drawtext_options.items()))
+
+    vf_string = ",".join(filters)
+    command = ['ffmpeg', '-i', input_image_path, '-vf', vf_string]
+    if overwrite: command.append('-y')
+    command.append(output_image_path)
+
+    print(f"主题: {chosen_theme}")
+
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, encoding='utf-8')
+        print(f"🎉 成功! 优化后的封面已保存到 '{output_image_path}'")
+        return output_image_path
+    except subprocess.CalledProcessError as e:
+        print("FFMPEG 执行失败!")
+        print(f"错误码: {e.returncode}")
+        print("FFMPEG 输出 (stderr):")
+        print(e.stderr)
+        return None

@@ -6,6 +6,7 @@
       <excludeFolder url="file://$MODULE_DIR$/videos" />
       <excludeFolder url="file://$MODULE_DIR$/application/Download" />
       <excludeFolder url="file://$MODULE_DIR$/application/Volume" />
+      <excludeFolder url="file://$MODULE_DIR$/third_party/TikTokDownloader" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (auto_video)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

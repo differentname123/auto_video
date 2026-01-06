@@ -8,18 +8,23 @@
 :description:
     进行视频的制作以及投稿
 """
+import os
+import random
 import time
 import traceback
 from datetime import datetime
 from collections import defaultdict
 
+import cv2
+
 from application.process_video import process_single_task, query_need_process_tasks
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths
-from utils.common_utils import read_json, is_valid_target_file_simple
+from utils.common_utils import read_json, is_valid_target_file_simple, init_config
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
-
-
+from utils.video_utils import get_frame_at_time_safe, create_enhanced_cover
+config_map = {}
+error_user_map = {}
 def gen_user_upload_info(uploaded_tasks_today):
     """
     通过今日投稿的任务生成用户投稿的信息
@@ -44,40 +49,36 @@ def gen_user_upload_info(uploaded_tasks_today):
 def sort_tasks(tasks_list, user_info_map):
     """
     对任务列表进行排序
-    规则: count(asc) -> schedule_date的日期(asc) -> update_time(asc)
+    规则: count(asc) -> schedule_date字符串(asc) -> update_time(asc)
     """
 
     def get_sort_key(task):
         # 1. 获取 userName
-        # 假设 task 是对象，使用 task.userName
-        # 如果 task 是字典，请改为 task['userName']
-        user_name = task.userName
+        user_name = task.get('userName')
 
-        # 2. 获取 count
-        # 从 map 中获取 user 对象
-        user_obj = user_info_map.get(user_name)
-
-        if user_obj:
-            # 假设 user_obj 是对象，使用 user_obj.count
-            # 如果 user_obj 是字典，请改为 user_obj['count']
-            count = user_obj.count
+        # 2. 获取 count (从 user_info_map 中查找)
+        user_info = user_info_map.get(user_name)
+        if user_info:
+            count = user_info.get('count', 0)
         else:
-            # 如果没查询到用户信息对象，count 为 0
             count = 0
 
-        # 3. 获取 schedule_date 并转换为只包含日期的对象
-        # 假设结构为 task.creation_guidance_info.schedule_date
-        schedule_dt = task.creation_guidance_info.schedule_date
-        schedule_day = schedule_dt.date()  # 只取日期部分 (YYYY-MM-DD)
+        # 3. 获取 schedule_date (字符串直接使用)
+        # 结构: task['creation_guidance_info']['schedule_date']
+        guidance_info = task.get('creation_guidance_info', {})
+
+        # 直接获取字符串 '2026-01-05'
+        # 建议给个默认值 '' (空字符串)，以防数据缺失导致排序报错
+        schedule_date_str = guidance_info.get('schedule_date', '')
 
         # 4. 获取 update_time
-        update_time = task.update_time
+        update_time = task.get('update_time', '')
 
-        # 5. 返回元组进行多级排序
-        # Python 的元组比较机制会自动按照顺序比较：先比第一个元素，相同则比第二个，以此类推
-        return (count, schedule_day, update_time)
+        # 5. 返回元组
+        # 字符串比较: '2026-01-05' < '2026-01-06'，符合预期
+        return (count, schedule_date_str, update_time)
 
-    # 使用 key 进行原地排序
+    # 执行排序
     tasks_list.sort(key=get_sort_key)
 
     return tasks_list
@@ -99,9 +100,292 @@ def gen_video_and_upload(task_info, manager):
 
     # 继续加工视频，主要是进行水印的增加以及ending的添加
 
+def check_type(task_info, user_config):
+    """
+    检查用户类型与视频题材是否匹配。
+    题材映射：
+      - 包含 '游戏' -> 'game'
+      - 包含 '运动' 或 '体育' -> 'sport'
+      - 包含 '搞笑'/'趣味'/'娱乐'/'新闻' -> 'fun'
+    """
+    user_name = task_info.get("userName", "other")
+    upload_info_list = task_info.get("upload_info")
+    # 获取category_id
+    category_id_list = [upload_info["category_id"] for upload_info in upload_info_list if "category_id" in upload_info]
+    category_data_info = read_json(r'W:\project\python_project\auto_video\config\bili_category_data.json')
+    category_name_list = []
+    for category_id in category_id_list:
+        category_name = category_data_info.get(str(category_id), {}).get("name", "")
+        if category_name:
+            category_name_list.append(category_name)
+    category_name_list_str = str(category_name_list)
+    video_type = "no"
+    if category_name_list_str:
+        if "游戏" in category_name_list_str:
+            video_type = "game"
+        elif "运动" in category_name_list_str or "体育" in category_name_list_str:
+            video_type = "sport"
+        elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str:
+            video_type = "fun"
+    user_type = "other"
+    user_type_info = user_config.get('user_type_info')
+    for user_type , user_list in user_type_info.items():
+        if user_name in user_list:
+            break
+
+    if user_type != video_type:
+        error_info = f"⚠️ 用户 {user_name} 的类型 {user_type} 与视频题材 {category_name_list_str} 的类型 {video_type} 不匹配，跳过上传。"
+        return error_info
+    return ""
+
+
+def get_wait_minutes():
+    """
+    根据当前时间的小时数，返回一个非线性的等待分钟数。
+    - 凌晨和清晨等待时间最长。
+    - 白天和傍晚逐渐减少。
+    - 深夜等待时间最短。
+    - 等待时间以5分钟为单位变化。
+
+    Returns:
+        int: 建议的等待分钟数。
+    """
+    # 1. 获取当前时间的小时数 (0-23)
+    current_hour = datetime.now().hour
+
+    # 2. 根据不同的时间段，返回不同的等待时间
+    # 规则：越早时间越长，越晚时间越短
+    if current_hour <= 8:  # 清晨 06:00 - 08:59，开始苏醒，等待时间减少
+        return 40
+
+    elif current_hour <= 11:  # 上午 09:00 - 11:59，工作时间，等待时间减少
+        return 30
+
+    elif current_hour <= 17:  # 中午及下午 12:00 - 17:59，活跃时间
+        return 20
+
+    elif current_hour <= 21:  # 傍晚 18:00 - 21:59，晚上休息前
+        return 10
+
+    else:  # 深夜 22:00 - 23:59，准备休息，等待时间最短
+        return 0
+
+def check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map, max_count=20):
+    """
+    总的来说就是检查该任务是否应该投稿
+    :param task_info:
+    :param user_upload_info:
+    :return:
+    """
+    creation_guidance_info = task_info.get('creation_guidance_info', {})
+    log_pre = f"{task_info.get('video_id_list', [])} {creation_guidance_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    global error_user_map
+
+    schedule_date = creation_guidance_info.get('schedule_date', '2026-01-05')
+    is_future = datetime.strptime(schedule_date, '%Y-%m-%d').date() > datetime.now().date()
+    if is_future:
+        print(f"还没到计划的投稿时间，跳过 {log_pre}")
+        return False
+
+
+    user_name = task_info.get('userName')
+    if user_name not in config_map.keys():
+        f"⚠️ 跳过 {user_name} 用户上传 请检查配置数据 {log_pre}"
+        return False
+
+
+    if user_name in error_user_map.keys():
+        error_info = error_user_map[user_name]
+        print(f'{user_name} 最近报错为 {error_info} 跳过 {log_pre}')
+        return False
+
+    if user_name in already_upload_users:
+        print(f"{user_name} 本轮已投稿，跳过 {log_pre}")
+        return False
 
 
 
+    self_user_list = user_config.get('self_user_list', [])
+    if user_name in self_user_list:
+        error_info = check_type(task_info, user_config)
+        if error_info:
+            print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
+            return False
+    if len(already_upload_users) > 5:
+        print(f"本轮已投稿用户过多，跳过 {log_pre}")
+        return False
+
+    right_now_user_list = user_config.get('right_now_user_list', [])
+    if user_name not in right_now_user_list:
+        need_waite_minutes = get_wait_minutes()
+        latest_upload_time = user_upload_info.get(user_name, {}).get('latest_upload_time', datetime.min)
+        # 计算和上次投稿的差值分数数
+        time_diff = (current_time - latest_upload_time).total_seconds() / 60
+
+        if time_diff < need_waite_minutes:
+            print(f"{user_name} 距离上次投稿仅 {time_diff:.2f} 分钟，一共需等待 {need_waite_minutes} 分钟，跳过 {log_pre}")
+            return False
+
+    uploaded_count = user_upload_info.get(user_name, {}).get('uploaded_count', 0)
+    if uploaded_count >= max_count:
+        print(f"{user_name} 今日投稿次数已达上限 {max_count} 次，跳过 {log_pre}")
+        return False
+
+
+    return True
+
+
+def gen_video(task_info, config_map, user_config, manager):
+    failure_details = {}
+    try:
+        failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager, gen_video=True)
+        user_name = task_info.get('userName')
+        all_task_video_path_info = build_task_video_paths(task_info)
+        final_output_path = all_task_video_path_info['final_output_path']
+        account_config = config_map.get(user_name)
+        upload_params = build_bilibili_params(final_output_path, chosen_script, user_config, user_name, video_info_dict, account_config)
+
+        return failure_details, video_info_dict, chosen_script, upload_params
+    except Exception as e:
+        traceback.print_exc()
+        error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
+        print(error_info)
+        failure_details[str(task_info.get('_id', 'N/A'))] = {
+            "error_info": error_info,
+            "error_level": ERROR_STATUS.CRITICAL
+        }
+        return failure_details, {}, {}, {}
+    finally:
+        if check_failure_details(failure_details):
+            failed_count = task_info.get('failed_count', 0)
+            task_info['failed_count'] = failed_count + 1
+            task_info['status'] = TaskStatus.FAILED
+        else:
+            # task_info['status'] = TaskStatus.COMPLETED
+            pass
+
+        task_info['failure_details'] = str(failure_details)
+        manager.upsert_tasks([task_info])
+
+def gen_cover_path(final_output_path, video_info_dict, cover_text):
+    """
+    生成最终的封面路径
+    :return:
+    """
+    available_cover_path_list = []
+    for video_id, video_info in video_info_dict.items():
+        meta_data = video_info.get('metadata')[0]
+        is_duplicate = video_info.get('is_duplicate', False)
+        if is_duplicate:
+            continue
+        abs_cover_path = meta_data.get('abs_cover_path', '')
+        if is_valid_target_file_simple(abs_cover_path):
+            available_cover_path_list.append(abs_cover_path)
+
+    if not available_cover_path_list:
+        output_dir = os.path.dirname(final_output_path)
+        target_frame = get_frame_at_time_safe(final_output_path, "00:00")
+        if target_frame is not None:
+            image_filename = f"first_frame.jpg"
+            image_save_path = os.path.join(output_dir, image_filename)
+            cv2.imwrite(image_save_path, target_frame)
+            available_cover_path_list.append(image_save_path)
+
+    # 随机选择一个封面
+    base_cover_path = random.choice(available_cover_path_list)
+    output_image_path = base_cover_path.replace(".jpg", "_enhanced.jpg")
+    if is_valid_target_file_simple(output_image_path):
+        return output_image_path
+    create_enhanced_cover(
+        input_image_path=base_cover_path,
+        output_image_path=output_image_path,
+        text_lines=[cover_text],
+    )
+    return output_image_path
+
+
+def build_bilibili_params(video_path, best_script, user_config, userName, video_info_dict, config):
+    """
+    生成投稿需要的参数
+    :return:
+    """
+    upload_info = best_script.get('upload_info', {})
+
+
+    title = best_script.get("title", "欢迎来看我的视频！")
+    if len(title) > 80:
+        title = title[:70]
+        print(f"⚠️ 标题过长，已截断为：{title}")
+
+    description_json = upload_info.get("introduction", {})
+    target_keys = ["core_highlight", "value_promise", "interaction_guide", "supplement_info"]
+    description = "\n".join(str(description_json[k]) for k in target_keys if k in description_json)
+
+
+
+    tags = upload_info.get('tags', [])
+    video_recommend_user_list = user_config.get('video_recommend_user_list', [])
+    fun_user_list = user_config.get('fun_user_list', [])
+    if userName in video_recommend_user_list:
+        tags.insert(0, "B站好片有奖种草")
+    if userName in fun_user_list:
+        tags.insert(0, "娱乐盘点")
+    tags = list(set(tags))
+    tags = [tag for tag in tags if len(tag) <= 18]
+    tags = tags[:12]
+    tags_str = ",".join(tags) if isinstance(tags, list) else str(tags)
+
+
+    dynamic = upload_info.get("introduction", {}).get("interaction_guide", "希望大家喜欢")
+
+    cover_text = best_script.get("cover_text", "")
+    cover_path = gen_cover_path(video_path, video_info_dict, cover_text)
+
+    human_type2 = upload_info.get("category_id", 1002)
+
+    topic_id = upload_info.get("topic_id", 1105274)
+    topic_detail = {
+        "from_topic_id": topic_id,
+        "from_source": "arc.web.recommend",
+        "topic_name": "骑行去追夏天的风",
+    }
+
+
+
+    upload_params = {
+        "title": title,
+        "description": description,
+        "tags": tags_str,
+        "dynamic": dynamic,
+        "cover_path": cover_path,
+        "video_path": video_path,
+        "sessdata": config[0],
+        "bili_jct": config[1],
+        "human_type2": human_type2,
+        "topic_detail": topic_detail,
+        "topic_id": topic_id,
+    }
+    return upload_params
+
+
+def build_user_config():
+    base_config_map = init_config()
+
+    for uid, detail_info in base_config_map.items():
+        name = detail_info.get("name", f"user_{uid}")
+        sessdata = detail_info.get("SESSDATA", f"SESSDATA")
+        bili_jct = detail_info.get("BILI_JCT", f"user_{uid}")
+        total_cookie = detail_info.get("total_cookie", f"user_{uid}")
+        # 判断total_cookie是否和之前的不一样，如果不一样则更新
+        before_total_cookie = config_map.get(name, (None, None, None))[2]
+        if before_total_cookie != total_cookie:
+            print(f"🔄 检测到用户 {name} 的 total_cookie 发生变化，已更新。")
+            # 如果name在error_user_map中，删除对应的错误记录
+            if name in error_user_map:
+                del error_user_map[name]
+
+        config_map[name] = (sessdata, bili_jct, total_cookie)
+    return config_map
 
 
 def auto_upload(manager):
@@ -109,18 +393,16 @@ def auto_upload(manager):
     进行单次循环的投稿
     :return:
     """
-    for i in range(10):
-        start_time = time.time()
-        tobe_upload_video_info_file = r'W:\project\python_project\auto_video\config\tobe_upload_video_info.json'
-        tobe_upload_video_info = read_json(tobe_upload_video_info_file)
-        tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
-        print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
-        start_time = time.time()
-
-        tasks_to_process = query_need_process_tasks()
-        print(f"找到 {len(tasks_to_process)} 个待处理任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
-
-    return
+    already_upload_users = []
+    current_time = datetime.now()
+    config_map = build_user_config()
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    start_time = time.time()
+    tobe_upload_video_info_file = r'W:\project\python_project\auto_video\config\tobe_upload_video_info.json'
+    tobe_upload_video_info = read_json(tobe_upload_video_info_file)
+    tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
+    print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
+    start_time = time.time()
 
     now = datetime.now()
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -129,31 +411,18 @@ def auto_upload(manager):
     user_upload_info = gen_user_upload_info(uploaded_tasks_today)
 
     sort_tasks_to_upload = sort_tasks(tasks_to_upload, tobe_upload_video_info)
-
+    failure_details = {}
     for task_info in sort_tasks_to_upload:
+        # check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
+        # if not check_result:
+        #     continue
+        if str(task_info.get('_id')) != '695c0131f0315fd8f1bc0583':
+            continue
 
-        try:
-            failure_details, video_info_dict = process_single_task(task_info, manager, gen_video=True)
-        except Exception as e:
-            traceback.print_exc()
-            error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
-            print(error_info)
-            failure_details[str(task_info.get('_id', 'N/A'))] = {
-                "error_info": error_info,
-                "error_level": ERROR_STATUS.CRITICAL
-            }
-            # 原代码在循环中使用了 continue，此处函数执行完异常处理后会自动进入 finally，效果一致
-        finally:
-            if check_failure_details(failure_details):
-                failed_count = task_info.get('failed_count', 0)
-                task_info['failed_count'] = failed_count + 1
-                task_info['status'] = TaskStatus.FAILED
-            else:
-                # task_info['status'] = TaskStatus.COMPLETED
-                pass
-
-            task_info['failure_details'] = str(failure_details)
-            manager.upsert_tasks([task_info])
+        failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config, manager)
+        print(upload_params)
+        if not chosen_script:
+            continue
 
 
 
@@ -162,4 +431,5 @@ if __name__ == "__main__":
     manager = MongoManager(mongo_base_instance)
     while True:
         auto_upload(manager)
+        print(f"本轮投稿处理完成，等待下一轮...当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         time.sleep(60)  # 每分钟运行一次

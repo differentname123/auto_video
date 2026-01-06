@@ -10,6 +10,7 @@
     整体逻辑：
         1.查询需要处理的任务
 """
+import hashlib
 import os
 import random
 import shutil
@@ -25,7 +26,7 @@ from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
-    add_text_adaptive_padding, add_bgm_to_video
+    add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -42,15 +43,12 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
         if not final_text:
             continue
         asr_start = asr_info.get('fix_start')
-        asr_start = max(0, asr_start-500)
+        asr_start = max(0, asr_start - 500)
         asr_end = asr_info.get('fix_end')
-        asr_end = min(video_duration_ms, asr_end+500)
+        asr_end = min(video_duration_ms, asr_end + 500)
         duration_list.append((asr_start, asr_end))
     merge_intervals_list = merge_intervals(duration_list)
     return merge_intervals_list
-
-
-
 
 
 def _process_single_video(video_id, video_info):
@@ -141,9 +139,6 @@ def _process_single_video(video_id, video_info):
     return None
 
 
-
-
-
 def gen_subtitle_box_and_cover_subtitle(video_info_dict):
     """
     批量生成遮挡作者字幕的视频
@@ -219,7 +214,6 @@ def add_image_text_to_video(video_path, video_info, optimized_video_plan_info, o
         print(error_info)
 
 
-
 def add_image_to_video(video_info_dict):
     """
     在视频上增加图片，目前主要是图片文字以及表情包(待实现)
@@ -237,7 +231,8 @@ def add_image_to_video(video_info_dict):
             video_overlays_text_info_list = video_info.get('video_overlays_text_info', [])
             image_text_video_path = all_path_info.get('image_text_video_path')
             if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
-                add_image_text_to_video(video_path, video_info, video_overlays_text_info_list, image_text_video_path, output_dir)
+                add_image_text_to_video(video_path, video_info, video_overlays_text_info_list, image_text_video_path,
+                                        output_dir)
 
             if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
                 error_info = f"添加图片文字后的视频文件大小异常，生成失败。"
@@ -437,7 +432,6 @@ def build_all_need_data_map(video_info_dict):
             scene_key = f"{video_id}_{scene_number}"
             all_logical_scene_dict[scene_key] = scene
 
-
         owner_asr_info_list = video_info.get('owner_asr_info')
 
         for asr_info in owner_asr_info_list:
@@ -449,13 +443,12 @@ def build_all_need_data_map(video_info_dict):
     return all_logical_scene_dict, all_owner_asr_info_dict
 
 
-
-
 def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box, voice_info):
     new_narration_script = split_scene.get('new_narration_script', '')
     narration_script_start = split_scene.get('narration_script_start', 0)
     narration_script_end = split_scene.get('narration_script_end', 0)
-    segment_output_scene_file = os.path.join(output_dir, 'split_scene/' f'{narration_script_start}_{narration_script_end}.mp4')
+    segment_output_scene_file = os.path.join(output_dir,
+                                             'split_scene/' f'{narration_script_start}_{narration_script_end}.mp4')
     start_time = time.time()
 
     if narration_script_start >= narration_script_end - 100:
@@ -478,7 +471,8 @@ def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_
             # replace_video_audio(segment_output_scene_file,seg_start, seg_end, pure_audio_path, segment_output_scene_background_file)
             # origin_video_path = segment_output_scene_background_file
             # keep_original_audio = True
-            gen_video(new_narration_script, output_path, origin_video_path, keep_original_audio=keep_original_audio, fixed_rect=subtitle_box, voice_info=voice_info)
+            gen_video(new_narration_script, output_path, origin_video_path, keep_original_audio=keep_original_audio,
+                      fixed_rect=subtitle_box, voice_info=voice_info)
         need_merge_video_file = output_path
     else:
         need_merge_video_file = segment_output_scene_file
@@ -517,7 +511,6 @@ def get_voice_info(tags=None):
     return final_voice_infp
 
 
-
 def gen_transition_video(video_path, split_scene_list, transition_text, voice_info, subtitle_box):
     """
     生成转场视频
@@ -535,12 +528,10 @@ def gen_transition_video(video_path, split_scene_list, transition_text, voice_in
     # 获取图片的分辨率
     height, width, _ = target_frame.shape
     resolution = (width, height)
-    text_image_to_video_with_subtitles(transition_text, image_path, transition_video_output_path, short_text=transition_text, resolution=resolution, voice_info=voice_info, fixed_rect=subtitle_box)
+    text_image_to_video_with_subtitles(transition_text, image_path, transition_video_output_path,
+                                       short_text=transition_text, resolution=resolution, voice_info=voice_info,
+                                       fixed_rect=subtitle_box)
     return transition_video_output_path
-
-
-
-
 
 
 def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info):
@@ -560,16 +551,13 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
         print(f"已存在最终单个场景视频，跳过生成: {final_scene_output_path}")
         return failure_details, final_scene_output_path
 
-
-
-
     # 生成转场视频
     transition_text = new_script_scene.get('transition_text', '')
     if transition_text:
-        transition_video_output_path = gen_transition_video(video_path, merged_segment_list, transition_text, voice_info, subtitle_box)
+        transition_video_output_path = gen_transition_video(video_path, merged_segment_list, transition_text,
+                                                            voice_info, subtitle_box)
         if is_valid_target_file_simple(transition_video_output_path):
             need_merge_video_file_list.append(transition_video_output_path)
-
 
     # 生成不同的分割段，然后进行每一段视频的生成
     new_narration_script_list = new_script_scene.get('new_narration_script')
@@ -585,7 +573,8 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
     count = 0
     for split_scene in split_scene_list:
         count += 1
-        need_merge_video_file = process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box, voice_info)
+        need_merge_video_file = process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box,
+                                                              voice_info)
         if need_merge_video_file:
             need_merge_video_file_list.append(need_merge_video_file)
 
@@ -593,7 +582,9 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
 
     return failure_details, final_scene_output_path
 
-def gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_file_list, best_script, video_with_title_output_path):
+
+def gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_file_list, best_script,
+                    video_with_title_output_path):
     """
     生成带有标题以及场景的视频
     :param all_scene_video_path:
@@ -610,7 +601,6 @@ def gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_f
     if is_need_scene_title is False:
         print(f"{all_scene_video_path} 不需要生成带标题视频，直接返回原视频路径")
         return failure_details, all_scene_video_path
-
 
     new_script_scenes = best_script.get('场景顺序与新文案', [])
     video_abstract = best_script.get('video_abstract')
@@ -819,6 +809,7 @@ def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_scrip
         }
         return failure_details, video_path
 
+
 def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_info_dict, all_logical_scene_dict,
                          voice_info):
     """
@@ -894,8 +885,71 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
 
     return failure_details, final_scene_output_path
 
-def add_watermark_and_ending(video_path, output_path, watermark_path, ending_video_path):
-    pass
+
+def get_watermark_path(user_type: str, user_name: str) -> str:
+    """
+    生成合适的水印图片路径。
+    从 asset/ 目录中筛选包含 user_type 的 .png，按 user_name 的哈希稳定选择。
+    """
+    asset_dir = r'W:\project\python_project\auto_video\config\asset'
+    try:
+        all_files = os.listdir(asset_dir)
+    except FileNotFoundError:
+        print("⚠️ 未找到 asset 目录，使用默认水印。")
+        return r"W:\project\python_project\auto_video\config\asset\default_watermark.png"
+
+    user_type_map = {
+        '娱乐': 'fun',
+        '体育': 'sport',
+        '游戏': 'game'}
+
+    en_user_type = user_type_map.get(user_type, 'fun')
+    filtered_files = [f for f in all_files if en_user_type in f and f.endswith(".png")]
+    if not filtered_files:
+        print("⚠️ 未找到符合条件的水印图片，使用默认水印。")
+        return r"W:\project\python_project\auto_video\config\asset\default_watermark.png"
+
+    filtered_files.sort()
+    user_hash_hex = hashlib.sha256(user_name.encode("utf-8")).hexdigest()
+    user_hash_int = int(user_hash_hex, 16)
+    selected_index = user_hash_int % len(filtered_files)
+    selected_file = filtered_files[selected_index]
+    watermark_path = os.path.join(asset_dir, selected_file)
+    print(
+        f"{user_name} ✅ 使用水印图片 {watermark_path} 筛选池大小 {len(filtered_files)} {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    return watermark_path
+
+
+def add_watermark_and_ending(video_path, watermark_path, ending_video_path, voice_info, best_script, user_name,
+                             user_type):
+    failure_details = {}
+    base_dir = os.path.dirname(video_path)
+    current_video_path = video_path
+    temp_ending_video_path = os.path.join(base_dir, 'temp_ending_video.mp4')
+    origin_ending_video_path = r'W:\project\python_project\auto_video\config\origin_ending_video.mp4'
+    ending_text = best_script.get('upload_info', {}).get('introduction', {}).get('warm_close',
+                                                                                 "感谢观看本视频，欢迎点赞、评论、关注、投币、分享！")
+    start_time = time.time()
+    gen_ending_video(ending_text, temp_ending_video_path, origin_ending_video_path, voice_info)
+    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path)
+    print(f"生成结尾视频完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {ending_video_path}")
+
+    # 尝试生成结尾视频
+    if is_valid_target_file_simple(ending_video_path):
+        print(f"成功添加片尾视频，输出路径: {ending_video_path}")
+        current_video_path = ending_video_path
+
+    wm_path = get_watermark_path(user_type, user_name)
+    start_time = time.time()
+    add_transparent_watermark(current_video_path, wm_path, watermark_path)
+    print(f"添加水印完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {watermark_path}")
+
+    if is_valid_target_file_simple(watermark_path):
+        print(f"成功添加水印，输出路径: {watermark_path}")
+        current_video_path = watermark_path
+
+    return failure_details, current_video_path
+
 
 def merge_script_and_upload_info(video_script_info_list, upload_info_list):
     """
@@ -933,18 +987,21 @@ def gen_new_video(task_info, video_info_dict):
 
 
 
-    # if is_valid_target_file_simple(final_output_path):
-    #     print(f"已存在最终生成视频，跳过生成: {final_output_path}")
-    #     return failure_details
-
     # 准备好一些数据
     final_scene_info = task_info.get('final_scene_info', {})
+
+    video_script_info = task_info.get('video_script_info', {})
+
     upload_info_list = task_info.get('upload_info', {})
-    final_scene_info = merge_script_and_upload_info(final_scene_info, upload_info_list)
+    final_video_script_info = merge_script_and_upload_info(video_script_info, upload_info_list)
 
     all_logical_scene_dict, all_owner_asr_info_dict = build_all_need_data_map(video_info_dict)
-    video_script_info = task_info.get('video_script_info', {})
-    best_script = find_best_solution(video_script_info)
+    best_script = find_best_solution(final_video_script_info)
+
+    if is_valid_target_file_simple(final_output_path):
+        print(f"已存在最终生成视频，跳过生成: {final_output_path}")
+        return failure_details, best_script
+
     upload_info = best_script.get('upload_info', {})
     # 只保留upload_info的 mood_tags theme_tags pacing_tags 这三个字段
     tags = {
@@ -952,7 +1009,6 @@ def gen_new_video(task_info, video_info_dict):
         'theme_tags': upload_info.get('theme_tags', []),
         'pacing_tags': upload_info.get('pacing_tags', [])
     }
-
 
     voice_info = get_voice_info(tags)
 
@@ -974,7 +1030,7 @@ def gen_new_video(task_info, video_info_dict):
             voice_info
         )
         if check_failure_details(failure_details):
-            return failure_details
+            return failure_details, best_script
         all_scene_video_file_list.append(final_scene_output_path)
 
     # 合并所有场景视频
@@ -982,32 +1038,39 @@ def gen_new_video(task_info, video_info_dict):
     if not is_valid_target_file_simple(all_scene_video_path):
         merge_videos_ffmpeg(all_scene_video_file_list, output_path=all_scene_video_path)
 
-
     # 生成带有标题的视频
     is_need_scene_title = task_info.get('creation_guidance_info', {}).get('is_need_scene_title', True)
     video_with_title_output_path = all_task_video_path_info.get('video_with_title_output_path')
-    failure_details, current_video_path = gen_title_video(is_need_scene_title, all_scene_video_path, all_scene_video_file_list, best_script, video_with_title_output_path)
+    failure_details, current_video_path = gen_title_video(is_need_scene_title, all_scene_video_path,
+                                                          all_scene_video_file_list, best_script,
+                                                          video_with_title_output_path)
     if check_failure_details(failure_details):
-        return failure_details
-
-
+        return failure_details, best_script
 
     # 生成带有bgm的视频
     video_with_bgm_output_path = all_task_video_path_info.get('video_with_bgm_output_path')
-    failure_details, current_video_path = gen_video_with_bgm(current_video_path, video_with_bgm_output_path, video_info_dict, new_script_scenes, tags)
+    failure_details, current_video_path = gen_video_with_bgm(current_video_path, video_with_bgm_output_path,
+                                                             video_info_dict, new_script_scenes, tags)
     if check_failure_details(failure_details):
-        return failure_details
+        return failure_details, best_script
 
-
+    # 增加结尾祝福以及水印
+    video_with_ending_output_path = all_task_video_path_info.get('video_with_ending_output_path')
+    video_with_watermark_output_path = all_task_video_path_info.get('video_with_watermark_output_path')
+    failure_details, current_video_path = add_watermark_and_ending(current_video_path,
+                                                                   watermark_path=video_with_watermark_output_path,
+                                                                   ending_video_path=video_with_ending_output_path,
+                                                                   voice_info=voice_info, best_script=best_script,
+                                                                   user_name=task_info.get('userName', 'user'),
+                                                                   user_type=task_info.get('creation_guidance_info',
+                                                                                           {}).get('video_type',
+                                                                                                   '娱乐'))
+    if check_failure_details(failure_details):
+        return failure_details, best_script
 
     # 将current_video_path复制到final_output_path
     shutil.copyfile(current_video_path, final_output_path)
-    return failure_details
-
-
-
-
-
+    return failure_details, best_script
 
 
 def gen_video_by_script(task_info, video_info_dict):
@@ -1028,13 +1091,8 @@ def gen_video_by_script(task_info, video_info_dict):
     if check_failure_details(failure_details):
         return failure_details, chosen_script
 
-
     failure_details, chosen_script = gen_new_video(task_info, video_info_dict)
     if check_failure_details(failure_details):
         return failure_details, chosen_script
 
-
-
-
     return failure_details, chosen_script
-

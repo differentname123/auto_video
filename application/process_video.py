@@ -19,6 +19,7 @@ import traceback
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
     gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp, gen_upload_info_llm
 from application.video_process import gen_video_by_script
+from utils.bilibili.bili_utils import check_duplicate_video
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
     clip_and_merge_segments
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
@@ -413,6 +414,17 @@ def prepare_basic_video_info(video_info_dict):
                 video_info['comment_list'] = fetched_comments
             print(f"视频 {video_id} 的基础信息准备完成。{log_pre}")
 
+            # 判断is_duplicate是否已经存在，避免重复计算
+            is_duplicate = video_info.get('is_duplicate')
+            if is_duplicate is None:
+                is_duplicate = check_duplicate_video(video_info.get('metadata')[0])
+                video_info['is_duplicate'] = is_duplicate
+
+
+
+
+
+
         except Exception as e:
             error_info = f"严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
             failure_details[video_id] = {
@@ -521,24 +533,24 @@ def process_single_task(task_info, manager, gen_video=False):
     # 准备好相应的视频数据
     failure_details, video_info_dict = gen_video_info_dict(task_info, manager)
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
 
     # 确保基础数据存在，比如视频文件，评论等
     failure_details, video_info_dict = prepare_basic_video_info(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='prepare_basic_video_error')
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
 
     # 生成后续需要处理的派生视频，删除指定片段主要是静态去除以及降低分辨率后的视频
     failure_details = gen_derive_videos(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='gen_derive_error')
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
 
     # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
     failure_details = gen_extra_info(video_info_dict, manager)
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
     print(f"任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
@@ -546,14 +558,14 @@ def process_single_task(task_info, manager, gen_video=False):
     # 生成新的视频脚本方案
     failure_details = gen_video_script(task_info, video_info_dict, manager)
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
     print(f"任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
     # 生成投稿所需的信息
     failure_details = gen_upload_info(task_info, video_info_dict, manager)
     if check_failure_details(failure_details):
-        return failure_details, video_info_dict
+        return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
     print(f"任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -561,7 +573,7 @@ def process_single_task(task_info, manager, gen_video=False):
         # 根据方案生成最终视频
         failure_details, chosen_script = gen_video_by_script(task_info, video_info_dict)
         if check_failure_details(failure_details):
-            return failure_details, video_info_dict
+            return failure_details, video_info_dict, chosen_script
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     return failure_details, video_info_dict, chosen_script
