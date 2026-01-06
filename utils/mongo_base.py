@@ -254,11 +254,11 @@ def gen_db_object():
     生成连接的实例
     :return:
     """
-    HOST = get_config("mongo_host")
-    PORT = get_config("mongo_port")
-    USERNAME = get_config("mongo_user")
-    PASSWORD = get_config("mongo_password")
-    DB_NAME = get_config("mongo_db_name")
+    HOST = get_config("local_mongo_host")
+    PORT = get_config("local_mongo_port")
+    USERNAME = get_config("local_mongo_user")
+    PASSWORD = get_config("local_mongo_password")
+    DB_NAME = get_config("local_mongo_db_name")
     mongo_instance = MongoBase(
         host=HOST,
         port=PORT,

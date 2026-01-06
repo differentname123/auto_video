@@ -13,7 +13,7 @@ import traceback
 from datetime import datetime
 from collections import defaultdict
 
-from application.process_video import process_single_task
+from application.process_video import process_single_task, query_need_process_tasks
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths
 from utils.common_utils import read_json, is_valid_target_file_simple
 from utils.mongo_base import gen_db_object
@@ -109,9 +109,18 @@ def auto_upload(manager):
     进行单次循环的投稿
     :return:
     """
-    tobe_upload_video_info_file = r'W:\project\python_project\auto_video\config\tobe_upload_video_info.json'
-    tobe_upload_video_info = read_json(tobe_upload_video_info_file)
-    tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
+    for i in range(10):
+        start_time = time.time()
+        tobe_upload_video_info_file = r'W:\project\python_project\auto_video\config\tobe_upload_video_info.json'
+        tobe_upload_video_info = read_json(tobe_upload_video_info_file)
+        tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
+        print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
+        start_time = time.time()
+
+        tasks_to_process = query_need_process_tasks()
+        print(f"找到 {len(tasks_to_process)} 个待处理任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
+
+    return
 
     now = datetime.now()
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
