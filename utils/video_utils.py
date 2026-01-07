@@ -1224,7 +1224,7 @@ def save_frames_around_timestamp(
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ret, frame = cap.read()
         if not ret:
-            print(f"警告：读取帧 {idx} 失败，跳过")
+            print(f"警告：读取帧 {idx} 失败，跳过 {video_path}")
             continue
 
         # BGR 转 RGB 并保存
