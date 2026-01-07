@@ -18,6 +18,7 @@ from collections import defaultdict
 from typing import Dict, List, Any, Optional
 
 import cv2
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -45,7 +46,7 @@ def gen_user_upload_info(uploaded_tasks_today):
 
     for task in uploaded_tasks_today:
         user_name = task['userName']
-        upload_time = task['upload_time']
+        upload_time = task['uploaded_time']
         play_count = task.get('play_count', None)
 
         # 更新数据
@@ -98,22 +99,6 @@ def sort_tasks(existing_video_tasks, not_existing_video_tasks, user_info_map):
     # 合并列表，existing 在前
     return existing_video_tasks + not_existing_video_tasks, existing_video_tasks, not_existing_video_tasks
 
-def gen_video_and_upload(task_info, manager):
-    """
-    生成视频并进行投稿
-    :param task_info:
-    :return:
-    """
-    failure_details = {}
-    upload_params = {}
-    all_task_video_path_info = build_task_video_paths(task_info)
-    final_output_path = all_task_video_path_info['final_output_path']
-    if not is_valid_target_file_simple(final_output_path):
-        failure_details, video_info_dict = process_single_task(task_info, manager, gen_video=True)
-    if check_failure_details(failure_details):
-        return failure_details, upload_params
-
-    # 继续加工视频，主要是进行水印的增加以及ending的添加
 
 def check_type(task_info, user_config):
     """
@@ -232,6 +217,10 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
 
     right_now_user_list = user_config.get('right_now_user_list', [])
     if user_name not in right_now_user_list:
+        if not (5 <= datetime.now().hour < 24):
+            cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
+            print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
+
         need_waite_minutes = get_wait_minutes()
         latest_upload_time = user_upload_info.get(user_name, {}).get('latest_upload_time', datetime.min)
         # 计算和上次投稿的差值分数数
@@ -496,53 +485,49 @@ def upload_worker(
         print(f"❌ 后台投稿失败 user={userName} video_id_list={video_id_list}：{err}")
 
 
-def print_formatted_stats_rich(statistic_data):
-    """
-    使用 Rich 库完美打印统计信息（自动处理中英文对齐 + 颜色美化）
-    """
+def print_simple_stats(statistic_data):
     if not statistic_data:
         print("暂无统计数据")
         return
+    header = (
+        "用户名            "  # 6个空格
+        "  今日已投 "  # 2个空格
+        "  平台存量 "  # 2个空格
+        "  准备就绪 "  # 2个空格
+        "  今日待传   "  # 2个空格
+        "  明日待传 "  # 2个空格
+        "         最近上传时间"  # 9个空格
+    )
 
-    # 1. 创建表格对象
-    table = Table(title="用户上传统计日报")
+    separator = "-" * 83
 
-    # 2. 设置列 (justify控制对齐: left/right/center)
-    # style可以设置颜色，no_wrap=True 防止内容换行
-    table.add_column("用户名", justify="left", style="cyan", no_wrap=True)
-    table.add_column("今日已投", justify="right", style="magenta")
-    table.add_column("平台存量", justify="right", style="green")
-    table.add_column("准备就绪", justify="right", style="green")
-    table.add_column("今日待传", justify="right", style="yellow")
-    table.add_column("明日待传", justify="right", style="blue")
-    table.add_column("最近上传时间", justify="center")
+    print(separator)
+    print(header)
+    print(separator)
 
-    # 3. 准备数据并排序
     sorted_users = sorted(
         statistic_data.keys(),
         key=lambda u: statistic_data[u].get('today_upload_count', 0),
         reverse=True
     )
 
-    # 4. 填充行
-    for user_name in sorted_users:
-        info = statistic_data[user_name]
+    for user in sorted_users:
+        info = statistic_data[user]
+        time_str = str(info.get('latest_upload_time') or '-')
 
-        # 提取数据，转为字符串（Rich通常需要字符串输入，或者数字）
-        row = [
-            str(user_name),
-            str(info.get('today_upload_count', 0)),
-            str(info.get('platform_upload_count', 0)),
-            str(info.get('tobe_upload_count', 0)),
-            str(info.get('today_process', 0)),
-            str(info.get('tomorrow_process', 0)),
-            str(info.get('latest_upload_time', '-') or '-')  # 处理 0 或 None
-        ]
-        table.add_row(*row)
+        # 这里保持全是 ASCII 字符（英文/数字），所以 Python 的宽度计算是准确的
+        row = (
+            f"{user:<12}"  # 对应 "用户名      "
+            f"{info.get('today_upload_count', 0):>10}"  # 对应 "  今日已投"
+            f"{info.get('platform_upload_count', 0):>10}"  # 对应 "  平台存量"
+            f"{info.get('tobe_upload_count', 0):>10}"  # 对应 "  准备就绪"
+            f"{info.get('today_process', 0):>10}"  # 对应 "  今日待传"
+            f"{info.get('tomorrow_process', 0):>10}"  # 对应 "  明日待传"
+            f"{time_str:>21}"  # 对应 "         最近上传时间"
+        )
+        print(row)
 
-    # 5. 打印
-    console = Console()
-    console.print(table)
+    print(separator)
 
 def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_tasks_list, tobe_upload_video_info):
     """
@@ -581,10 +566,16 @@ def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_
                 user_statistic_info[user_name]['today_process'] = 0
             user_statistic_info[user_name]['today_process'] += 1
 
+    # 将user_statistic_info中的latest_upload_time转换成字符串格式
+    for user_name, info in user_statistic_info.items():
+        latest_time = info.get('latest_upload_time')
+        if isinstance(latest_time, datetime):
+            info['latest_upload_time'] = latest_time.strftime('%Y-%m-%d %H:%M:%S')
+
     save_json(USER_STATISTIC_INFO_PATH, user_statistic_info)
     # 规范的打印出来这个统计信息
 
-    print_formatted_stats_rich(user_statistic_info)
+    print_simple_stats(user_statistic_info)
     return user_statistic_info
 
 
@@ -610,13 +601,12 @@ def auto_upload(manager):
     uploaded_tasks_today = manager.find_tasks_after_time_with_status(today_midnight, [TaskStatus.UPLOADED])
     user_upload_info = gen_user_upload_info(uploaded_tasks_today)
 
-
     sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info)
     for task_info in sort_tasks_to_upload:
         check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
         user_name = task_info.get('userName')
-        if user_name != 'mama':
-            continue
+        # if user_name != 'mama':
+        #     continue
         if not check_result:
             continue
         # if str(task_info.get('_id')) != '695c09dff0315fd8f1bc08d3':

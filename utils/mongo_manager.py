@@ -85,7 +85,7 @@ class MongoManager:
         # 3. 构建查询条件
         # MongoDB 隐式的 AND 操作：同时满足 upload_time > target_time 和 status in status_list
         query = {
-            "upload_time": {
+            "uploaded_time": {
                 "$gt": target_time  # $gt (greater than) 大于
             },
             "status": {
