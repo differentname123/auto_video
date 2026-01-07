@@ -127,7 +127,7 @@ class MongoManager:
         """
         query = {
             "status": {
-                "$ne": "已完成"  # 使用 $ne (not equal) 操作符
+                "$ne": "已投稿"  # 使用 $ne (not equal) 操作符
             }
         }
         # 同时，我们也可以排除那些根本没有 status 字段的旧数据（可选，但建议）

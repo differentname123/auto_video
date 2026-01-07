@@ -320,3 +320,8 @@ def fix_split_time_points(remove_time_segments_ms, split_time_points):
                 fixed_split_time_points.append(new_point)
 
     return fixed_split_time_points
+
+
+BVID_FILE_PATH = r'W:\project\python_project\auto_video\config\bvid_file.json' # 用于存放拉取到的平台视频数据，方便进行播放量统计以及计算时间投稿成功的数量
+
+USER_STATISTIC_INFO_PATH = r'W:\project\python_project\auto_video\config\user_upload_info.json' # 用于存放用户的统计信息
