@@ -959,7 +959,7 @@ def gen_hudong_by_llm(video_path, video_info):
     desc = f"\n已有评论列表 (数字表示已获赞数量): {temp_comments}"
     # 模型选择逻辑（与原版保持一致）
     max_duration = 600
-    model_name = "gemini-flash-latest"
+    model_name = "gemini-3-flash-preview"
     if duration > max_duration:
         # 即使超过时长，模型名也没变，但保留打印语句
         print(f"视频时长 {duration} 秒超过最大限制 {max_duration} 秒，使用默认处理方式。  {log_pre}")
