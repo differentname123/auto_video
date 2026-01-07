@@ -23,7 +23,8 @@ from utils.bilibili.find_paid_topics import get_all_paid_topics
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
-from utils.video_utils import probe_duration, get_scene, save_frames_around_timestamp
+from utils.video_utils import probe_duration, get_scene, \
+    save_frames_around_timestamp_ffmpeg
 
 
 def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames,
@@ -291,7 +292,7 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         video_filename = os.path.splitext(os.path.basename(video_path))[0]
         output_dir = os.path.join(os.path.dirname(video_path), f'{video_filename}_scenes')
         # 1. 保存关键帧 (涉及IO，易报错)
-        image_path_list = save_frames_around_timestamp(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
+        image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
         # 2. 运行OCR (涉及显存/模型，易报错)
         ocr = SubtitleOCR(use_gpu=True)

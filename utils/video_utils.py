@@ -3299,3 +3299,168 @@ def create_enhanced_cover(
         print("FFMPEG 输出 (stderr):")
         print(e.stderr)
         return None
+
+
+def get_video_info(video_path: str):
+    """
+    使用 ffprobe 获取视频的 FPS 和总时长
+    """
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=r_frame_rate,duration,nb_frames",
+        "-of", "json",
+        video_path
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        info = json.loads(result.stdout)
+        stream = info["streams"][0]
+
+        # 计算 FPS (处理 "60000/1001" 这种分数格式)
+        fps_str = stream.get("r_frame_rate", "30/1")
+        if '/' in fps_str:
+            num, den = map(float, fps_str.split('/'))
+            fps = num / den if den != 0 else 0
+        else:
+            fps = float(fps_str)
+
+        # 获取总帧数 (nb_frames 有时为空，需要容错)
+        nb_frames = stream.get("nb_frames")
+        if nb_frames:
+            total_frames = int(nb_frames)
+        else:
+            # 如果读不到总帧数，尝试用 时长 * fps 估算
+            duration = float(stream.get("duration", 0))
+            total_frames = int(duration * fps)
+
+        return fps, total_frames
+    except Exception as e:
+        raise ValueError(f"无法获取视频信息，请检查 ffprobe 是否安装或视频路径: {e}")
+
+
+def save_frames_around_timestamp_ffmpeg(
+        video_path: str,
+        timestamp,
+        num_frames: int,
+        output_dir: str,
+        time_duration_s=None
+) -> List[str]:
+    """
+    使用 FFmpeg 从视频中在给定时间戳前后各截取 num_frames 帧。
+    逻辑尽量模拟 OpenCV 版本：如果所有目标文件都已存在，则跳过 FFmpeg 执行。
+    """
+
+    # 1. 准备数据
+    ts_target_sec = float(timestamp)
+
+    # 获取视频信息 (假设 get_video_info 返回 fps, total_frames)
+    # 这里的 probe_video 和 get_video_info 需要你自己提供或实现
+    # video_info = probe_video(video_path)
+    fps, total_frames = get_video_info(video_path)
+
+    if fps <= 0:
+        raise ValueError("无效的 FPS")
+
+    if time_duration_s:
+        num_frames = int(fps * time_duration_s)
+
+    # 2. 计算截取范围 (Index)
+    target_idx = int(round(ts_target_sec * fps))
+    start_idx = max(0, target_idx - num_frames)
+    # 限制 end_idx，防止超出视频末尾
+    end_idx = min(total_frames - 1, target_idx + num_frames)
+
+    extract_count = end_idx - start_idx + 1
+
+    if extract_count <= 0:
+        return []
+
+    # 3. 预先计算所有目标文件路径，检查是否需要执行
+    os.makedirs(output_dir, exist_ok=True)
+
+    saved_paths = []
+    missing_files = False  # 标记是否缺少文件
+
+    # 用于后续重命名的映射列表: [(frame_idx, output_path), ...]
+    frame_map = []
+
+    print(f"FPS: {fps}, 目标时间: {ts_target_sec}s, 截取范围: {start_idx} - {end_idx} {video_path}")
+
+    for i in range(extract_count):
+        current_idx = start_idx + i
+        current_sec = current_idx / fps
+        current_ms = int(current_sec * 1000)
+        filename = f"frame_{current_ms}.png"
+        out_path = os.path.join(output_dir, filename)
+
+        frame_map.append((current_idx, out_path))
+        saved_paths.append(out_path)
+
+        if not os.path.exists(out_path):
+            missing_files = True
+
+    # --- 逻辑对齐点：如果所有文件都存在，直接返回，不运行 FFmpeg ---
+    if not missing_files:
+        # print("所有文件已存在，跳过提取。") # 可选日志
+        return saved_paths
+
+    # 4. 只有当确实缺文件时，才配置并运行 FFmpeg
+
+    # FFmpeg start_time
+    start_time_sec = start_idx / fps
+    # print(f"FFmpeg Seek 时间点: {start_time_sec:.3f}s") # 调试用，为了对齐旧日志可不打
+
+    temp_dir = os.path.join(output_dir, "temp_ffmpeg_out")
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+    os.makedirs(temp_dir, exist_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss", f"{start_time_sec:.6f}",
+        "-i", video_path,
+        "-frames:v", str(extract_count),
+        "-vsync", "0",
+        "-q:v", "2",
+        "-f", "image2",  # 显式指定格式
+        os.path.join(temp_dir, "%05d.png")
+    ]
+
+    try:
+        # 捕获输出以保持洁癖，出错再打印
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg 获取指定时间戳周围图片执行出错: {e.stderr.decode()}")
+        # 清理临时目录
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        return []
+
+    # 5. 重命名并移动文件
+    temp_files = sorted(os.listdir(temp_dir))
+
+    # 安全检查：FFmpeg 产出的数量可能少于预期（例如到了视频末尾）
+    count_to_move = min(len(temp_files), len(frame_map))
+
+    for i in range(count_to_move):
+        temp_filename = temp_files[i]
+        src_path = os.path.join(temp_dir, temp_filename)
+
+        # 从之前的映射中取出目标路径
+        _, final_path = frame_map[i]
+
+        # 移动并覆盖 (shutil.move 在目标存在时行为取决于系统，建议先删后移或直接copy)
+        if os.path.exists(final_path):
+            os.remove(final_path)
+
+        shutil.move(src_path, final_path)
+        # print(f"已保存: {os.path.basename(final_path)}")
+
+    # 清理
+    shutil.rmtree(temp_dir)
+
+    # 返回完整的路径列表（包含本来就存在的和新覆盖的）
+    return saved_paths

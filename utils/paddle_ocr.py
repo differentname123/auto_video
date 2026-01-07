@@ -1,7 +1,9 @@
 # ocr_engine.py
 # -- coding: utf-8 --
+import gc
 import os
 import sys
+import threading
 import time
 import traceback
 from typing import List
@@ -19,6 +21,8 @@ from utils.common_utils import time_to_ms
 class SubtitleOCR:
     _engine_instance = None
     _current_mode = None  # 记录当前是 GPU 还是 CPU
+    _init_lock = threading.Lock()  # 【新增】全局初始化锁，确保线程安全
+    _inference_semaphore = threading.Semaphore(1)
 
     # 锚定模型根目录：无论在哪里调用，都以本文件所在位置为基准
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,57 +33,86 @@ class SubtitleOCR:
 
     def _get_engine(self):
         """
-        获取引擎实例。如果实例不存在，则初始化。
+        【修改版】获取引擎实例。
+        采用了双重检查锁定 (Double-Checked Locking) 机制，
+        彻底解决多线程并发导致的多次初始化和显存溢出问题。
         """
-        # 1. 检查是否已存在且模式匹配
+        # 第一层检查：如果实例存在且模式匹配，直接返回，避免进入锁（高性能）
         if SubtitleOCR._engine_instance is not None:
             if SubtitleOCR._current_mode == self.use_gpu:
                 return SubtitleOCR._engine_instance
-            else:
-                # 模式切换了（如 CPU -> GPU），需要销毁重建
-                print("Mode changed. Resetting engine...")
+
+        # 加锁：防止多个线程同时进入初始化逻辑
+        with SubtitleOCR._init_lock:
+            # 第二层检查：进入锁后再次检查，防止在排队等待锁的过程中，前一个线程已经完成了初始化
+            if SubtitleOCR._engine_instance is not None:
+                if SubtitleOCR._current_mode == self.use_gpu:
+                    return SubtitleOCR._engine_instance
+                else:
+                    # 模式切换（如CPU变GPU），需要销毁旧实例
+                    print("Mode changed. Cleaning up old engine...")
+                    del SubtitleOCR._engine_instance
+                    SubtitleOCR._engine_instance = None
+                    gc.collect()  # 强制回收内存
+
+            # --- 开始初始化逻辑 ---
+            det_path = os.path.join(self.MODELS_DIR, "detection", "v5", "det.onnx")
+            rec_path = os.path.join(self.MODELS_DIR, "languages", "chinese", "rec.onnx")
+            keys_path = os.path.join(self.MODELS_DIR, "languages", "chinese", "dict.txt")
+
+            if not all(os.path.exists(p) for p in [det_path, rec_path, keys_path]):
+                print(f"Missing models in {self.MODELS_DIR}")
+                return None
+
+            try:
+                mode_str = "GPU" if self.use_gpu else "CPU"
+                print(f"Initializing RapidOCR in {mode_str} mode (Thread Safe)...")
+
+                engine = RapidOCR(
+                    det_model_path=det_path,
+                    cls_model_path=None,
+                    rec_model_path=rec_path,
+                    rec_keys_path=keys_path,
+                    use_angle_cls=False,
+                    det_use_cuda=self.use_gpu,
+                    cls_use_cuda=self.use_gpu,
+                    rec_use_cuda=self.use_gpu
+                )
+
+                # 赋值给类变量
+                SubtitleOCR._engine_instance = engine
+                SubtitleOCR._current_mode = self.use_gpu
+                print("Engine initialized successfully.")
+                return engine
+            except Exception as e:
+                print(f"Failed to initialize engine: {e}")
+                traceback.print_exc()
+                # 初始化失败，确保清理干净
                 SubtitleOCR._engine_instance = None
-
-        # 2. 路径检查 (使用绝对路径，确保健壮性)
-        det_path = os.path.join(self.MODELS_DIR, "detection", "v5", "det.onnx")
-        rec_path = os.path.join(self.MODELS_DIR, "languages", "chinese", "rec.onnx")
-        keys_path = os.path.join(self.MODELS_DIR, "languages", "chinese", "dict.txt")
-
-        if not all(os.path.exists(p) for p in [det_path, rec_path, keys_path]):
-            # 这里记录错误但不抛出崩溃异常，稍后在调用处处理
-            print(f"Missing models in {self.MODELS_DIR}")
-            return None
-
-        # 3. 加载模型
-        try:
-            mode_str = "GPU" if self.use_gpu else "CPU"
-            print(f"Initializing RapidOCR in {mode_str} mode...")
-
-            engine = RapidOCR(
-                det_model_path=det_path,
-                cls_model_path=None,
-                rec_model_path=rec_path,
-                rec_keys_path=keys_path,
-                use_angle_cls=False,
-                det_use_cuda=self.use_gpu,
-                cls_use_cuda=self.use_gpu,
-                rec_use_cuda=self.use_gpu
-            )
-            SubtitleOCR._engine_instance = engine
-            SubtitleOCR._current_mode = self.use_gpu
-            print("Engine initialized successfully.")
-            return engine
-        except Exception as e:
-            print(f"Failed to initialize engine: {e}")
-            traceback.print_exc()
-            return None
+                gc.collect()
+                return None
 
     def _reset_engine(self):
         """
-        强制重置引擎，用于处理底层崩溃后的自愈
+        【修改版】强制重置引擎。
+        增加了锁机制和显式垃圾回收，确保旧的显存占用被释放。
         """
-        print("Resetting OCR Engine instance due to internal error...")
-        SubtitleOCR._engine_instance = None
+        with SubtitleOCR._init_lock:
+            # 再次检查，防止重复重置
+            if SubtitleOCR._engine_instance is not None:
+                print("Resetting OCR Engine instance due to internal error...")
+                try:
+                    # 删除引用
+                    del SubtitleOCR._engine_instance
+                except:
+                    pass
+
+                # 置空并强制GC
+                SubtitleOCR._engine_instance = None
+                SubtitleOCR._current_mode = None
+                gc.collect()
+                print("Engine reset and memory collected.")
+
 
     def _select_best_subtitle_strict(
             self,
@@ -211,6 +244,7 @@ class SubtitleOCR:
         保证不抛出异常，返回标准 JSON 结构。
         集成了严格的 find_subtitle 几何筛选逻辑。
         """
+        print(f"Starting batch OCR for {len(image_path_list)} images...")
         # 整体结果容器
         response = {
             "code": 0,
@@ -271,19 +305,25 @@ class SubtitleOCR:
 
                 # 2. 推理
                 ocr_result = []
-                try:
-                    # rapidocr/paddleocr返回结构通常是 [dt_boxes, rec_res] 或 直接 list
-                    # 这里假设返回的是标准的 list of [box, text, score] 结构
-                    result_raw, _ = engine(img_numpy)
-                    ocr_result = result_raw if result_raw else []
-                except Exception as e_engine:
-                    print(f"Inference error on {os.path.basename(img_path)}, retrying...")
-                    self._reset_engine()
-                    engine = self._get_engine()
-                    if engine:
-                        ocr_result, _ = engine(img_numpy)
-                    else:
-                        raise Exception("Engine reload failed")
+
+                # 【关键修改】在此处使用信号量，确保同一时刻只有一个线程在使用 GPU 推理
+                # 这会解决显存飙升到 20G 的问题，因为其他线程会在这里排队等待
+                with SubtitleOCR._inference_semaphore:
+                    try:
+                        # rapidocr/paddleocr返回结构通常是 [dt_boxes, rec_res] 或 直接 list
+                        # 这里假设返回的是标准的 list of [box, text, score] 结构
+                        result_raw, _ = engine(img_numpy)
+                        ocr_result = result_raw if result_raw else []
+                    except Exception as e_engine:
+                        # 保留了你原始的日志
+                        print(f"Inference error on {os.path.basename(img_path)}, retrying...")
+                        self._reset_engine()
+                        engine = self._get_engine()
+                        if engine:
+                            # 再次尝试推理（仍在信号量保护范围内，安全）
+                            ocr_result, _ = engine(img_numpy)
+                        else:
+                            raise Exception("Engine reload failed")
 
                 # 3. 结果筛选与格式化
                 if ocr_result:
@@ -643,12 +683,13 @@ if __name__ == "__main__":
     # 模拟路径 (请确保这些文件存在，或修改为你的真实路径进行测试)
     # 故意包含一个不存在的图片来测试健壮性
     test_images = [
-        r"W:\project\python_project\watermark_remove\common_utils\video_scene\scenes\52.267\frame_1565_time_00_00_52_166.png",
-        r"W:\project\python_project\watermark_remove\common_utils\video_scene\scenes\52.267\frame_1565_time_00_00_52_166.png",
-        r"W:\project\python_project\watermark_remove\common_utils\video_scene\scenes\52.267\frame_1565_time_00_00_52_166.png",
-        r"W:\project\python_project\watermark_remove\common_utils\video_scene\scenes\52.267\frame_1565_time_00_00_52_166.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
 
     ]
+
 
     print("\n--- Starting Safe Batch OCR ---")
     # # 这一步绝对不会报错，只会返回 JSON

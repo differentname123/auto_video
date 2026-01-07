@@ -579,6 +579,58 @@ def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_
     return user_statistic_info
 
 
+def process_idle_tasks(
+        tasks: list,
+        tobe_upload_video_info: dict,
+        futures: List[concurrent.futures.Future],
+        config_map: dict,
+        user_config: dict,
+        manager
+):
+    """
+    利用上传等待的空闲时间，处理未生成视频的任务
+    """
+    total_candidates = len(tasks)
+    start_time = time.time()
+    print(
+        f"开始处理 {total_candidates} 个未生成视频的任务 利用空闲时间...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    count = 0
+    for task_info in tasks:
+        count += 1
+        user_name = task_info.get('userName')
+        # 注意：修正了原代码f-string中引号嵌套的潜在兼容性问题
+        print(f"处理用户 {user_name} 的任务{task_info.get('video_id_list', [])}...已有的数量{tobe_upload_video_info.get(user_name)} 进度 {count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+
+        # 生成视频核心逻辑
+        gen_video(task_info, config_map, user_config, manager)
+
+        # 计算时间与状态
+        processing_duration = time.time() - start_time
+        pending_uploads_count = sum(1 for f in futures if not f.done())
+        is_uploading = pending_uploads_count > 0
+
+        # 更新统计信息 (引用传递，会同步修改外部字典)
+        if user_name not in tobe_upload_video_info:
+            tobe_upload_video_info[user_name] = 0
+        tobe_upload_video_info[user_name] += 1
+
+        print(
+            f"处理完成，处理用户 {user_name} 的任务{task_info.get('video_id_list', [])} 耗时 {processing_duration:.2f} 秒，当前待上传任务数 {pending_uploads_count}，是否有上传任务正在进行: {is_uploading} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+
+        # 核心退出逻辑：如果处理时间超过200秒且没有后台上传在进行，则结束“压榨算力”
+        if processing_duration > 200 and not is_uploading:
+            print(
+                f"🎉 【有效处理完成】 任务 '{task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. 且无后台投稿。 进度 {count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            print("   - 目标达成，备用处理流程结束。")
+            break
+
+        if processing_duration > 200:
+            print(
+                f"   ⚡ [算力压榨] 耗时已超 {processing_duration:.2f}s，利用 {pending_uploads_count} 个后台上传间隙继续处理...")
+        else:
+            print(f"   ⚡ 未进行实际的处理 处理太快了 {processing_duration:.2f}s，继续处理...")
+
+
 def auto_upload(manager):
     """
     进行单次循环的投稿
@@ -589,6 +641,8 @@ def auto_upload(manager):
     config_map = build_user_config()
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     start_time = time.time()
+
+    # 1. 获取并统计任务
     tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
     print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
     existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload)
@@ -601,22 +655,26 @@ def auto_upload(manager):
     uploaded_tasks_today = manager.find_tasks_after_time_with_status(today_midnight, [TaskStatus.UPLOADED])
     user_upload_info = gen_user_upload_info(uploaded_tasks_today)
 
-    sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info)
+    sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks,
+                                                                                                not_existing_video_tasks,
+                                                                                                tobe_upload_video_info)
+
+    # 2. 循环提交上传任务
     for task_info in sort_tasks_to_upload:
-        check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
+        check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config,
+                                         config_map)
         user_name = task_info.get('userName')
-        # if user_name != 'mama':
-        #     continue
+
         if not check_result:
             continue
-        # if str(task_info.get('_id')) != '695c09dff0315fd8f1bc08d3':
-        #     continue
 
-        failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config, manager)
+        failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config,
+                                                                                   manager)
         print(upload_params)
         if not chosen_script:
             print(f"❌ 生成视频失败，跳过上传 {task_info.get('video_id_list', [])} 用户 {user_name} ")
             continue
+
         all_files_to_cleanup = []
         account_executor = account_executors[user_name]
         future = account_executor.submit(
@@ -630,37 +688,22 @@ def auto_upload(manager):
         futures.append(future)
         already_upload_users.append(user_name)
 
-    total_candidates = len(sort_not_existing_video_tasks)
-    start_time = time.time()
-    print(f"开始处理 {total_candidates} 个未生成视频的任务 利用空闲时间...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    for task_info in sort_not_existing_video_tasks:
-        user_name = task_info.get('userName')
-        print(f"处理用户 {user_name} 的任务{task_info.get("video_id_list", [])}...已有的数量{tobe_upload_video_info.get(user_name)}当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
-        gen_video(task_info, config_map, user_config, manager)
-        processing_duration = time.time() - start_time
-        pending_uploads_count = sum(1 for f in futures if not f.done())
-        is_uploading = pending_uploads_count > 0
-        if user_name not in tobe_upload_video_info:
-            tobe_upload_video_info[user_name] = 0
-        tobe_upload_video_info[user_name] += 1
-        print(f"处理完成，处理用户 {user_name} 的任务{task_info.get("video_id_list", [])} 耗时 {processing_duration:.2f} 秒，当前待上传任务数 {pending_uploads_count}，是否有上传任务正在进行: {is_uploading} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+    # 3. 【重构点】利用上传间隙，处理未生成视频的任务
+    process_idle_tasks(
+        tasks=sort_not_existing_video_tasks,
+        tobe_upload_video_info=tobe_upload_video_info,
+        futures=futures,
+        config_map=config_map,
+        user_config=user_config,
+        manager=manager
+    )
 
-        if processing_duration > 200 and not is_uploading:
-            print(f"🎉 【有效处理完成】 任务 '{task_info.get("video_id_list", [])}' 耗时 {processing_duration:.2f} 秒. 且无后台投稿。")
-            print("   - 目标达成，备用处理流程结束。")
-            break
-
-        # 如果超时但正在上传，这里可以补一句简单的日志（可选，不写也不影响逻辑）
-        if processing_duration > 200:
-            print(
-                f"   ⚡ [算力压榨] 耗时已超 {processing_duration:.2f}s，利用 {pending_uploads_count} 个后台上传间隙继续处理...")
-        else:
-            print(f"   ⚡ 未进行实际的处理 处理太快了 {processing_duration:.2f}s，继续处理...")
-
-
-
-    print(f"等待所有等待后台上传完成... 本轮投稿数量 {len(already_upload_users)}  用户{already_upload_users}  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} {error_user_map}")
+    # 4. 收尾与统计
+    print(
+        f"等待所有等待后台上传完成... 本轮投稿数量 {len(already_upload_users)}  用户{already_upload_users}  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} {error_user_map}")
     need_process_tasks = query_need_process_tasks()
+
+    # 注意：tobe_upload_video_info 在 process_idle_tasks 中可能被修改，这里使用修改后的值，逻辑正确
     gen_all_statistic_info(already_upload_users, user_upload_info, need_process_tasks, tobe_upload_video_info)
     concurrent.futures.wait(futures, timeout=None)
 

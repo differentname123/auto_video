@@ -26,7 +26,8 @@ from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
-    add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark
+    add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark, \
+    save_frames_around_timestamp
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -1097,3 +1098,10 @@ def gen_video_by_script(task_info, video_info_dict):
         return failure_details, chosen_script
 
     return failure_details, chosen_script
+
+
+if __name__ == "__main__":
+    video_path = r"W:\project\python_project\auto_video\videos\material\7214445666997767480\7214445666997767480_static_cut.mp4"
+    output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+
+    save_frames_around_timestamp(video_path, 64992 / 1000, 30, output_dir, time_duration_s=1)
