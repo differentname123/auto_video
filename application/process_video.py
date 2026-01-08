@@ -139,7 +139,7 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
         # 3. 打印日志
         if strategy == 'visual':
             print(f"[Scene: {target_ts} -> {new_ts} "
-                  f"(✅ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
+                  f"(🖼️ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
 
         elif strategy == 'subtitle':
             print(f": {target_ts} -> {new_ts} "
@@ -279,7 +279,7 @@ def gen_extra_info(video_info_dict, manager):
 
         if check_failure_details(failure_details):
             return failure_details
-        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {stage_timings['logical_scene']:.2f}s")
 
         # ---------------- 阶段2: 情绪性花字 ----------------
         t_start = time.time()
@@ -355,7 +355,7 @@ def gen_extra_info(video_info_dict, manager):
 
         # ---------------- 最后: 打印各阶段耗时 ----------------
         timing_str = ", ".join([f"{k}: {v:.2f}s" for k, v in stage_timings.items()])
-        print(f"视频 {video_id} 各阶段处理耗时统计: [{timing_str}]")
+        print(f"📊 视频 {video_id} 各阶段处理耗时统计: [{timing_str}] 总耗时: {sum(stage_timings.values()):.2f}s")
 
     return failure_details
 
@@ -403,7 +403,8 @@ def prepare_basic_video_info(video_info_dict):
     :param video_info_dict:
     :return:
     """
-    log_pre = f"准备基础视频信息  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    log_pre = f"1️⃣ 准备基础视频信息  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    start_time = time.time()
     failure_details = {}
     for video_id, video_info in video_info_dict.items():
         try:
@@ -414,11 +415,11 @@ def prepare_basic_video_info(video_info_dict):
 
             # 步骤A: 保证视频文件存在，并清理相关的错误状态
             if not is_valid_target_file_simple(origin_video_path):
-                print(f"视频 {video_id} 的原始文件不存在，准备下载...{log_pre}")
+                print(f"{log_pre} 视频 {video_id} 的原始文件不存在，准备下载...")
                 result = download_douyin_video_sync(video_url)
 
                 if not result:
-                    error_info = f"错误: 视频 {video_id} 下载失败。{log_pre}"
+                    error_info = f"{log_pre}错误: 视频 {video_id} 下载失败。"
                     print(error_info)
                     failure_details[video_id] = {
                         "error_info": error_info,
@@ -430,17 +431,17 @@ def prepare_basic_video_info(video_info_dict):
                 original_file_path, metadata = result
                 os.makedirs(os.path.dirname(origin_video_path), exist_ok=True)
                 os.replace(original_file_path, origin_video_path)
-                print(f"视频 {video_id} 下载并移动成功。{log_pre}")
+                print(f"{log_pre} 视频 {video_id} 下载并移动成功。")
                 video_info['metadata'] = metadata
 
 
             # 步骤B: 保证评论信息完整
             comment_list = video_info.get('comment_list', [])
             if not comment_list or NEED_REFRESH_COMMENT:
-                print(f"视频 {video_id} 的评论需要获取或刷新...{log_pre}")
+                print(f"{log_pre} 视频 {video_id} 的评论需要获取或刷新...")
                 fetched_comments = get_comment(video_id, comment_limit=100)
                 video_info['comment_list'] = fetched_comments
-            print(f"视频 {video_id} 的基础信息准备完成。{log_pre}")
+            print(f"{log_pre} 视频 {video_id} 的基础信息准备完成。 耗时 {time.time() - start_time:.2f}s")
 
             # 判断is_duplicate是否已经存在，避免重复计算
             is_duplicate = video_info.get('is_duplicate')
@@ -455,7 +456,7 @@ def prepare_basic_video_info(video_info_dict):
 
         except Exception as e:
             traceback.print_exc()
-            error_info = f"严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
+            error_info = f"{log_pre} ⚠️ 严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
             failure_details[video_id] = {
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.ERROR
@@ -557,7 +558,7 @@ def process_single_task(task_info, manager, gen_video=False):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
-    print(f"开始处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 视频开始视频处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
     time_records = []
     start_time = time.time()
@@ -609,7 +610,7 @@ def process_single_task(task_info, manager, gen_video=False):
 
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # 生成新的视频脚本方案
     failure_details = gen_video_script(task_info, video_info_dict, manager)
@@ -621,7 +622,7 @@ def process_single_task(task_info, manager, gen_video=False):
 
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # 生成投稿所需的信息
     failure_details = gen_upload_info(task_info, video_info_dict, manager)
@@ -634,7 +635,7 @@ def process_single_task(task_info, manager, gen_video=False):
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
-    print(f"任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     if gen_video:
         # 根据方案生成最终视频
@@ -650,11 +651,8 @@ def process_single_task(task_info, manager, gen_video=False):
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # [新增] 最终打印所有阶段耗时
-    print("=" * 40)
     time_records_str = ", ".join(time_records)
-    print(f"任务处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {time_records_str}")
-    print(f"任务总耗时: {time.time() - start_time:.2f}s")
-    print("=" * 40)
+    print(f"✅完成视频完成 成功视频成功处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {time_records_str}")
 
     return failure_details, video_info_dict, chosen_script
 

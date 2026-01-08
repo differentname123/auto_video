@@ -278,7 +278,7 @@ def calculate_closest_cut_point(timestamp_text_map, anchor_timestamp):
     # 使用 min 函数，key 为与 anchor_timestamp 的绝对距离
     closest_point = min(jump_candidates, key=lambda t: abs(t - anchor_timestamp))
 
-    print(f"锚点: {anchor_timestamp}, 检测到的跳变候选: {jump_candidates}, 最终选择: {closest_point}")
+    # print(f"锚点: {anchor_timestamp}, 检测到的跳变候选: {jump_candidates}, 最终选择: {closest_point}")
 
     return closest_point
 
@@ -310,7 +310,7 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
             return timestamp
 
         # --- 阶段 3: 分析并计算最终包围框 ---
-        print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
+        # print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
         good_boxes = analyze_and_filter_boxes(detected_boxes)
         if not good_boxes:
             print("\n[结果] 所有检测到的框都被过滤为异常值。")
@@ -321,10 +321,10 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         max_x, max_y = np.max(all_points[:, 0]), np.max(all_points[:, 1])
         final_box_coords = (min_x, max_x, min_y, max_y)
 
-        print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
+        # print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
 
         # --- 阶段 4: 生成 {时间戳: 文本} 映射 ---
-        print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
+        # print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
         timestamp_text_map = {}
 
         for item in result_json.get('data', []):
@@ -347,12 +347,12 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
             return timestamp
 
         # --- 阶段 5: 调用独立函数计算最终时间点 ---
-        print(f"\n[阶段 5] 计算最近的字幕切分点...字幕长度为：{len(timestamp_text_map)}")
+        # print(f"\n[阶段 5] 计算最近的字幕切分点...字幕长度为：{len(timestamp_text_map)}")
 
         # 计算逻辑也可能出错，放在 try 块中很安全
         final_timestamp = calculate_closest_cut_point(timestamp_text_map, timestamp)
 
-        print(f"初始时间: {timestamp}ms -> 精确时间: {final_timestamp}ms")
+        # print(f"初始时间: {timestamp}ms -> 精确时间: {final_timestamp}ms")
 
         return final_timestamp
 
@@ -419,6 +419,7 @@ def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_m
             return target_ts, 'failed', {'reason': reason}
 
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
+    strat_time = time.time()
     time_map = {}  # 用于缓存已处理的时间戳，避免重复计算
 
     # 检查是否有数据（仅用于打印一条全局警告，不影响逻辑运行）
@@ -448,7 +449,7 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
             # 3. 打印日志
             if strategy == 'visual':
                 print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} "
-                      f"(✅ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
+                      f"(🖼️ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
 
             elif strategy == 'subtitle':
                 print(f"[Scene {i}] {key}: {orig_ts} -> {new_ts} "
@@ -460,6 +461,7 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
             # 4. 更新与缓存
             time_map[orig_ts] = new_ts
             scene[key] = new_ts
+    print(f"🎯  {video_path} 时间修正完成，总耗时 {time.time() - strat_time:.2f} 秒。 场景数量为{len(scenes)}")
 
     return logical_scene_info
 
@@ -568,7 +570,9 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
     for attempt in range(1, max_retries + 1):
         try:
             print(f"正在生成逻辑性场景划分 (尝试 {attempt}/{max_retries}) {log_pre}")
+            start_time = time.time()
             gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
+            print(f"生成完成，耗时 {time.time() - start_time:.2f} 秒。开始解析结果... {log_pre}")
 
             logical_scene_info = string_to_object(raw)
             check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes, need_remove_frames, fixed_points)
@@ -949,12 +953,12 @@ def gen_hudong_by_llm(video_path, video_info):
     MAX_RETRIES = 3  # 设置最大重试次数
     prompt_file_path = './prompt/筛选出合适的弹幕.txt'
     base_prompt = gen_base_prompt(video_path, video_info)
-    log_pre = f"{video_path} 生成弹幕互动信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    log_pre = f"📝 {video_path} 生成弹幕互动信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     try:
         prompt = read_file_to_str(prompt_file_path)
         duration = probe_duration(video_path)
     except Exception as e:
-        print(f"初始化prompt或获取视频时长时出错: {e} {log_pre}")
+        print(f"{log_pre}初始化prompt或获取视频时长时出错: {e} ")
         return None
 
     prompt_with_duration = f"{prompt}{base_prompt}"
@@ -966,19 +970,19 @@ def gen_hudong_by_llm(video_path, video_info):
     model_name = "gemini-3-flash-preview"
     if duration > max_duration:
         # 即使超过时长，模型名也没变，但保留打印语句
-        print(f"视频时长 {duration} 秒超过最大限制 {max_duration} 秒，使用默认处理方式。  {log_pre}")
+        print(f"{log_pre} 视频时长 {duration} 秒超过最大限制 {max_duration} 秒，使用默认处理方式。  ")
     error_info = ""
     # 开始重试循环
     for attempt in range(1, MAX_RETRIES + 1):
-        print(f"\n--- [第 {attempt}/{MAX_RETRIES} 次尝试] ---  {log_pre}")
+        print(f"\n{log_pre}--- [第 {attempt}/{MAX_RETRIES} 次尝试] ---  ")
 
         # 策略：首次尝试带 desc，后续重试不带 desc
         if attempt == 1:
             current_prompt = f"{prompt_with_duration}\n{desc}"
-            print(f"生成弹幕互动信息 首次尝试：使用包含 `desc` 的完整 prompt。 {log_pre}")
+            print(f" {log_pre}生成弹幕互动信息 首次尝试：使用包含 `desc` 的完整 prompt。")
         else:
             current_prompt = prompt_with_duration
-            print(f"生成弹幕互动信息 重试尝试：使用不包含 `desc` 的基础 prompt。 {log_pre}")
+            print(f"{log_pre}生成弹幕互动信息 重试尝试：使用不包含 `desc` 的基础 prompt。 ")
 
         try:
             # 1. 调用 LLM 获取原始文本
@@ -993,21 +997,21 @@ def gen_hudong_by_llm(video_path, video_info):
                 result = string_to_object(raw)
                 check_result, check_info = validate_danmu_result(result)
                 if not check_result:
-                    raise ValueError(f"生成弹幕互动信息 结果验证未通过: {check_info} {raw} {log_pre}")
+                    raise ValueError(f"{log_pre}生成弹幕互动信息 结果验证未通过: {check_info} {raw} ")
                 return error_info, result
             except Exception as e:
                 error_info = f"生成弹幕互动信息 解析返回结果时出错: {str(e)}"
                 print(f"生成弹幕互动信息 解析返回结果时出错: {str(e)}")
-                return error_info, None
+                # return error_info, None
 
         except Exception as e:
             error_info = f"生成弹幕互动信息 解析返回结果时出错: {str(e)}"
-            print(f"生成弹幕互动信息 在第 {attempt} 次调用 LLM API 时发生严重错误: {e}")
+            print(f"{log_pre} ⚠️生成弹幕互动信息 在第 {attempt} 次调用 LLM API 时发生严重错误: {e}")
             # 如果API调用本身就失败了，也计为一次失败的尝试
             if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
                 print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
                 break  # 使用 break 更清晰地跳出循环
-            return error_info, None
+    return error_info, None
 
 
 def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='global'):
@@ -1250,11 +1254,11 @@ def gen_video_script_llm(task_info, video_info_dict):
             video_script_info = string_to_object(raw_response)
             check_result, check_info = check_video_script(video_script_info, final_info_list, allow_commentary, is_need_narration)
             if not check_result:
-                error_info = f"新视频脚本 检查未通过: {check_info} {raw_response} {log_pre}"
+                error_info = f"新视频脚本 检查未通过: {check_info} {raw_response} {log_pre} {check_info}  "
                 raise ValueError(error_info)
             return error_info, video_script_info, origin_final_scene_info
         except Exception as e:
-            error_str = f"{error_info} {str(e)} {gen_error_info}"
+            error_str = f"{str(e)} {gen_error_info}"
             print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
@@ -1321,7 +1325,7 @@ def get_proper_topics(video_info_dict):
     category_name_list = []
     for video_id, video_info in video_info_dict.items():
         hudong_info = video_info.get('hudong_info', {})
-        category_id_list = hudong_info.get('视频分析', []).get('category_id_list', [])
+        category_id_list = hudong_info.get('视频分析', {}).get('category_id_list', [])
         for category_id in category_id_list:
             if str(category_id) in category_data_all.keys():
                 category_name = category_data_all[str(category_id)]['name']
@@ -1441,7 +1445,7 @@ def gen_upload_info_llm(task_info, video_info_dict):
                 traceback.print_exc()
                 error_info = f"生成上传信息 解析返回结果时出错: {str(e)}"
                 print(f"生成上传信息 解析返回结果时出错: {str(e)}")
-                return error_info, None
+                # return error_info, None
 
         except Exception as e:
             traceback.print_exc()
@@ -1452,7 +1456,7 @@ def gen_upload_info_llm(task_info, video_info_dict):
             if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
                 print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
                 break  # 使用 break 更清晰地跳出循环
-            return error_info, None
+    return error_info, None
 
 
 

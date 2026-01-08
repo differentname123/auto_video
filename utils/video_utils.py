@@ -574,10 +574,10 @@ def get_scene(video_path, min_final_scenes=20):
         print(f"检测到已存在的合并时间戳文件，直接加载返回，场景数量为: {len(kept_sorted)} {kept_sorted}")
         return kept_sorted
 
-
+    start_time = time.time()
     for attempt in range(max_attempts):
-        print(f"--- 第 {attempt + 1}/{max_attempts} 次尝试 ---")
-        print(f"当前使用的阈值列表: {thresholds} {video_path}")
+        # print(f"--- 第 {attempt + 1}/{max_attempts} 次尝试 ---")
+        # print(f"当前使用的阈值列表: {thresholds} {video_path}")
 
         # 你的核心逻辑基本不变，只是把固定的 [30, 50, 70] 换成了可变的 thresholds
         for high_threshold in thresholds:
@@ -594,22 +594,21 @@ def get_scene(video_path, min_final_scenes=20):
                 high_threshold=high_threshold,
                 min_scene_len=25,
             )
-            print(
-                f"阈值为 {high_threshold} 场景信息字典已生成。共 {len(scene_info_dict)} 个场景。 耗时: {time.time() - start_time:.2f} 秒\n")
+            # print(f"阈值为 {high_threshold} 场景信息字典已生成。共 {len(scene_info_dict)} 个场景。 耗时: {time.time() - start_time:.2f} 秒\n")
 
             save_json(scene_info_file, scene_info_dict)
             all_scene_info_dict[high_threshold] = scene_info_dict
 
         # 合并逻辑不变
         kept_sorted, pairs = merge_scene_timestamps(all_scene_info_dict, min_count=3)
-        print(f"场景识别合并完成: 本次尝试生成场景数量为: {len(kept_sorted)}")
+        # print(f"场景识别合并完成: 本次尝试生成场景数量为: {len(kept_sorted)}")
 
         # --- 新增的核心判断逻辑 ---
         if len(kept_sorted) >= min_final_scenes:
-            print(f"成功！生成的场景数量 ({len(kept_sorted)}) 满足要求 (>= {min_final_scenes})。")
+            print(f"成功！生成的场景数量  {video_path} ({len(kept_sorted)}) 满足要求 (>= {min_final_scenes})。")
             break  # 达到目标，跳出重试循环
         else:
-            print(f"警告：生成的场景数量 ({len(kept_sorted)}) 过少，不满足要求 (>= {min_final_scenes})。")
+            print(f"警告：生成的场景数量  {video_path} ({len(kept_sorted)}) 过少，不满足要求 (>= {min_final_scenes})。")
             # 如果不是最后一次尝试，则降低阈值准备重试
             if attempt < max_attempts - 1:
                 print(f"准备降低阈值后重试...")
@@ -617,14 +616,13 @@ def get_scene(video_path, min_final_scenes=20):
                 thresholds = [max(10, t - adjustment_step) for t in thresholds]
                 # 如果阈值已经降到最低无法再降，也提前退出
                 if all(t == 10 for t in thresholds):
-                    print("阈值已降至最低，无法继续。")
+                    print(f" {video_path}阈值已降至最低，无法继续。")
                     break
             else:
-                print("已达到最大尝试次数，将使用当前结果。")
+                print(f" {video_path}已达到最大尝试次数，将使用当前结果。")
 
     # 循环结束后的收尾工作（保存文件等）
-    print(f"\n--- 最终处理结果 ---")
-    print(f"最终场景数量为: {len(kept_sorted)} {kept_sorted} 总共耗时: {time.time() - start_time:.2f} 秒")
+    print(f"{video_path} 最终场景数量为: {len(kept_sorted)} 总共耗时: {time.time() - start_time:.2f} 秒 {kept_sorted} ")
     save_json(
         merged_timestamps_path,
         kept_sorted)

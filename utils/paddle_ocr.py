@@ -22,7 +22,7 @@ class SubtitleOCR:
     _engine_instance = None
     _current_mode = None  # 记录当前是 GPU 还是 CPU
     _init_lock = threading.Lock()  # 【新增】全局初始化锁，确保线程安全
-    _inference_semaphore = threading.Semaphore(1)
+    _inference_semaphore = threading.Semaphore(3)
 
     # 锚定模型根目录：无论在哪里调用，都以本文件所在位置为基准
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -66,8 +66,6 @@ class SubtitleOCR:
 
             try:
                 mode_str = "GPU" if self.use_gpu else "CPU"
-                print(f"Initializing RapidOCR in {mode_str} mode (Thread Safe)...")
-
                 engine = RapidOCR(
                     det_model_path=det_path,
                     cls_model_path=None,
@@ -112,7 +110,6 @@ class SubtitleOCR:
                 SubtitleOCR._current_mode = None
                 gc.collect()
                 print("Engine reset and memory collected.")
-
 
     def _select_best_subtitle_strict(
             self,
@@ -243,72 +240,77 @@ class SubtitleOCR:
         执行批量识别。
         保证不抛出异常，返回标准 JSON 结构。
         集成了严格的 find_subtitle 几何筛选逻辑。
+
+        【修改说明】: 使用信号量包裹整个方法，确保同一时间只有一个线程可以执行 run_batch。
+        这会序列化所有批次处理请求，最大程度降低显存并发压力。
         """
-        print(f"Starting batch OCR for {len(image_path_list)} images...")
-        # 整体结果容器
-        response = {
-            "code": 0,
-            "message": "success",
-            "total_count": len(image_path_list),
-            "success_count": 0,
-            "failed_count": 0,
-            "data": [],
-            "perf_stats": {}
-        }
+        # --- 信号量控制入口 ---
+        all_start_time = time.time()
+        with SubtitleOCR._inference_semaphore:
+            print(f"Starting batch OCR for {len(image_path_list)} images (Lock Acquired)...")
 
-        all_recognized_texts = []
-
-        if not image_path_list:
-            response["message"] = "Empty image list"
-            return response
-
-        t_start = time.time()
-
-        # 获取引擎
-        engine = self._get_engine()
-        if engine is None:
-            response["code"] = -1
-            response["message"] = "Failed to load OCR models."
-            return response
-
-        for img_path in image_path_list:
-            item_result = {
-                "file_path": img_path,
-                "status": "failed",
-                "subtitles": [],
-                "error_msg": ""
+            # 整体结果容器
+            response = {
+                "code": 0,
+                "message": "success",
+                "total_count": len(image_path_list),
+                "success_count": 0,
+                "failed_count": 0,
+                "data": [],
+                "perf_stats": {}
             }
 
-            if not os.path.exists(img_path):
-                item_result["error_msg"] = "File not found"
-                response["data"].append(item_result)
-                response["failed_count"] += 1
-                continue
+            all_recognized_texts = []
 
-            try:
-                # 1. 图像预处理
-                img = Image.open(img_path)
-                width, height = img.size
+            if not image_path_list:
+                response["message"] = "Empty image list"
+                return response
 
-                # 裁剪逻辑
-                y_offset = 0
-                if 0 < crop_ratio < 1.0:
-                    y_offset = int(height * (1 - crop_ratio))
-                    crop_area = (0, y_offset, width, height)
-                    img_crop = img.crop(crop_area)
-                else:
-                    img_crop = img
+            t_start = time.time()
 
-                img_numpy = np.array(img_crop)
-                # 获取裁剪后的尺寸，用于几何筛选
-                crop_h, crop_w = img_numpy.shape[:2]
+            # 获取引擎
+            engine = self._get_engine()
+            if engine is None:
+                response["code"] = -1
+                response["message"] = "Failed to load OCR models."
+                return response
 
-                # 2. 推理
-                ocr_result = []
+            for img_path in image_path_list:
+                item_result = {
+                    "file_path": img_path,
+                    "status": "failed",
+                    "subtitles": [],
+                    "error_msg": ""
+                }
 
-                # 【关键修改】在此处使用信号量，确保同一时刻只有一个线程在使用 GPU 推理
-                # 这会解决显存飙升到 20G 的问题，因为其他线程会在这里排队等待
-                with SubtitleOCR._inference_semaphore:
+                if not os.path.exists(img_path):
+                    item_result["error_msg"] = "File not found"
+                    response["data"].append(item_result)
+                    response["failed_count"] += 1
+                    continue
+
+                try:
+                    # 1. 图像预处理
+                    img = Image.open(img_path)
+                    width, height = img.size
+
+                    # 裁剪逻辑
+                    y_offset = 0
+                    if 0 < crop_ratio < 1.0:
+                        y_offset = int(height * (1 - crop_ratio))
+                        crop_area = (0, y_offset, width, height)
+                        img_crop = img.crop(crop_area)
+                    else:
+                        img_crop = img
+
+                    img_numpy = np.array(img_crop)
+                    # 获取裁剪后的尺寸，用于几何筛选
+                    crop_h, crop_w = img_numpy.shape[:2]
+
+                    # 2. 推理
+                    ocr_result = []
+
+                    # 之前这里的信号量已经移到函数最外层，此处直接调用即可
                     try:
                         # rapidocr/paddleocr返回结构通常是 [dt_boxes, rec_res] 或 直接 list
                         # 这里假设返回的是标准的 list of [box, text, score] 结构
@@ -320,75 +322,75 @@ class SubtitleOCR:
                         self._reset_engine()
                         engine = self._get_engine()
                         if engine:
-                            # 再次尝试推理（仍在信号量保护范围内，安全）
+                            # 再次尝试推理（仍在最外层信号量保护范围内，安全）
                             ocr_result, _ = engine(img_numpy)
                         else:
                             raise Exception("Engine reload failed")
 
-                # 3. 结果筛选与格式化
-                if ocr_result:
-                    # A. 初步过滤置信度 (这也是一种筛选)
-                    high_conf_lines = [
-                        line for line in ocr_result
-                        if line and len(line) == 3 and line[2] > confidence
-                    ]
+                    # 3. 结果筛选与格式化
+                    if ocr_result:
+                        # A. 初步过滤置信度 (这也是一种筛选)
+                        high_conf_lines = [
+                            line for line in ocr_result
+                            if line and len(line) == 3 and line[2] > confidence
+                        ]
 
-                    # B. **执行严格的几何筛选**
-                    # 注意：这里传入的是相对于 crop 图片的坐标和尺寸
-                    best_sub = self._select_best_subtitle_strict(
-                        high_conf_lines,
-                        crop_h,
-                        crop_w,
-                        bottom_ratio_in_crop=0.0,  # 因为已经裁剪了，这里设为0，表示在裁剪区域内不再次切分底部
-                        rect_ang_thresh=10.0,
-                        rect_ratio_thresh=0.8,
-                        aspect_ratio_thresh=2.0,
-                        width_ratio_thresh=0.1
-                    )
+                        # B. **执行严格的几何筛选**
+                        # 注意：这里传入的是相对于 crop 图片的坐标和尺寸
+                        best_sub = self._select_best_subtitle_strict(
+                            high_conf_lines,
+                            crop_h,
+                            crop_w,
+                            bottom_ratio_in_crop=0.0,  # 因为已经裁剪了，这里设为0，表示在裁剪区域内不再次切分底部
+                            rect_ang_thresh=10.0,
+                            rect_ratio_thresh=0.8,
+                            aspect_ratio_thresh=2.0,
+                            width_ratio_thresh=0.1
+                        )
 
-                    if best_sub:
-                        text = best_sub["text"]
-                        box = best_sub["box"]
-                        score = best_sub["score"]
+                        if best_sub:
+                            text = best_sub["text"]
+                            box = best_sub["box"]
+                            score = best_sub["score"]
 
-                        # C. 坐标还原 (Crop -> Full Image)
-                        # 将 numpy array 转换为 list，并加上 y_offset
-                        final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
+                            # C. 坐标还原 (Crop -> Full Image)
+                            # 将 numpy array 转换为 list，并加上 y_offset
+                            final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
 
-                        item_result["subtitles"].append({
-                            "text": text,
-                            "box": final_box,
-                            "score": float(score)
-                        })
+                            item_result["subtitles"].append({
+                                "text": text,
+                                "box": final_box,
+                                "score": float(score)
+                            })
 
-                        all_recognized_texts.append(text)
+                            all_recognized_texts.append(text)
 
-                item_result["status"] = "success"
-                response["success_count"] += 1
+                    item_result["status"] = "success"
+                    response["success_count"] += 1
 
-            except Exception as e:
-                item_result["error_msg"] = str(e)
-                item_result["status"] = "error"
-                response["failed_count"] += 1
+                except Exception as e:
+                    item_result["error_msg"] = str(e)
+                    item_result["status"] = "error"
+                    response["failed_count"] += 1
 
-            response["data"].append(item_result)
+                response["data"].append(item_result)
 
-        # --- 统计 ---
-        t_end = time.time()
-        total_time = t_end - t_start
-        response["perf_stats"] = {
-            "total_time_sec": float(f"{total_time:.4f}"),
-            "avg_time_per_img_sec": float(f"{total_time / len(image_path_list):.4f}") if image_path_list else 0
-        }
+            # --- 统计 ---
+            t_end = time.time()
+            total_time = t_end - t_start
+            response["perf_stats"] = {
+                "total_time_sec": float(f"{total_time:.4f}"),
+                "avg_time_per_img_sec": float(f"{total_time / len(image_path_list):.4f}") if image_path_list else 0
+            }
 
-        print("=" * 40)
-        print(f"处理图片的数量: {response['total_count']}")
-        print(f"耗时: {total_time:.4f} 秒")
-        print(f"成功数量: {response['success_count']}")
-        print(f"前20个字符串的识别结果: {all_recognized_texts[:20]}")
-        print("=" * 40)
+            print("=" * 40)
+            print(f"处理图片的数量: {response['total_count']}")
+            print(f"运行耗时: {total_time:.4f} 秒 总共耗时{time.time() - all_start_time:.4f}秒")
+            print(f"成功数量: {response['success_count']}")
+            print(f"前20个字符串的识别结果: {all_recognized_texts[:20]}")
+            print("=" * 40)
 
-        return response
+            return response
 
 def analyze_and_filter_boxes(
         boxes: List[List[List[int]]],
@@ -425,14 +427,14 @@ def analyze_and_filter_boxes(
     height_diff_threshold = median_height * height_tolerance_ratio
 
     height_filtered_boxes = []
-    print(f"[过滤-阶段1: 高度] 以中位高度 {median_height:.2f} 为基准 (容忍度: {height_diff_threshold:.2f}px)。")
+    # print(f"[过滤-阶段1: 高度] 以中位高度 {median_height:.2f} 为基准 (容忍度: {height_diff_threshold:.2f}px)。")
     for i, box in enumerate(boxes):
         if abs(heights[i] - median_height) <= height_diff_threshold:
             height_filtered_boxes.append(box)
         else:
             # print(f"  - 剔除高度异常框: 高度为 {heights[i]}, 与中位数差异过大。")
             pass
-    print(f"[过滤-阶段1: 高度] 完成，剩余 {len(height_filtered_boxes)} 个框进入下一阶段。")
+    # print(f"[过滤-阶段1: 高度] 完成，剩余 {len(height_filtered_boxes)} 个框进入下一阶段。")
     if len(height_filtered_boxes) < 3:
         return height_filtered_boxes
 
@@ -444,14 +446,15 @@ def analyze_and_filter_boxes(
     y_pos_diff_threshold = median_height * y_pos_tolerance_ratio
 
     position_filtered_boxes = []
-    print(f"[过滤-阶段2: 位置] 以中位下底 {median_bottom_y:.2f} 为基准 (容忍度: {y_pos_diff_threshold:.2f}px)。")
+    # print(f"[过滤-阶段2: 位置] 以中位下底 {median_bottom_y:.2f} 为基准 (容忍度: {y_pos_diff_threshold:.2f}px)。")
     for i, box in enumerate(height_filtered_boxes):
         if abs(bottom_ys[i] - median_bottom_y) <= y_pos_diff_threshold:
             position_filtered_boxes.append(box)
         else:
-            print(f"  - 剔除位置异常框: 下底为 {bottom_ys[i]} (期望: {median_bottom_y:.2f})，差异过大。")
+            # print(f"  - 剔除位置异常框: 下底为 {bottom_ys[i]} (期望: {median_bottom_y:.2f})，差异过大。")
+            pass
 
-    print(f"[过滤-阶段2: 位置] 完成，剩余 {len(position_filtered_boxes)} 个框进入精筛。")
+    # print(f"[过滤-阶段2: 位置] 完成，剩余 {len(position_filtered_boxes)} 个框进入精筛。")
     if len(position_filtered_boxes) < 3:
         return position_filtered_boxes
 
@@ -469,7 +472,7 @@ def analyze_and_filter_boxes(
     mean_center_y, std_center_y = np.mean(clean_center_ys), np.std(clean_center_ys)
 
     final_good_boxes = []
-    print(f"[过滤-阶段3: 精筛] 以稳定数据为基准进行Z-score分析。")
+    # print(f"[过滤-阶段3: 精筛] 以稳定数据为基准进行Z-score分析。")
     for i, box in enumerate(position_filtered_boxes):
         prop = properties[i]
         # 计算 Z-score, 避免标准差为0时除零
@@ -646,7 +649,7 @@ def find_overall_subtitle_box_target_number(
 
 
     # --- 阶段 3: 分析并计算最终包围框 ---
-    print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
+    # print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
     good_boxes = analyze_and_filter_boxes(detected_boxes)
 
     if not good_boxes:
@@ -683,6 +686,14 @@ if __name__ == "__main__":
     # 模拟路径 (请确保这些文件存在，或修改为你的真实路径进行测试)
     # 故意包含一个不存在的图片来测试健壮性
     test_images = [
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\a2.png",
         r"C:\Users\zxh\Desktop\temp\a2.png",
         r"C:\Users\zxh\Desktop\temp\a2.png",
         r"C:\Users\zxh\Desktop\temp\a2.png",

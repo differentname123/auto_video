@@ -931,20 +931,20 @@ def modify_relation(fid, action_type, cookie_str, url: str = URL_MODIFY_RELATION
     last_err = None
     for attempt in range(1, retries + 2):  # 总尝试次数 = retries + 1
         try:
-            print(f"INFO: 尝试{action_text} UID:{fid}（第 {attempt} 次）...")
+            # print(f"INFO: 尝试{action_text} UID:{fid}（第 {attempt} 次）...")
             resp = requests.post(url, data=payload, headers=headers, cookies=cookies, timeout=timeout)
             resp.raise_for_status()
             try:
                 j = resp.json()
             except ValueError:
-                print(f"ERROR: {action_text} UID:{fid} — 响应不是 JSON，status={resp.status_code}")
+                # print(f"ERROR: {action_text} UID:{fid} — 响应不是 JSON，status={resp.status_code}")
                 return False, f"non_json_status_{resp.status_code}"
 
             if j.get("code") == 0:
                 print(f"SUCCESS: 成功{action_text} UID: {fid}")
                 return True, j
             else:
-                print(f"ERROR: {action_text} UID:{fid} 失败: {j.get('message')} (Code: {j.get('code')})")
+                # print(f"ERROR: {action_text} UID:{fid} 失败: {j.get('message')} (Code: {j.get('code')})")
                 return False, j
 
         except requests.exceptions.RequestException as e:
@@ -977,7 +977,7 @@ def block_all_author(mid_list=None, action_type=5):
             mid = value.get("mid")
             if mid and mid not in mid_list:
                 mid_list.append(mid)
-    print(f"[提示] 共有 {len(mid_list)} 个不同的 B 站用户需要拉黑  用户数量为{len(config_map)}")
+    # print(f"[提示] 共有 {len(mid_list)} 个不同的 B 站用户需要拉黑  用户数量为{len(config_map)}")
     user_id_list = config_map.keys()
 
     for mid in mid_list:
@@ -985,20 +985,21 @@ def block_all_author(mid_list=None, action_type=5):
             total_cookie = value.get("total_cookie", "")
             name = value.get("name", "")
             if not total_cookie:
-                print(f"[跳过] 用户 {uid} 未配置 total_cookie，无法拉黑")
+                # print(f"[跳过] 用户 {uid} 未配置 total_cookie，无法拉黑")
                 continue
             if mid == uid:
-                print(f"[跳过] 用户 {uid} 不能拉黑自己")
+                # print(f"[跳过] 用户 {uid} 不能拉黑自己")
                 continue
 
             if str(mid) in user_id_list and action_type == 5:
-                print(f"[跳过] 用户 {mid} 在配置文件中，跳过拉黑")
+                # print(f"[跳过] 用户 {mid} 在配置文件中，跳过拉黑")
                 continue
 
-            print(f"[提示] 使用用户 {uid} 的账号尝试拉黑 {mid}")
+            # print(f"[提示] 使用用户 {uid} 的账号尝试拉黑 {mid}")
             success, result = modify_relation(fid=mid, action_type=action_type, cookie_str=total_cookie)
             if success:
-                print(f"[成功] 用户 {name} 成功拉黑 {mid}")
+                # print(f"[成功] 用户 {name} 成功拉黑 {mid}")
+                pass
         time.sleep(2)  # 每个用户间隔 2 秒
     print(f"[完成] 所有用户拉黑操作完成，耗时 {time.time() - start_time:.2f} 秒")
 

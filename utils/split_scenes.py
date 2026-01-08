@@ -10,7 +10,9 @@ from scenedetect.scene_manager import SceneManager
 from scenedetect.stats_manager import StatsManager
 from scenedetect.detectors import ContentDetector
 
-
+import warnings
+# 忽略 scenedetect 发出的所有 DeprecationWarning
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="scenedetect")
 def find_and_split_scenes(
         video_path,
         high_threshold=50,
@@ -243,7 +245,7 @@ def split_scenes_json(video_path: str,
 # --- 主程序入口 ---
 if __name__ == '__main__':
     # 把这里换成你的视频文件路径
-    my_video_path = 'test2.mp4'
+    my_video_path = r"W:\project\python_project\auto_video\videos\material\7566501817573182756\7566501817573182756_low_resolution.mp4"
 
     # 运行带有精炼功能的场景分割
     scene_info_dict = find_and_split_scenes(
