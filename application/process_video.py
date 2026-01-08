@@ -102,7 +102,7 @@ def run():
             manager.upsert_tasks([task_info])
 
     # 使用线程池并发处理，设置线程数量为 5
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(_task_worker, tasks_to_process)
 
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
@@ -254,6 +254,12 @@ def gen_extra_info(video_info_dict, manager):
     for video_id, video_info in video_info_dict.items():
         all_path_info = build_video_paths(video_id)
 
+        # 用于记录当前视频各阶段耗时
+        stage_timings = {}
+
+        # ---------------- 阶段1: 逻辑场景划分 ----------------
+        t_start = time.time()
+
         # 生成逻辑性的场景划分
         logical_scene_info = video_info.get('logical_scene_info')
         video_path = all_path_info['low_resolution_video_path']
@@ -267,11 +273,16 @@ def gen_extra_info(video_info_dict, manager):
                     "error_level": ERROR_STATUS.ERROR
                 }
             update_video_info(video_info_dict, manager, failure_details, error_key='logical_error')
+
+        # 记录耗时
+        stage_timings['logical_scene'] = time.time() - t_start
+
         if check_failure_details(failure_details):
             return failure_details
         print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-
+        # ---------------- 阶段2: 情绪性花字 ----------------
+        t_start = time.time()
 
         # 生气情绪性花字
         video_overlays_text_info = video_info.get('video_overlays_text_info', {})
@@ -287,13 +298,16 @@ def gen_extra_info(video_info_dict, manager):
                 video_info["overlays_text_error"] = error_info
             update_video_info(video_info_dict, manager, failure_details, error_key='overlays_text_error')
 
+        # 记录耗时
+        stage_timings['overlays_text'] = time.time() - t_start
+
         if check_failure_details(failure_details):
             return failure_details
         failure_details = {}
         print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-
-
+        # ---------------- 阶段3: ASR识别 ----------------
+        t_start = time.time()
 
         # 生成asr识别结果
         owner_asr_info = video_info.get('owner_asr_info', None)
@@ -309,10 +323,15 @@ def gen_extra_info(video_info_dict, manager):
                 }
             update_video_info(video_info_dict, manager, failure_details, error_key='owner_asr_error')
 
+        # 记录耗时
+        stage_timings['owner_asr'] = time.time() - t_start
+
         if check_failure_details(failure_details):
             return failure_details
         print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
+        # ---------------- 阶段4: 互动信息 ----------------
+        t_start = time.time()
 
         # 生成互动信息
         hudong_info = video_info.get('hudong_info', {})
@@ -326,9 +345,17 @@ def gen_extra_info(video_info_dict, manager):
                     "error_level": ERROR_STATUS.ERROR
                 }
             update_video_info(video_info_dict, manager, failure_details, error_key='hudong_error')
+
+        # 记录耗时
+        stage_timings['hudong_info'] = time.time() - t_start
+
         if check_failure_details(failure_details):
             return failure_details
         print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # ---------------- 最后: 打印各阶段耗时 ----------------
+        timing_str = ", ".join([f"{k}: {v:.2f}s" for k, v in stage_timings.items()])
+        print(f"视频 {video_id} 各阶段处理耗时统计: [{timing_str}]")
 
     return failure_details
 
@@ -427,6 +454,7 @@ def prepare_basic_video_info(video_info_dict):
 
 
         except Exception as e:
+            traceback.print_exc()
             error_info = f"严重错误: 处理视频 {video_id} 时发生未知异常: {str(e)}"
             failure_details[video_id] = {
                 "error_info": error_info,
@@ -529,42 +557,80 @@ def process_single_task(task_info, manager, gen_video=False):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
+    print(f"开始处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    # [新增] 初始化计时变量
+    time_records = []
+    start_time = time.time()
+    last_time = start_time
 
     chosen_script = None
     # 准备好相应的视频数据
     failure_details, video_info_dict = gen_video_info_dict(task_info, manager)
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"准备视频数据耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
 
     # 确保基础数据存在，比如视频文件，评论等
     failure_details, video_info_dict = prepare_basic_video_info(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='prepare_basic_video_error')
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"基础数据准备耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
 
     # 生成后续需要处理的派生视频，删除指定片段主要是静态去除以及降低分辨率后的视频
     failure_details = gen_derive_videos(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='gen_derive_error')
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"派生视频生成耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
 
     # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
     failure_details = gen_extra_info(video_info_dict, manager)
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"大模型信息/ASR生成耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     print(f"任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-
-
     # 生成新的视频脚本方案
     failure_details = gen_video_script(task_info, video_info_dict, manager)
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"视频脚本生成耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     print(f"任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-
     # 生成投稿所需的信息
     failure_details = gen_upload_info(task_info, video_info_dict, manager)
+
+    # [新增] 记录阶段耗时
+    curr_time = time.time()
+    time_records.append(f"投稿信息生成耗时: {curr_time - last_time:.2f}s")
+    last_time = curr_time
+
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
@@ -573,9 +639,22 @@ def process_single_task(task_info, manager, gen_video=False):
     if gen_video:
         # 根据方案生成最终视频
         failure_details, chosen_script = gen_video_by_script(task_info, video_info_dict)
+
+        # [新增] 记录阶段耗时
+        curr_time = time.time()
+        time_records.append(f"最终视频合成耗时: {curr_time - last_time:.2f}s")
+        last_time = curr_time
+
         if check_failure_details(failure_details):
             return failure_details, video_info_dict, chosen_script
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # [新增] 最终打印所有阶段耗时
+    print("=" * 40)
+    time_records_str = ", ".join(time_records)
+    print(f"任务处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {time_records_str}")
+    print(f"任务总耗时: {time.time() - start_time:.2f}s")
+    print("=" * 40)
 
     return failure_details, video_info_dict, chosen_script
 
@@ -583,17 +662,16 @@ def process_single_task(task_info, manager, gen_video=False):
 
 
 if __name__ == '__main__':
-    if __name__ == '__main__':
-        I = 3600  # 秒
-        while True:
-            t0 = time.monotonic()
+    I = 3600  # 秒
+    while True:
+        t0 = time.monotonic()
+        try:
+            run()
+        except Exception:
+            traceback.print_exc()
+        dt = time.monotonic() - t0
+        if dt < I:
             try:
-                run()
-            except Exception:
-                traceback.print_exc()
-            dt = time.monotonic() - t0
-            if dt < I:
-                try:
-                    time.sleep(I - dt)
-                except KeyboardInterrupt:
-                    break
+                time.sleep(I - dt)
+            except KeyboardInterrupt:
+                break

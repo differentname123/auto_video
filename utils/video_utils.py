@@ -624,7 +624,7 @@ def get_scene(video_path, min_final_scenes=20):
 
     # 循环结束后的收尾工作（保存文件等）
     print(f"\n--- 最终处理结果 ---")
-    print(f"最终场景数量为: {len(kept_sorted)} {kept_sorted}")
+    print(f"最终场景数量为: {len(kept_sorted)} {kept_sorted} 总共耗时: {time.time() - start_time:.2f} 秒")
     save_json(
         merged_timestamps_path,
         kept_sorted)

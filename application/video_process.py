@@ -902,8 +902,9 @@ def get_watermark_path(user_name: str) -> str:
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     user_type = "fun"
     user_type_info = user_config.get('user_type_info')
-    for user_type , user_list in user_type_info.items():
+    for temp_user_type, user_list in user_type_info.items():
         if user_name in user_list:
+            user_type = temp_user_type
             break
 
     filtered_files = [f for f in all_files if user_type in f and f.endswith(".png")]

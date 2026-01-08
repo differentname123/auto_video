@@ -22,6 +22,7 @@ from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.find_paid_topics import get_all_paid_topics
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
+from utils.gemini_web import generate_gemini_content_managed
 from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
 from utils.video_utils import probe_duration, get_scene, \
     save_frames_around_timestamp_ffmpeg
@@ -106,6 +107,8 @@ def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_sc
                 })
 
             except (ValueError, TypeError) as e:
+                traceback.print_exc()
+
                 return False, f"检查失败：场景 {i + 1} 的时间格式无效。原始场景: {scene}, 错误: {e}"
 
     # 如果视频时长为0，且没有场景，这是有效情况
@@ -356,8 +359,6 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
     # 【修改点 2】捕获所有异常，打印日志并强制返回原始 timestamp
     except Exception as e:
         print(f"[Error] gen_precise_scene_timestamp_by_subtitle 发生错误: {e}")
-        # 建议打印堆栈信息以便后续排查，但不影响流程继续
-        import traceback
         traceback.print_exc()
         return timestamp
 
@@ -545,6 +546,8 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
         video_duration = probe_duration(video_path)
         video_duration_ms = int(video_duration * 1000)
     except Exception as e:
+        traceback.print_exc()
+
         print(f"获取视频时长失败: {e}")
         return "获取视频时长失败", None
 
@@ -573,8 +576,8 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
 
-            merged_timestamps = get_scene(static_cut_video_path, min_final_scenes=max_scenes*2)
-            logical_scene_info = fix_logical_scene_info(static_cut_video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes*2)
+            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
 
             return None, logical_scene_info
         except Exception as e:
@@ -1240,9 +1243,9 @@ def gen_video_script_llm(task_info, video_info_dict):
         raw_response = ""
         error_info = ""
         try:
-            gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+            # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
 
-
+            gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
             # 解析和校验
             video_script_info = string_to_object(raw_response)
             check_result, check_info = check_video_script(video_script_info, final_info_list, allow_commentary, is_need_narration)

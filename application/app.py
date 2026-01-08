@@ -15,6 +15,7 @@
 """
 
 import time
+import traceback
 from typing import Optional, List, Tuple, Dict, Any, Set
 
 from flask import Flask, request, jsonify, render_template, Response
@@ -66,6 +67,8 @@ def parse_douyin_video(video_url: str):
             return False, None, ErrorMessage.PARSE_NO_METADATA
         return True, meta_data_list[0], None
     except Exception as e:
+        traceback.print_exc()
+
         print(f"解析URL '{video_url}' 异常: {e}")
         return False, None, f"解析异常: {e}"
 
@@ -493,6 +496,8 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         return response_structure, 200
 
     except Exception as e:
+        traceback.print_exc()
+
         app.logger.error(f"数据库操作失败: {e}")
         response_structure['message'] = "系统内部错误: 数据库保存失败"
         response_structure['errors'].append(str(e))

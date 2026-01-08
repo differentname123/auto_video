@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import threading
 import time
 import re
 import traceback
@@ -9,12 +10,15 @@ from datetime import datetime
 from pathlib import Path
 
 from gemini_webapi import GeminiClient, set_log_level
-from gemini_webapi.exceptions import AuthError
-from utils.common_utils import read_json, save_json
+
+from utils.common_utils import save_json
 
 # 设置日志级别
 set_log_level("INFO")
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_FILE = r'W:\project\python_project\auto_video\config\gemini_web.json'
+STATS_FILE = r'W:\project\python_project\auto_video\config\gemini_web_stats.json'
 
 # ==========================================
 # 1. 基础工具类：文件锁 (保持不变)
@@ -131,12 +135,12 @@ class GeminiAccountManager:
             # 5. 筛选可用账号
             candidates = []
             for name, info in stats.items():
-                if info.get('status') == 'idle':
-                    count = info.get('model_usage', {}).get(model_name, {}).get('count', 0)
-                    candidates.append({
-                        'name': name,
-                        'count': count
-                    })
+                # if info.get('status') == 'idle':
+                count = info.get('model_usage', {}).get(model_name, {}).get('count', 0)
+                candidates.append({
+                    'name': name,
+                    'count': count
+                })
 
             if not candidates:
                 save_json(self.stats_path, stats)
@@ -230,15 +234,12 @@ async def _do_gemini_request(cookie_str, prompt, model_name, files):
 # 4. 对外接口
 # ==========================================
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-CONFIG_FILE = BASE_DIR / 'config/gemini_web.json'
-STATS_FILE = BASE_DIR / 'config/gemini_web_stats.json'
 
 manager = GeminiAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
 # 【修改 3】: 实现无可用账号时的阻塞等待
-def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=None, wait_timeout=60):
+def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=None, wait_timeout=600):
     """
     对外提供的统一接口。
 
@@ -251,6 +252,11 @@ def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=N
     Returns:
         tuple: (error_info, response_str)
     """
+    pid = os.getpid()
+    tid = threading.get_ident()
+    log_prefix = f"[System][PID:{pid},TID:{tid}]" # 创建一个统一的日志前缀
+    # ====================================
+
     start_time = time.time()
     account_name, cookie = None, None
 
@@ -258,30 +264,29 @@ def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=N
     while time.time() - start_time < wait_timeout:
         account_name, cookie = manager.allocate_account(model_name)
         if account_name:
-            break  # 成功获取账号，跳出循环
+            break
 
-        # 未获取到账号，打印等待信息并休眠
         elapsed = int(time.time() - start_time)
-        print(f"[System] 无可用账号，进入等待... (已等待 {elapsed}s / {wait_timeout}s)")
-        time.sleep(random.uniform(1, 3))  # 休眠1-3秒，避免高频轮询
+        # === 修改日志输出 ===
+        print(f"{log_prefix} 无可用账号，进入等待... (已等待 {elapsed}s / {wait_timeout}s)")
+        time.sleep(random.uniform(10, 20))
 
     if not account_name:
         return f"System Busy: 等待 {wait_timeout} 秒后仍无可用账号。", None
 
-    print(f"[System] 分配账号: {account_name}")
+    # === 修改日志输出 ===
+    print(f"{log_prefix} 分配账号: {account_name}")
 
     error_detail = None
     result_text = None
 
     try:
-        # 2. 执行请求
         result_text = asyncio.run(_do_gemini_request(cookie, prompt, model_name, files))
     except Exception as e:
-        # 格式化详细错误信息
         error_detail = f"发生错误: {str(e)}\n\n堆栈追踪:\n{traceback.format_exc()}"
     finally:
-        # 3. 释放账号 (无论成功或失败都执行)
-        print(f"[System] 释放账号: {account_name}")
+        # === 修改日志输出 ===
+        print(f"{log_prefix} 释放账号: {account_name}")
         manager.release_account(account_name, error_detail)
 
     return error_detail, result_text
@@ -294,16 +299,20 @@ def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=N
 if __name__ == "__main__":
 
     print("开始测试...")
+    test_file = ['test.mp4']
+    for i in range(4):
+        try:
+            err, res = generate_gemini_content_managed(
+                prompt="你是谁？",
+                model_name="gemini-2.5-flash",
+                # files=test_file
+            )
 
-    err, res = generate_gemini_content_managed(
-        prompt="你是哪个模型？",
-        model_name="gemini-2.5-flash",
-        wait_timeout=10  # 测试时可以设置较短的等待时间
-    )
-
-    if err:
-        print("\n======== 调用失败 ========")
-        print(err)
-    else:
-        print("\n======== 调用成功 ========")
-        print(res)
+            if err:
+                print("\n======== 调用失败 ========")
+                print(err)
+            else:
+                print("\n======== 调用成功 ========")
+                print(res)
+        except Exception as e:
+            print(f"测试过程中发生异常: {str(e)}")

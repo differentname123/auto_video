@@ -149,6 +149,7 @@ def check_for_crash_and_abort(page: Page):
             raise PageCrashedException(error_msg)
 
     except Exception as e:
+        traceback.print_exc()
         # 如果在1秒内找不到按钮 (抛出 TimeoutError)，或者发生其他错误，
         # 都意味着页面大概率是正常的，我们可以安全地忽略这个异常。
         # 我们只关心 PageCrashedException。

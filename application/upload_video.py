@@ -211,7 +211,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) >= SINGLE_UPLOAD_COUNT:
+    if len(already_upload_users) >= 0:
         print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
@@ -443,6 +443,8 @@ def upload_worker(
             result = upload_to_bilibili(**upload_params)
             break
         except Exception as e:
+            traceback.print_exc()
+
             print(
                 f"❌ 上传接口异常 (第 {attempt} 次重试) user={userName} video_id_list={video_id_list}：{e} {upload_params}"
             )
@@ -467,6 +469,8 @@ def upload_worker(
                     print(f"⚠️ 清理文件 {p} 失败：{e}")
 
         except Exception as e:
+            traceback.print_exc()
+
             print(f"⚠️ 后台上传后处理异常：{e}")
 
         task_info["upload_params"] = upload_params
@@ -480,6 +484,8 @@ def upload_worker(
         try:
             err = result.get("message", str(result)) if isinstance(result, dict) else str(result)
         except Exception:
+            traceback.print_exc()
+
             err = str(result)
         error_user_map[userName] = err or "未知错误"
         print(f"❌ 后台投稿失败 user={userName} video_id_list={video_id_list}：{err}")
