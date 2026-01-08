@@ -250,21 +250,19 @@ def gen_extra_info(video_info_dict, manager):
     :return:
     """
     failure_details = {}
-
+    cost_time_info = {}
+    all_start_time = time.time()
     for video_id, video_info in video_info_dict.items():
+        start_time = time.time()
+        cost_time_info[video_id] = {}
         all_path_info = build_video_paths(video_id)
-
-        # 用于记录当前视频各阶段耗时
-        stage_timings = {}
-
-        # ---------------- 阶段1: 逻辑场景划分 ----------------
-        t_start = time.time()
 
         # 生成逻辑性的场景划分
         logical_scene_info = video_info.get('logical_scene_info')
         video_path = all_path_info['low_resolution_video_path']
+        logical_cost_time_info ={}
         if not logical_scene_info:
-            error_info, logical_scene_info = gen_logical_scene_llm(video_path, video_info, all_path_info)
+            error_info, logical_scene_info, logical_cost_time_info = gen_logical_scene_llm(video_path, video_info, all_path_info)
             if not error_info:
                 video_info['logical_scene_info'] = logical_scene_info
             else:
@@ -273,13 +271,12 @@ def gen_extra_info(video_info_dict, manager):
                     "error_level": ERROR_STATUS.ERROR
                 }
             update_video_info(video_info_dict, manager, failure_details, error_key='logical_error')
-
         # 记录耗时
-        stage_timings['logical_scene'] = time.time() - t_start
-
+        logical_cost_time_info['total_time'] = time.time() - start_time
+        cost_time_info[video_id]['logical_scene'] = logical_cost_time_info
         if check_failure_details(failure_details):
             return failure_details
-        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {stage_timings['logical_scene']:.2f}s")
+        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {logical_cost_time_info['total_time']:.2f}s")
 
         # ---------------- 阶段2: 情绪性花字 ----------------
         t_start = time.time()
@@ -299,12 +296,11 @@ def gen_extra_info(video_info_dict, manager):
             update_video_info(video_info_dict, manager, failure_details, error_key='overlays_text_error')
 
         # 记录耗时
-        stage_timings['overlays_text'] = time.time() - t_start
-
+        cost_time_info[video_id]['overlays_text'] = time.time() - t_start
         if check_failure_details(failure_details):
             return failure_details
         failure_details = {}
-        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['overlays_text']}")
 
         # ---------------- 阶段3: ASR识别 ----------------
         t_start = time.time()
@@ -324,11 +320,11 @@ def gen_extra_info(video_info_dict, manager):
             update_video_info(video_info_dict, manager, failure_details, error_key='owner_asr_error')
 
         # 记录耗时
-        stage_timings['owner_asr'] = time.time() - t_start
+        cost_time_info[video_id]['owner_asr'] = time.time() - t_start
 
         if check_failure_details(failure_details):
             return failure_details
-        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['owner_asr']:.2f}s")
 
         # ---------------- 阶段4: 互动信息 ----------------
         t_start = time.time()
@@ -347,17 +343,17 @@ def gen_extra_info(video_info_dict, manager):
             update_video_info(video_info_dict, manager, failure_details, error_key='hudong_error')
 
         # 记录耗时
-        stage_timings['hudong_info'] = time.time() - t_start
-
+        cost_time_info[video_id]['hudong_info'] = time.time() - t_start
         if check_failure_details(failure_details):
             return failure_details
-        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['hudong_info']:.2f}s")
 
         # ---------------- 最后: 打印各阶段耗时 ----------------
-        timing_str = ", ".join([f"{k}: {v:.2f}s" for k, v in stage_timings.items()])
-        print(f"📊 视频 {video_id} 各阶段处理耗时统计: [{timing_str}] 总耗时: {sum(stage_timings.values()):.2f}s")
-
-    return failure_details
+        print(f"📊 视频 {video_id} 总耗时: {time.time() - start_time:.2f}s 各阶段处理耗时统计: [{cost_time_info[video_id]}] ")
+    print(f"🎉 {video_info_dict.keys()} 所有视频额外信息生成完成。总耗时: {time.time() - all_start_time:.2f}s {cost_time_info}")
+    final_cost_time_info = {}
+    final_cost_time_info['extra_info'] = cost_time_info
+    return failure_details, final_cost_time_info
 
 
 def gen_video_info_dict(task_info, manager):
@@ -367,6 +363,8 @@ def gen_video_info_dict(task_info, manager):
     :param manager:
     :return:
     """
+    start_time = time.time()
+    cost_time_info = {}
     failure_details = {}  # 使用字典记录每个失败视频的详细原因
 
     video_id_list = task_info.get('video_id_list', [])
@@ -393,8 +391,9 @@ def gen_video_info_dict(task_info, manager):
                 "error_level": ERROR_STATUS.CRITICAL
             }
 
-
-    return failure_details, video_info_dict
+    cost_time = time.time() - start_time
+    cost_time_info['准备视频数据'] = cost_time
+    return failure_details, video_info_dict, cost_time_info
 
 
 def prepare_basic_video_info(video_info_dict):
@@ -403,6 +402,7 @@ def prepare_basic_video_info(video_info_dict):
     :param video_info_dict:
     :return:
     """
+    cost_time_info = {}
     log_pre = f"1️⃣ 准备基础视频信息  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     start_time = time.time()
     failure_details = {}
@@ -446,7 +446,11 @@ def prepare_basic_video_info(video_info_dict):
             # 判断is_duplicate是否已经存在，避免重复计算
             is_duplicate = video_info.get('is_duplicate')
             if is_duplicate is None:
-                is_duplicate = check_duplicate_video(video_info.get('metadata')[0])
+                try:
+                    is_duplicate = check_duplicate_video(video_info.get('metadata')[0])
+                except Exception as e:
+                    print(f"{log_pre} 警告: 视频 {video_id} 检测重复时发生异常: {str(e)}，默认设置为非重复。")
+                    is_duplicate = False
                 video_info['is_duplicate'] = is_duplicate
 
 
@@ -461,7 +465,8 @@ def prepare_basic_video_info(video_info_dict):
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.ERROR
             }
-    return failure_details, video_info_dict
+    cost_time_info['准备基础视频信息'] = time.time() - start_time
+    return failure_details, video_info_dict, cost_time_info
 
 
 def update_video_info(video_info_dict, manager, failure_details, error_key='last_error'):
@@ -488,6 +493,8 @@ def gen_derive_videos(video_info_dict):
     :param video_info_dict:
     :return:
     """
+    cost_time_info = {}
+    start_time = time.time()
     failure_details = {}
     for video_id, video_info in video_info_dict.items():
         try:
@@ -499,7 +506,8 @@ def gen_derive_videos(video_info_dict):
                 "error_info": error_info,
                 "error_level": ERROR_STATUS.ERROR
             }
-    return failure_details
+    cost_time_info['生成派生视频'] = time.time() - start_time
+    return failure_details, cost_time_info
 
 def gen_video_script(task_info, video_info_dict, manager):
     """
@@ -509,6 +517,8 @@ def gen_video_script(task_info, video_info_dict, manager):
     :param manager:
     :return:
     """
+    start_time = time.time()
+    cost_time_info = {}
     task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
     failure_details = {}
     video_script_info = task_info.get('video_script_info', {})
@@ -524,7 +534,8 @@ def gen_video_script(task_info, video_info_dict, manager):
             }
             task_info["script_error"] = error_info
         manager.upsert_tasks([task_info])
-    return failure_details
+    cost_time_info['生成视频脚本'] = time.time() - start_time
+    return failure_details, cost_time_info
 
 
 def gen_upload_info(task_info, video_info_dict, manager):
@@ -534,6 +545,8 @@ def gen_upload_info(task_info, video_info_dict, manager):
     :param video_info_dict:
     :return:
     """
+    cost_time_info = {}
+    start_time = time.time()
     task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
     failure_details = {}
     upload_info = task_info.get('upload_info', {})
@@ -549,7 +562,8 @@ def gen_upload_info(task_info, video_info_dict, manager):
             }
             task_info["upload_info_error"] = error_info
         manager.upsert_tasks([task_info])
-    return failure_details
+    cost_time_info['生成投稿信息'] = time.time() - start_time
+    return failure_details, cost_time_info
 
 
 def process_single_task(task_info, manager, gen_video=False):
@@ -561,94 +575,72 @@ def process_single_task(task_info, manager, gen_video=False):
     print(f"🚀 视频开始视频处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
     time_records = []
+    all_cost_time_info = {}
     start_time = time.time()
-    last_time = start_time
-
     chosen_script = None
     # 准备好相应的视频数据
-    failure_details, video_info_dict = gen_video_info_dict(task_info, manager)
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"准备视频数据耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    failure_details, video_info_dict, cost_time_info = gen_video_info_dict(task_info, manager)
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
+
+
 
     # 确保基础数据存在，比如视频文件，评论等
-    failure_details, video_info_dict = prepare_basic_video_info(video_info_dict)
+    failure_details, video_info_dict, cost_time_info = prepare_basic_video_info(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='prepare_basic_video_error')
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"基础数据准备耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
+
+
+
 
     # 生成后续需要处理的派生视频，删除指定片段主要是静态去除以及降低分辨率后的视频
-    failure_details = gen_derive_videos(video_info_dict)
+    failure_details, cost_time_info = gen_derive_videos(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='gen_derive_error')
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"派生视频生成耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
+
+
+
 
     # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
-    failure_details = gen_extra_info(video_info_dict, manager)
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"大模型信息/ASR生成耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    failure_details, cost_time_info = gen_extra_info(video_info_dict, manager)
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+
+
+
 
     # 生成新的视频脚本方案
-    failure_details = gen_video_script(task_info, video_info_dict, manager)
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"视频脚本生成耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    failure_details, cost_time_info = gen_video_script(task_info, video_info_dict, manager)
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+
+
+
 
     # 生成投稿所需的信息
-    failure_details = gen_upload_info(task_info, video_info_dict, manager)
-
-    # [新增] 记录阶段耗时
-    curr_time = time.time()
-    time_records.append(f"投稿信息生成耗时: {curr_time - last_time:.2f}s")
-    last_time = curr_time
-
+    failure_details, cost_time_info = gen_upload_info(task_info, video_info_dict, manager)
+    all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
-    print(f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     if gen_video:
         # 根据方案生成最终视频
-        failure_details, chosen_script = gen_video_by_script(task_info, video_info_dict)
-
-        # [新增] 记录阶段耗时
-        curr_time = time.time()
-        time_records.append(f"最终视频合成耗时: {curr_time - last_time:.2f}s")
-        last_time = curr_time
-
+        failure_details, chosen_script, cost_time_info = gen_video_by_script(task_info, video_info_dict)
+        all_cost_time_info.update(cost_time_info)
         if check_failure_details(failure_details):
             return failure_details, video_info_dict, chosen_script
-        print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
     # [新增] 最终打印所有阶段耗时
     time_records_str = ", ".join(time_records)

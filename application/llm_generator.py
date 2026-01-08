@@ -540,6 +540,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
     """
     生成新的视频方案
     """
+    cost_time_info = {}
     need_remove_frames = video_info.get('extra_info', {}).get('has_ad_or_face', 'auto')
     static_cut_video_path = all_path_info.get('static_cut_video_path', '')
     base_prompt = gen_base_prompt(video_path, video_info)
@@ -551,7 +552,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
         traceback.print_exc()
 
         print(f"获取视频时长失败: {e}")
-        return "获取视频时长失败", None
+        return "获取视频时长失败", None, {}
 
     retry_delay = 10
     max_retries = 3
@@ -572,18 +573,22 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             print(f"正在生成逻辑性场景划分 (尝试 {attempt}/{max_retries}) {log_pre}")
             start_time = time.time()
             gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
-            print(f"生成完成，耗时 {time.time() - start_time:.2f} 秒。开始解析结果... {log_pre}")
+            cost_time_info['llm_generate_time'] = time.time() - start_time
 
             logical_scene_info = string_to_object(raw)
             check_result, check_info = check_logical_scene(logical_scene_info, video_duration_ms, max_scenes, need_remove_frames, fixed_points)
             if not check_result:
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
-
+            start_time = time.time()
             merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes*2)
-            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            cost_time_info['get_scene_time'] = time.time() - start_time
 
-            return None, logical_scene_info
+            start_time = time.time()
+            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            cost_time_info['fix_scene_time'] = time.time() - start_time
+
+            return None, logical_scene_info, cost_time_info
         except Exception as e:
             error_str = f"{error_info} {str(e)}"
             print(f"生成逻辑性场景划分失败 (尝试 {attempt}/{max_retries}): {error_str} {log_pre} {gen_error_info}")
@@ -592,7 +597,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
                 time.sleep(retry_delay)  # 等待一段时间后再重试
             else:
                 print(f"达到最大重试次数，失败. {log_pre}")
-                return error_str, None  # 达到最大重试次数后返回 None
+                return error_str, None, {}  # 达到最大重试次数后返回 None
 
 def check_overlays_text(optimized_video_plan, video_duration_ms):
     """
@@ -953,7 +958,7 @@ def gen_hudong_by_llm(video_path, video_info):
     MAX_RETRIES = 3  # 设置最大重试次数
     prompt_file_path = './prompt/筛选出合适的弹幕.txt'
     base_prompt = gen_base_prompt(video_path, video_info)
-    log_pre = f"📝 {video_path} 生成弹幕互动信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    log_pre = f"{video_path} 生成弹幕互动信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     try:
         prompt = read_file_to_str(prompt_file_path)
         duration = probe_duration(video_path)

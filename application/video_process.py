@@ -1083,6 +1083,8 @@ def gen_video_by_script(task_info, video_info_dict):
     :param video_info_dict:
     :return:
     """
+    cost_time_info = {}
+    start_time = time.time()
     chosen_script = {}
     # 生成字幕遮挡视频
     failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
@@ -1098,7 +1100,8 @@ def gen_video_by_script(task_info, video_info_dict):
     if check_failure_details(failure_details):
         return failure_details, chosen_script
 
-    return failure_details, chosen_script
+    cost_time_info['生成视频耗时'] = time.time() - start_time
+    return failure_details, chosen_script, cost_time_info
 
 
 if __name__ == "__main__":
