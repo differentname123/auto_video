@@ -21,7 +21,7 @@ import traceback  # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\new_taobao6"
+USER_DATA_DIR = r"W:\temp\dahao"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 
@@ -199,33 +199,28 @@ def login_and_save_session(model_name: str = "gemini-2.5-pro"):
 
 def click_acknowledge_if_present(page: Page):
     """
-    (内部调用) 检查并点击可能出现的 "Acknowledge" 弹窗按钮。
-    此函数会快速检查按钮是否存在，如果不存在则不会等待，避免拖慢流程。
+    检查并点击 "Acknowledge" 弹窗按钮。
     """
-    # print("[*] 正在检查 'Acknowledge' 弹窗...")
+    # 优先尝试匹配 aria-label，这是最准确的 Role 匹配方式
+    # 或者使用 page.locator("button", has_text="Acknowledge")
+    acknowledge_button = page.get_by_role("button", name="Agree to the copyright acknowledgement")
     time.sleep(2)
-
-    # 使用 get_by_role 是 Playwright 推荐的最健壮的方式
-    # 它会同时匹配按钮的可见文本 "Acknowledge"
-    acknowledge_button = page.get_by_role("button", name="Acknowledge")
-
     try:
-        # 使用一个非常短的超时时间来检查按钮是否可见
-        # 如果弹窗存在，它通常会很快出现
-        if acknowledge_button.is_visible(timeout=3000):  # 等待最多3秒
+        # is_visible 会自动轮询等待元素出现，直到超时。
+        # 这里不需要 time.sleep，直接依靠 timeout。
+        if acknowledge_button.is_visible(timeout=5000):
             print("[+] 检测到 'Acknowledge' 按钮，正在点击...")
             acknowledge_button.click()
-            # 等待按钮消失，确认弹窗已关闭
+
+            # 确认点击成功（按钮消失）
             expect(acknowledge_button).to_be_hidden(timeout=5000)
             print("[+] 'Acknowledge' 弹窗已处理。")
         else:
-            print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
-            pass
-    except Exception:
-        # 如果在3秒内按钮没有出现，is_visible 会返回 False，不会抛出异常。
-        # 这里加一个 except 以防万一，比如页面跳转导致检查失败。
-        print("[-] 检查 'Acknowledge' 弹窗时发生意外或未找到，继续执行。")
+            print("[-] 未发现 'Acknowledge' 弹窗 (超时)，继续执行。")
 
+    except Exception as e:
+        # 捕获可能的报错，比如元素在判断可见后瞬间消失导致 click 失败
+        print(f"[-] 处理 'Acknowledge' 弹窗时发生异常: {e}")
 
 def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_data_dir=USER_DATA_DIR,
                            model_name: str = "gemini-2.5-pro") -> Tuple[Optional[str], Optional[str]]:
@@ -263,7 +258,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
         with sync_playwright() as p:
             try:
                 # 启动持久化上下文，它会自动加载 user_data_dir 中的登录信息
-
+                #
                 context = p.chromium.launch_persistent_context(
                     user_data_dir=user_data_dir,
                     headless=False,  # 必须保持 False 以通过反爬检测
@@ -327,6 +322,7 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
 
             for i in range(3):
                 # 5. 提交 Prompt
+                click_acknowledge_if_present(page)
                 _submit_prompt(page, prompt)
                 # 6. 等待并获取响应
                 response_text = _wait_and_get_response(page)

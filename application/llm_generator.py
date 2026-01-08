@@ -14,7 +14,10 @@ import re
 import time
 import traceback
 from collections import Counter
+import threading  # 需要确保导入 threading 模块
 
+# 定义全局信号量，限制 fix_logical_scene_info 的最大并发数为 3
+_fix_scene_semaphore = threading.Semaphore(3)
 import numpy as np
 
 from application.video_common_config import correct_owner_timestamps
@@ -421,7 +424,7 @@ def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_m
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
     strat_time = time.time()
     time_map = {}  # 用于缓存已处理的时间戳，避免重复计算
-
+    print(f"🔧 开始修正 {video_path} 的逻辑场景时间戳...")
     # 检查是否有数据（仅用于打印一条全局警告，不影响逻辑运行）
     has_valid_data = any(c and c[0] is not None and c[1] > 0 for c in merged_timestamps)
     if not has_valid_data:
@@ -536,6 +539,8 @@ def append_segmentation_constraints(full_prompt, fixed_points, max_scenes, guida
 
     return full_prompt
 
+
+
 def gen_logical_scene_llm(video_path, video_info, all_path_info):
     """
     生成新的视频方案
@@ -584,9 +589,11 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes*2)
             cost_time_info['get_scene_time'] = time.time() - start_time
 
-            start_time = time.time()
-            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
-            cost_time_info['fix_scene_time'] = time.time() - start_time
+            # 使用信号量控制并发，最多3个线程同时进入此代码块
+            with _fix_scene_semaphore:
+                start_time = time.time()
+                logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+                cost_time_info['fix_scene_time'] = time.time() - start_time
 
             return None, logical_scene_info, cost_time_info
         except Exception as e:
@@ -672,11 +679,11 @@ def gen_overlays_text_llm(video_path, video_info):
             video_overlays_text_info = string_to_object(raw)
             check_result, check_info = check_overlays_text(video_overlays_text_info, video_duration_ms)
             if not check_result:
-                error_info = f"优化方案检查未通过: {check_info} {raw} {log_pre}"
+                error_info = f"优化方案检查未通过: {check_info} {raw} {log_pre} {check_info}"
                 raise ValueError(error_info)
             return error_info, video_overlays_text_info
         except Exception as e:
-            error_str = f"{error_info} {str(e)}"
+            error_str = f"{str(e)}"
             print(f"视频覆盖文字方案检查未通过 (尝试 {attempt}/{max_retries}): {e} {raw} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")

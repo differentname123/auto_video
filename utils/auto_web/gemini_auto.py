@@ -149,10 +149,33 @@ class PlaywrightAccountManager:
             # 过滤掉已失效或已用完次数的账号
             active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
 
-            # 如果池不满，补充新账号（优先选总使用次数最少的）
+            # 如果池不满，补充新账号（优先选总使用次数最少的，且必须满足30分钟冷却时间）
             needed = max_concurrency - len(active_pool)
             if needed > 0:
-                candidates = [n for n in valid_accounts_map if n not in active_pool]
+                # 定义冷却时间 30分钟
+                COOLDOWN_SECONDS = 1200
+                now_dt = datetime.now()
+
+                def is_cooldown_ready(acc_name):
+                    """检查账号上次使用时间是否在30分钟前"""
+                    last_time_str = stats.get(acc_name, {}).get('last_used_time', '')
+                    if not last_time_str:
+                        return True  # 从未使用的账号，直接可用
+                    try:
+                        last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
+                        # 只有当 (当前时间 - 上次时间) > 30分钟 时才允许被选中进入活跃池
+                        return (now_dt - last_time).total_seconds() > COOLDOWN_SECONDS
+                    except ValueError:
+                        return True
+
+                # 筛选候选人：在有效列表中 + 不在当前活跃池中 + 满足冷却时间
+                candidates = [
+                    n for n in valid_accounts_map
+                    if n not in active_pool
+                       and is_cooldown_ready(n)
+                ]
+
+                # 按总使用次数排序，优先使用少的
                 candidates.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
                 active_pool.extend(candidates[:needed])
 
@@ -165,12 +188,12 @@ class PlaywrightAccountManager:
             if idle_in_pool:
                 idle_in_pool.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
                 target_name = idle_in_pool[0]
-            else:
-                # 备选逻辑：如果池内恰好没空位（极其罕见），从池外找一个空闲的
-                all_idle = [n for n, info in stats.items() if isinstance(info, dict) and info.get('status') == 'idle']
-                if all_idle:
-                    all_idle.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
-                    target_name = all_idle[0]
+            # else:
+            #     # 备选逻辑：如果池内恰好没空位（极其罕见），从池外找一个空闲的
+            #     all_idle = [n for n, info in stats.items() if isinstance(info, dict) and info.get('status') == 'idle']
+            #     if all_idle:
+            #         all_idle.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+            #         target_name = all_idle[0]
 
             if not target_name:
                 save_json(self.stats_path, stats)
@@ -199,7 +222,7 @@ class PlaywrightAccountManager:
                 info['last_error_info'] = str(error_info)[:1000] if error_info else None
                 # 如果有错误，可以选择重置连续使用计数，让它有机会被轮换出去
                 if error_info:
-                    print(f"[Manager] 账号 {account_name} 出现错误，重置其连续使用次数。")
+                    print(f"[Manager] 账号 {account_name} 出现错误，重置其连续使用次数。{error_info}")
                     info['current_streak'] = 0
 
             save_json(self.stats_path, stats)
