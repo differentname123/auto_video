@@ -275,7 +275,7 @@ def gen_extra_info(video_info_dict, manager):
         logical_cost_time_info['total_time'] = time.time() - start_time
         cost_time_info[video_id]['logical_scene'] = logical_cost_time_info
         if check_failure_details(failure_details):
-            return failure_details
+            return failure_details, cost_time_info
         print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {logical_cost_time_info['total_time']:.2f}s")
 
         # ---------------- 阶段2: 情绪性花字 ----------------
@@ -298,7 +298,7 @@ def gen_extra_info(video_info_dict, manager):
         # 记录耗时
         cost_time_info[video_id]['overlays_text'] = time.time() - t_start
         if check_failure_details(failure_details):
-            return failure_details
+            return failure_details, cost_time_info
         failure_details = {}
         print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['overlays_text']}")
 
@@ -323,7 +323,7 @@ def gen_extra_info(video_info_dict, manager):
         cost_time_info[video_id]['owner_asr'] = time.time() - t_start
 
         if check_failure_details(failure_details):
-            return failure_details
+            return failure_details, cost_time_info
         print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['owner_asr']:.2f}s")
 
         # ---------------- 阶段4: 互动信息 ----------------
@@ -345,7 +345,7 @@ def gen_extra_info(video_info_dict, manager):
         # 记录耗时
         cost_time_info[video_id]['hudong_info'] = time.time() - t_start
         if check_failure_details(failure_details):
-            return failure_details
+            return failure_details, cost_time_info
         print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['hudong_info']:.2f}s")
 
         # ---------------- 最后: 打印各阶段耗时 ----------------
@@ -574,7 +574,6 @@ def process_single_task(task_info, manager, gen_video=False):
     """
     print(f"🚀 视频开始视频处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
-    time_records = []
     all_cost_time_info = {}
     start_time = time.time()
     chosen_script = None
@@ -642,9 +641,7 @@ def process_single_task(task_info, manager, gen_video=False):
             return failure_details, video_info_dict, chosen_script
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
-    # [新增] 最终打印所有阶段耗时
-    time_records_str = ", ".join(time_records)
-    print(f"✅完成视频完成 成功视频成功处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {time_records_str}")
+    print(f"✅完成视频完成 成功视频成功处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
 
     return failure_details, video_info_dict, chosen_script
 

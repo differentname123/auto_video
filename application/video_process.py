@@ -1089,16 +1089,16 @@ def gen_video_by_script(task_info, video_info_dict):
     # 生成字幕遮挡视频
     failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details, chosen_script
+        return failure_details, chosen_script, cost_time_info
 
     # 生成有了图片文字的视频
     failure_details = add_image_to_video(video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details, chosen_script
+        return failure_details, chosen_script, cost_time_info
 
     failure_details, chosen_script = gen_new_video(task_info, video_info_dict)
     if check_failure_details(failure_details):
-        return failure_details, chosen_script
+        return failure_details, chosen_script, cost_time_info
 
     cost_time_info['生成视频耗时'] = time.time() - start_time
     return failure_details, chosen_script, cost_time_info

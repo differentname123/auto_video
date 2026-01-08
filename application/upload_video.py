@@ -24,7 +24,7 @@ from rich.table import Table
 
 from application.process_video import process_single_task, query_need_process_tasks
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths, \
-    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH
+    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths
 from utils.bilibili.bilibili_uploader import upload_to_bilibili
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json
 from utils.mongo_base import gen_db_object
@@ -73,22 +73,13 @@ def sort_tasks(existing_video_tasks, not_existing_video_tasks, user_info_map):
         # 1. 获取 userName
         user_name = task.get('userName')
 
-        # 2. 获取 count (从 user_info_map 中查找)
         count = user_info_map.get(user_name, 0)
-
-        # 3. 获取 schedule_date (字符串直接使用)
-        # 结构: task['creation_guidance_info']['schedule_date']
         guidance_info = task.get('creation_guidance_info', {})
 
-        # 直接获取字符串 '2026-01-05'
-        # 给个默认值 '' (空字符串)，以防数据缺失导致排序报错
         schedule_date_str = guidance_info.get('schedule_date', '')
 
-        # 4. 获取 update_time
         update_time = task.get('update_time', '')
 
-        # 5. 返回元组
-        # 字符串比较: '2026-01-05' < '2026-01-06'，符合预期
         return (count, schedule_date_str, update_time)
 
     # 分别对两个列表执行排序
@@ -637,6 +628,63 @@ def process_idle_tasks(
             print(f"   ⚡ 未进行实际的处理 处理太快了 {processing_duration:.2f}s，继续处理...")
 
 
+def gen_all_files_to_cleanup(task_info):
+    """
+    梳理出投稿后需要删除的文件
+    扫描 file_path_list 目录及其子目录，收集不在 exclude_file_list 中的所有文件路径
+    :param task_info: 任务信息字典
+    :return: 需要清理的文件路径列表 clean_files
+    """
+    # 1. 初始化排除列表和目录列表
+    exclude_file_list = ['merged_timestamps.json']
+    file_path_list = []
+
+    # 2. 获取视频相关的路径和排除文件
+    video_id_list = task_info.get('video_id_list', [])
+    for video_id in video_id_list:
+        # 假设 build_video_paths 是外部定义的函数
+        video_path_info = build_video_paths(video_id)
+        origin_video_path = video_path_info.get('origin_video_path')
+
+        if origin_video_path:
+            video_file_name = os.path.basename(origin_video_path)
+            base_dir = os.path.dirname(origin_video_path)
+            file_path_list.append(base_dir)
+            exclude_file_list.append(video_file_name)
+    task_path_info = build_task_video_paths(task_info)
+    final_output_path = task_path_info.get('final_output_path')
+
+    if final_output_path:
+        final_output_file_name = os.path.basename(final_output_path)
+        exclude_file_list.append(final_output_file_name)
+        base_dir = os.path.dirname(final_output_path)
+        file_path_list.append(base_dir)
+
+    clean_files = []
+    keep_files = []
+
+    # 转换为集合以提高查找性能 (O(1) 复杂度)
+    exclude_files_set = set(exclude_file_list)
+    # 目录去重，避免重复扫描同一个文件夹
+    unique_dirs = set(file_path_list)
+
+    for dir_path in unique_dirs:
+        # 检查目录是否存在，防止报错
+        if not os.path.exists(dir_path):
+            continue
+
+        # os.walk 会递归遍历 dir_path 下的所有子目录
+        for root, dirs, files in os.walk(dir_path):
+            for file_name in files:
+                if file_name not in exclude_files_set:
+                    full_path = os.path.join(root, file_name)
+                    clean_files.append(str(full_path))
+                else:
+                    keep_files.append(file_name)
+
+    return clean_files, keep_files
+
+
 def auto_upload(manager):
     """
     进行单次循环的投稿
@@ -681,13 +729,13 @@ def auto_upload(manager):
             print(f"❌ 生成视频失败，跳过上传 {task_info.get('video_id_list', [])} 用户 {user_name} ")
             continue
 
-        all_files_to_cleanup = []
+        clean_files, keep_files = gen_all_files_to_cleanup(task_info)
         account_executor = account_executors[user_name]
         future = account_executor.submit(
             upload_worker,
             upload_params,
             task_info,
-            all_files_to_cleanup,
+            clean_files,
             user_name,
             manager,
         )

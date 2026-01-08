@@ -184,7 +184,7 @@ def check_failure_details(failure_details):
     """
     for video_id, detail in failure_details.items():
         if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
-            print(f"❌ 失败视频失败  结束视频结束 检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
+            print(f"❌ 失败视频失败  结束视频结束 错误视频错误 检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
             return True
     return False
 
@@ -325,3 +325,6 @@ def fix_split_time_points(remove_time_segments_ms, split_time_points):
 BVID_FILE_PATH = r'W:\project\python_project\auto_video\config\bvid_file.json' # 用于存放拉取到的平台视频数据，方便进行播放量统计以及计算时间投稿成功的数量
 
 USER_STATISTIC_INFO_PATH = r'W:\project\python_project\auto_video\config\user_upload_info.json' # 用于存放用户的统计信息
+
+
+ALL_BILIBILI_EMOTE_PATH = r'W:\project\python_project\auto_video\config\all_emote.json'

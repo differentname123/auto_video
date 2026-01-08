@@ -599,24 +599,45 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None, {}  # 达到最大重试次数后返回 None
 
+
 def check_overlays_text(optimized_video_plan, video_duration_ms):
     """
     检查优化的方案
+    逻辑更新：先过滤掉文本长度 > 15 的条目，再检查剩余条目的数量和时间范围。
     """
 
     overlays = optimized_video_plan.get('overlays', [])
-    # 长度要大于2
+
+    # -------------------------------------------------
+    # 1. 过滤：移除文本长度大于 15 的 overlay
+    # -------------------------------------------------
+    filtered_overlays = [
+        overlay for overlay in overlays
+        if len(overlay.get('text', '').strip()) <= 15
+    ]
+
+    # 修改原本的 optimized_video_plan
+    optimized_video_plan['overlays'] = filtered_overlays
+    # 更新局部变量 overlays 用于后续检查
+    overlays = filtered_overlays
+
+    # -------------------------------------------------
+    # 2. 常规检查
+    # -------------------------------------------------
+
+    # 检查：过滤后长度是否还大于等于 2
     if len(overlays) < 2:
-        return False, f"优化方案检查失败：overlays 长度必须至少为 2。当前长度为 {len(overlays)}。"
-    # 每个start必须都在视频时长范围内
+        return False, f"优化方案检查失败：经过长文本过滤后，overlays 长度必须至少为 2。当前长度为 {len(overlays)}。"
+
+    # 检查：每个start必须都在视频时长范围内
     for i, overlay in enumerate(overlays):
         start = overlay.get('start')
+        # 注意：这里假设 time_to_ms 函数在外部已定义
         start_ms = time_to_ms(start)
-        text = overlay.get('text', '').strip()
-        if len(text) > 15:
-            return False, f"优化方案检查失败：第 {i + 1} 个 overlay 的文本长度过长（>=10）。文本: {text}"
+
         if not (0 <= start_ms <= video_duration_ms):
             return False, f"优化方案检查失败：第 {i + 1} 个 overlay 的 start 时间 {start} 超出视频时长范围 [0, {video_duration_ms}ms]。"
+
     return True, "优化方案检查通过。"
 
 
@@ -963,8 +984,9 @@ def gen_hudong_by_llm(video_path, video_info):
         prompt = read_file_to_str(prompt_file_path)
         duration = probe_duration(video_path)
     except Exception as e:
-        print(f"{log_pre}初始化prompt或获取视频时长时出错: {e} ")
-        return None
+        error_info = f"{log_pre}初始化prompt或获取视频时长时出错: {e} "
+        print(error_info)
+        return error_info, None
 
     prompt_with_duration = f"{prompt}{base_prompt}"
     comment_list = video_info.get('base_info', {}).get('comment_list', [])
