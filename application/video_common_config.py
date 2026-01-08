@@ -184,7 +184,7 @@ def check_failure_details(failure_details):
     """
     for video_id, detail in failure_details.items():
         if detail.get('error_level') in [ERROR_STATUS.ERROR, ERROR_STATUS.CRITICAL]:
-            print(f"❌ 检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
+            print(f"❌ 失败视频失败  结束视频结束 检测到严重错误，停止后续处理。视频ID: {video_id} 错误详情: {detail}")
             return True
     return False
 
