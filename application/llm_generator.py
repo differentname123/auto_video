@@ -424,7 +424,7 @@ def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_m
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
     strat_time = time.time()
     time_map = {}  # 用于缓存已处理的时间戳，避免重复计算
-    print(f"🔧 开始修正 {video_path} 的逻辑场景时间戳...")
+    print(f"🔧 开始修正开始 {video_path} 的逻辑场景时间戳...")
     # 检查是否有数据（仅用于打印一条全局警告，不影响逻辑运行）
     has_valid_data = any(c and c[0] is not None and c[1] > 0 for c in merged_timestamps)
     if not has_valid_data:
@@ -464,7 +464,7 @@ def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, ma
             # 4. 更新与缓存
             time_map[orig_ts] = new_ts
             scene[key] = new_ts
-    print(f"🎯  {video_path} 时间修正完成，总耗时 {time.time() - strat_time:.2f} 秒。 场景数量为{len(scenes)}")
+    print(f"🎯  {video_path} 完成修正完成，总耗时 {time.time() - strat_time:.2f} 秒。 场景数量为{len(scenes)}")
 
     return logical_scene_info
 
