@@ -597,7 +597,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
 
             return None, logical_scene_info, cost_time_info
         except Exception as e:
-            error_str = f"{error_info} {str(e)}"
+            error_str = f"{error_info} {str(e)} {log_pre}"
             print(f"生成逻辑性场景划分失败 (尝试 {attempt}/{max_retries}): {error_str} {log_pre} {gen_error_info}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
@@ -683,7 +683,7 @@ def gen_overlays_text_llm(video_path, video_info):
                 raise ValueError(error_info)
             return error_info, video_overlays_text_info
         except Exception as e:
-            error_str = f"{str(e)}"
+            error_str = f"{str(e)} {log_pre}"
             print(f"视频覆盖文字方案检查未通过 (尝试 {attempt}/{max_retries}): {e} {raw} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
@@ -935,7 +935,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
             owner_asr_info = correct_owner_timestamps(owner_asr_info, video_duration_ms)
             return error_info, owner_asr_info
         except Exception as e:
-            error_str = f"{error_info} {str(e)} {gen_error_info}"
+            error_str = f"{error_info} {str(e)} {gen_error_info} {log_pre}"
             print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
@@ -1039,7 +1039,7 @@ def gen_hudong_by_llm(video_path, video_info):
                 # return error_info, None
 
         except Exception as e:
-            error_info = f"生成弹幕互动信息 解析返回结果时出错: {str(e)}"
+            error_info = f" {log_pre} {str(e)}"
             print(f"{log_pre} ⚠️生成弹幕互动信息 在第 {attempt} 次调用 LLM API 时发生严重错误: {e}")
             # 如果API调用本身就失败了，也计为一次失败的尝试
             if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
@@ -1292,7 +1292,7 @@ def gen_video_script_llm(task_info, video_info_dict):
                 raise ValueError(error_info)
             return error_info, video_script_info, origin_final_scene_info
         except Exception as e:
-            error_str = f"{str(e)} {gen_error_info}"
+            error_str = f"{str(e)} {gen_error_info}  {log_pre}"
             print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
@@ -1477,7 +1477,7 @@ def gen_upload_info_llm(task_info, video_info_dict):
                 return error_info, upload_info_list
             except Exception as e:
                 traceback.print_exc()
-                error_info = f"生成上传信息 解析返回结果时出错: {str(e)}"
+                error_info = f" {log_pre} {str(e)}"
                 print(f"生成上传信息 解析返回结果时出错: {str(e)}")
                 # return error_info, None
 
