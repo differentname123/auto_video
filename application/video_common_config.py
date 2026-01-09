@@ -41,6 +41,7 @@ class TaskStatus:
     FAILED = '失败'
     DOWNLOADED = '已下载'
     PLAN_GENERATED = '方案已生成'
+    TO_UPLOADED = '待投稿'
     UPLOADED = '已投稿'
 
 

@@ -68,6 +68,8 @@ def run():
     from concurrent.futures import ThreadPoolExecutor
 
     tasks_to_process = query_need_process_tasks()
+    # 过滤掉 方案已生成 状态的任务
+    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
     print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     mongo_base_instance = gen_db_object()
@@ -631,6 +633,7 @@ def process_single_task(task_info, manager, gen_video=False):
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
+    manager.upsert_tasks([task_info])
     print(f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     if gen_video:
@@ -639,6 +642,8 @@ def process_single_task(task_info, manager, gen_video=False):
         all_cost_time_info.update(cost_time_info)
         if check_failure_details(failure_details):
             return failure_details, video_info_dict, chosen_script
+        task_info['status'] = TaskStatus.TO_UPLOADED
+        manager.upsert_tasks([task_info])
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
     print(f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")

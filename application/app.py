@@ -21,10 +21,10 @@ from typing import Optional, List, Tuple, Dict, Any, Set
 from flask import Flask, request, jsonify, render_template, Response
 
 from application.process_video import query_need_process_tasks
-from utils.common_utils import read_json, save_json, check_timestamp
+from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
-    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points
+    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths
 
 _configure_third_party_paths()
 
@@ -193,6 +193,9 @@ def check_cached_material(cached_material, video_item):
             return False
 
         print(f"{cached_material.get('video_id')} 检测到素材配置变更，清理相关缓存数据...")
+        all_path_info = build_video_paths(cached_material.get('video_id'))
+        origin_video_path = all_path_info.get('origin_video_path')
+        delete_files_in_dir_except_target(origin_video_path)
         cached_material['logical_scene_info'] = None
         cached_material['video_overlays_text_info'] = None
         cached_material['owner_asr_info'] = None

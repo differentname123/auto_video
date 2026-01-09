@@ -14,6 +14,7 @@ import json
 import os
 import random
 import re
+import shutil
 import string
 import traceback
 from collections import defaultdict
@@ -876,3 +877,53 @@ def filter_danmu(danmu_list, total_seconds):
         time_diff += 4
         processed_danmu.append(new_danmu)
     return processed_danmu
+
+
+def delete_files_in_dir_except_target(keep_file_path):
+    """
+    获取指定文件的目录，并删除该目录下除了该文件以外的所有内容。
+
+    Args:
+        keep_file_path (str): 需要保留的文件的路径
+    """
+    try:
+        # 1. 获取绝对路径，确保路径比较准确
+        abs_keep_path = os.path.abspath(keep_file_path)
+
+        # 2. 获取目录路径
+        directory = os.path.dirname(abs_keep_path)
+
+        # 如果目录不存在，直接返回，不报错
+        if not os.path.exists(directory):
+            print(f"目录不存在: {directory}")
+            return
+
+        # 3. 遍历目录下的所有内容
+        for filename in os.listdir(directory):
+            # 拼接当前遍历到的文件的完整路径
+            file_path = os.path.join(directory, filename)
+
+            # 获取当前文件的绝对路径用于比较
+            abs_file_path = os.path.abspath(file_path)
+
+            # 4. 核心逻辑：如果是我们要保留的文件，直接跳过
+            if abs_file_path == abs_keep_path:
+                continue
+
+            # 5. 删除操作（由于是遍历，建议加一个内部try，防止因为某个文件被占用导致整个流程中断）
+            try:
+                if os.path.isfile(abs_file_path) or os.path.islink(abs_file_path):
+                    os.remove(abs_file_path)  # 删除文件或软链接
+                    print(f"已删除文件: {filename}")
+                elif os.path.isdir(abs_file_path):
+                    shutil.rmtree(abs_file_path)  # 删除子文件夹
+                    print(f"已删除目录: {filename}")
+            except Exception as e:
+                # 打印错误但不抛出，确保继续处理下一个文件
+                print(f"删除 {filename} 失败: {e}")
+
+    except Exception as e:
+        # 6. 外层捕获所有未知异常，确保绝不影响调用者
+        print(f"清理目录函数发生错误: {e}")
+        # 这里可以选择打印堆栈信息用于调试，但在生产环境中可以注释掉
+        # traceback.print_exc()
