@@ -328,3 +328,7 @@ USER_STATISTIC_INFO_PATH = r'W:\project\python_project\auto_video\config\user_up
 
 
 ALL_BILIBILI_EMOTE_PATH = r'W:\project\python_project\auto_video\config\all_emote.json'
+USER_BVID_FILE = r'W:\project\python_project\auto_video\config\user_bvid_file.json'
+ALL_BVID_FILE = r'W:\project\python_project\auto_video\config\all_bvid_file.json'
+
+COMMENTER_USAFE_FILE = r'W:\project\python_project\auto_video\config\commenter_usage.json'

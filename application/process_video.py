@@ -641,7 +641,7 @@ def process_single_task(task_info, manager, gen_video=False):
             return failure_details, video_info_dict, chosen_script
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
-    print(f"✅完成视频完成 成功视频成功处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
+    print(f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
 
     return failure_details, video_info_dict, chosen_script
 

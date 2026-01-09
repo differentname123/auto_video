@@ -24,12 +24,14 @@ from rich.table import Table
 
 from application.process_video import process_single_task, query_need_process_tasks
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths, \
-    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths
+    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths, ALL_BILIBILI_EMOTE_PATH
 from utils.bilibili.bilibili_uploader import upload_to_bilibili
-from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json
+from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json, get_top_comments, \
+    extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
-from utils.video_utils import get_frame_at_time_safe, create_enhanced_cover
+from utils.video_utils import get_frame_at_time_safe, create_enhanced_cover, probe_duration
+
 config_map = {}
 error_user_map = {}
 
@@ -202,7 +204,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) >= 0:
+    if len(already_upload_users) >= 1:
         print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
@@ -416,7 +418,8 @@ def upload_worker(
         task_info,
         files_to_cleanup: List[Optional[str]],
         userName: str,
-        manager
+        manager,
+        video_info_dict
 ) -> None:
     """
     后台上传任务（在各自账号的单线程 executor 中运行，保证同账号串行）；
@@ -427,7 +430,7 @@ def upload_worker(
     max_retries = 3
     result: Optional[Dict[str, Any]] = None
     t_upload = time.time()
-
+    print(f"🚀 准备为{userName} 投稿 video_id_list={video_id_list} 上传参数：{upload_params}")
     # 上传重试
     for attempt in range(1, max_retries + 1):
         try:
@@ -449,8 +452,7 @@ def upload_worker(
         try:
             print(
                 f"🎉 后台投稿成功！AID={result['aid']}  BVID={result['bvid']} video_id_list={video_id_list} "
-                f"user={userName} 上传耗时 {time.time() - t_upload:.2f} 秒。"
-            )
+                f"user={userName} 上传耗时 {time.time() - t_upload:.2f} 秒。 上传参数：{upload_params}")
             # 删除临时文件（上传成功后清理）
             for p in files_to_cleanup or []:
                 try:
@@ -464,8 +466,20 @@ def upload_worker(
 
             print(f"⚠️ 后台上传后处理异常：{e}")
 
+        try:
+            video_path = upload_params.get("video_path", "")
+            video_duration = probe_duration(video_path)
+        except Exception as e:
+            traceback.print_exc()
+            video_duration = 120
+
+        hudong_info = build_hudong_info(task_info, video_info_dict, video_duration)
+
         task_info["upload_params"] = upload_params
         task_info["upload_result"] = result
+        task_info["bvid"] = result["bvid"]
+        task_info["video_duration"] = video_duration
+        task_info["hudong_info"] = hudong_info
         task_info["uploaded_time"] = datetime.now()
         task_info["status"] = TaskStatus.UPLOADED
         manager.upsert_tasks([task_info])
@@ -685,6 +699,64 @@ def gen_all_files_to_cleanup(task_info):
     return clean_files, keep_files
 
 
+
+def build_hudong_info(task_info, video_info_dict, video_duration):
+    """
+    生成该视频的互动信息
+    :param task_info:
+    :param video_info_dict:
+    :param all_emote_list:
+    :return:
+    """
+    try:
+        all_emote_list = read_json(ALL_BILIBILI_EMOTE_PATH)
+
+        hudong_info = {}
+        upload_info = task_info.get('upload_result', {})
+        total_seconds = int(video_duration)
+        interaction_prompts, supplementary_notes = extract_guides(upload_info)
+        if len(interaction_prompts) == 0:
+            interaction_prompts = ["刷到这个视频的你，希望今天能有个好心情呀~",
+                                   "叮！你收到一份来自UP主的好运，请注意查收哦！",
+                                   "不管此刻你在做什么，都要记得好好照顾自己。",
+                                   "嘿，朋友，为你正在付出的一切点赞，你超棒的！",
+                                   "很高兴遇见你，愿所有美好都向你奔赴而来。"]
+        if len(supplementary_notes) == 0:
+            supplementary_notes = ["感谢你愿意花时间看到最后，愿这份好运能一直陪着你。",
+                                   "如果觉得视频还不错，不妨点个赞，把这份快乐和祝福一起带走吧！",
+                                   "视频虽已结束，但我的祝福不会。祝你，不止今天，天天开心！",
+                                   "感谢我们的这次相遇，我们下期再见，在那之前，要一切顺利哦！",
+                                   "那么，就到这里啦。晚安，祝你好梦，忘掉所有烦恼。"]
+        interaction_danmu_list = [{'建议时间戳': 1, '推荐弹幕内容': interaction_prompts}]
+        supplementary_notes_list = [{'建议时间戳': total_seconds - 8, '推荐弹幕内容': supplementary_notes}]
+
+        owner_danmu_list = []  # 用于存储UP主的弹幕
+        owner_danmu_list.extend(interaction_danmu_list)  # 将互动引导弹幕添加到UP主弹幕列表中
+        owner_danmu_list.extend(supplementary_notes_list)  # 将补充信息弹幕添加到UP主弹幕列表中
+
+        comment_list = get_top_comments(video_info_dict, need_image=True)
+        format_bilibili_emote(comment_list, all_emote_list)
+
+        all_danmu_list = []
+        for video_id, video_info in video_info_dict.items():
+            danmu_info = video_info.get('hudong_info', {})
+            danmu_list = parse_and_group_danmaku(danmu_info)
+            all_danmu_list.extend(danmu_list)
+
+        danmu_list = filter_danmu(all_danmu_list, total_seconds)
+        hudong_info['comment_list'] = comment_list
+        hudong_info['owner_danmu'] = owner_danmu_list
+        hudong_info["duration"] = total_seconds
+        hudong_info['danmu_list'] = danmu_list
+    except Exception as e:
+        traceback.print_exc()
+        print(f"⚠️ 生成互动信息失败：{e}")
+        hudong_info = {}
+    return hudong_info
+
+
+
+
 def auto_upload(manager):
     """
     进行单次循环的投稿
@@ -738,6 +810,7 @@ def auto_upload(manager):
             clean_files,
             user_name,
             manager,
+            video_info_dict
         )
         futures.append(future)
         already_upload_users.append(user_name)

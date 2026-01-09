@@ -21,7 +21,7 @@ import traceback  # 用于捕获更详细的异常信息
 # ==============================================================================
 # 用于保存浏览器登录状态的目录，请确保该目录可写
 # 第一次运行登录后，这里会生成包含cookies等信息的文件
-USER_DATA_DIR = r"W:\temp\dahao"
+USER_DATA_DIR = r"W:\temp\new_taobao13"
 TARGET_URL_BASE = 'https://aistudio.google.com/prompts/new_chat'
 
 
@@ -216,7 +216,7 @@ def click_acknowledge_if_present(page: Page):
             expect(acknowledge_button).to_be_hidden(timeout=5000)
             print("[+] 'Acknowledge' 弹窗已处理。")
         else:
-            print("[-] 未发现 'Acknowledge' 弹窗 (超时)，继续执行。")
+            print("[-] 未发现 'Acknowledge' 弹窗，继续执行。")
 
     except Exception as e:
         # 捕获可能的报错，比如元素在判断可见后瞬间消失导致 click 失败

@@ -17,7 +17,7 @@ from collections import Counter
 import threading  # 需要确保导入 threading 模块
 
 # 定义全局信号量，限制 fix_logical_scene_info 的最大并发数为 3
-_fix_scene_semaphore = threading.Semaphore(3)
+_fix_scene_semaphore = threading.Semaphore(1)
 import numpy as np
 
 from application.video_common_config import correct_owner_timestamps

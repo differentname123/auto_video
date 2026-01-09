@@ -9,12 +9,16 @@
 
 """
 import ast
+import difflib
 import json
 import os
+import random
 import re
 import string
+import traceback
+from collections import defaultdict
 from pathlib import Path
-from typing import Union
+from typing import Union, List, Optional
 
 import aiofiles
 import aiohttp
@@ -578,7 +582,7 @@ def init_config():
     return config_map
 
 
-def get_top_comments(video_info_dict, target_limit=20, min_guarantee=2):
+def get_top_comments(video_info_dict, target_limit=20, min_guarantee=2, need_image=False):
     """
     从视频字典中筛选评论：
     1. 每个视频保底选择 min_guarantee 条（不足则全选）。
@@ -589,7 +593,9 @@ def get_top_comments(video_info_dict, target_limit=20, min_guarantee=2):
 
     for info in video_info_dict.values():
         # 提取评论数据: [(内容, 点赞), ...]
-        comments = [(c[0], c[1]) for c in info.get('comment_list', [])]
+        comments = info.get('comment_list', [])
+        if not need_image:
+            comments = [(c[0], c[1]) for c in info.get('comment_list', [])]
 
         # 当前视频评论按点赞倒序排列
         comments.sort(key=lambda x: x[1], reverse=True)
@@ -610,3 +616,263 @@ def get_top_comments(video_info_dict, target_limit=20, min_guarantee=2):
     selected_comments.sort(key=lambda x: x[1], reverse=True)
 
     return selected_comments
+
+
+
+def most_similar_text(text_list: List[str], target_text: str) -> Optional[str]:
+    """
+    返回 text_list 中与 target_text 最为相似的字符串。
+    """
+    if not text_list:
+        return None
+
+    best_match = '[吃瓜]'
+    best_score = -1.0
+    for text in text_list:
+        score = difflib.SequenceMatcher(None, text, target_text).ratio()
+        if score > best_score:
+            best_score = score
+            best_match = text
+
+    return best_match
+
+
+
+def replace_bracketed(text: str, text_list: List[str]) -> str:
+    """
+    找到 text 中所有被 [ 和 ] 包围的子串。
+    对于前5个子串，提取其中内容 item，用 most_similar_text(text_list, item) 的返回值去替换整个 [item]。
+    对于第6个及以后的 [ 和 ] 子串，直接删除。
+
+    :param text: 包含若干 […] 片段的原始字符串
+    :param text_list: 用于匹配的候选字符串列表
+    :return: 处理后的新字符串
+    """
+
+    # 在外部函数作用域定义一个计数器
+    match_count = 0
+
+    # 回调函数：为每一个匹配项计算替换结果
+    def _replacer(match: re.Match) -> str:
+        nonlocal match_count
+        match_count += 1
+
+        # 如果是前5个匹配项，执行替换逻辑
+        if match_count <= 5:
+            inner = match.group(1)
+            best = most_similar_text(text_list, inner)
+            # 如果没找到任何匹配，保留原括号内容
+            return best if best is not None else match.group(0)
+        # 如果是第6个及以后的匹配项，返回空字符串，即删除该匹配
+        else:
+            return ""
+
+    # 使用正则替换所有 [内容]
+    # re.sub 会对每一个匹配项调用一次 _replacer 函数
+    return re.sub(r'\[([^\]]+)\]', _replacer, text)
+
+def format_bilibili_emote(comment_list, all_emote_list):
+    """
+    进行b站的emote转换，避免没有正常输出表情
+    """
+    for comment in comment_list:
+        # 将第一个元素调用 replace_bracketed
+        comment[0] = replace_bracketed(comment[0], all_emote_list)
+
+
+
+def extract_guides(data_list):
+    """
+    从给定的数据字典中提取“互动引导”和“补充信息”列表。
+
+    参数:
+        data: dict
+            数据结构中每个顶层 key 对应一个方案，方案内可能包含“简介”字典，
+            其下包含“互动引导”和“补充信息”字段。
+
+    返回:
+        Tuple[List[str], List[str]]
+            第一个元素是所有方案的“互动引导”列表，第二个元素是所有方案的“补充信息”列表。
+            如果没有对应字段，则返回空列表。
+    """
+    interaction_prompts = []
+
+    supplementary_notes = []
+
+    for upload_info in data_list:
+        # 获取“简介”部分
+        brief = upload_info.get("introduction", {})
+        # 提取互动引导
+        prompt = brief.get("interaction_guide")
+        if isinstance(prompt, str) and prompt.strip():
+            interaction_prompts.append(prompt.strip())
+        # 提取补充信息
+        note = brief.get("supplement_info")
+        if isinstance(note, str) and note.strip():
+            supplementary_notes.append(note.strip())
+
+    return interaction_prompts, supplementary_notes
+
+
+
+def parse_and_group_danmaku(data: dict) -> list:
+    """
+    解析输入的字典，将弹幕按时间戳进行分组。
+
+    Args:
+        data: 包含弹幕信息的源字典。
+
+    Returns:
+        一个按时间戳排序的列表。每个元素是一个字典，
+        包含 "建议时间戳" 和一个该时间戳下所有 "推荐弹幕内容" 的列表。
+    """
+    # 1. 使用 defaultdict(list) 来自动处理分组
+    grouped_danmaku = defaultdict(list)
+
+    # 2. 遍历 "开场弹幕" 并添加到分组字典中
+    opening_danmaku = data.get("开场弹幕")
+    if opening_danmaku:
+        timestamp = opening_danmaku.get("建议时间戳")
+        contents = opening_danmaku.get("推荐弹幕内容", [])
+        if timestamp and contents:
+            # 使用 extend 将列表中的所有元素都添加进去
+            grouped_danmaku[timestamp].extend(contents)
+
+    # 3. 遍历 "推荐弹幕列表" 并添加到分组字典中
+    recommendation_list = data.get("推荐弹幕列表", [])
+    recommendation_list_back = data.get("精选弹幕再创作列表", [])
+    recommendation_list.extend(recommendation_list_back)
+    for item in recommendation_list:
+        timestamp = item.get("建议时间戳")
+        contents = item.get("推荐弹幕内容", [])
+        if timestamp and contents:
+            grouped_danmaku[timestamp].extend(contents)
+
+    # 4. 将分组后的字典转换为目标格式的列表
+    final_list = []
+    for timestamp, contents in grouped_danmaku.items():
+        final_list.append({
+            "建议时间戳": timestamp,
+            "推荐弹幕内容": contents
+        })
+
+    # 5. 按时间戳对最终列表进行排序
+    final_list.sort(key=lambda x: x["建议时间戳"])
+
+    return final_list
+
+
+
+def filter_danmu(danmu_list, total_seconds):
+    """
+    过滤和调整弹幕列表。
+    1. 确保所有弹幕的时间戳在视频时长范围内，无效时间戳会随机分配。
+    2. 如果最终弹幕数量不足25条，则从通用弹幕池中随机抽取补足。
+
+    Args:
+        danmu_list: 弹幕列表，每个元素是包含 '建议时间戳' 和 '推荐弹幕内容' 的字典。
+        duration: 视频总时长，格式为 "HH:MM:SS" 或 "MM:SS" 或秒数。
+
+    Returns:
+        调整后的弹幕列表，至少有25条弹幕（除非视频时长无效）。
+    """
+    common_danmu_list = [
+        "屏幕那头的陌生人，不管你在哪里，祝你天天开心。",
+        "祝刷到这条视频的你，烦恼全消，未来可期。",
+        "愿刷到这里的你，凛冬散尽，星河长明。",
+        "希望这条弹幕能吸收你今天所有的不开心。",
+        "这条弹幕不为什么，就是想祝你万事胜意。",
+
+        "外面在下雨，屋里看视频，感觉很安心。",
+        "这里是弹幕许愿池，许个愿吧，万一实现了呢？",
+        "感觉累了，大家能在这里留下一句加油吗？给我也给你自己。",
+        "我的电量比进度条还多，优势在我！",
+        "前方高能！",
+        "白嫖失败，投币了投币了",
+        "给屏幕对面那个或许有些疲惫的你，一个看不见的拥抱。",
+        "今天也要好好吃饭，好好生活呀！",
+        "很高兴在此刻，与屏幕前的各位“网友”共度这一分一秒。",
+        "把不开心的事，都留在当下吧！",
+        "让这条弹幕带走你今天的疲惫。",
+    ]
+
+    danmaku_zouxin_sanlian_gongmian = [
+        "就冲结尾这句，放心把三连交了",
+        "三连送上，这结尾太值得",
+        "最后一段值得三连收藏",
+        "这句祝福让我毫不犹豫三连",
+        "把这段当成今日小确幸，三连已交付",
+        "这结尾值得多按几下（已按）",
+        "已三连，愿这份祝福常在",
+        "悄悄三连，最后一句反复回放中",
+        "被最后这句治愈了，三连必须的",
+        "最后这句值得三连也值得收藏",
+        "三连已给，感恩这份温柔",
+        "手滑三连了（是真的走心）",
+        "这祝福像暖阳，照进烦心处",
+        "一句走心话，整天都舒服了"
+    ]
+    try:
+        total_seconds = int(total_seconds)
+    except Exception as e:
+        total_seconds = None
+    if total_seconds is None or total_seconds <= 0:
+        return danmu_list
+
+    # === 第一步：处理并规范化传入的弹幕列表 ===
+    processed_danmu = []
+    for item in danmu_list:
+        try:
+            # 为了不修改原始列表，创建一个副本进行操作
+            new_item = item.copy()
+            ts = new_item.get('建议时间戳')
+            seconds = time_to_ms(ts) / 1000
+            seconds = int(seconds) if seconds is not None else None
+
+            # 如果时间戳无法解析或超出范围，则随机分配
+            if seconds is None or seconds < 0 or seconds > total_seconds:
+                seconds = random.randint(2, total_seconds - 10)
+
+            new_item['建议时间戳'] = seconds
+            processed_danmu.append(new_item)
+        except Exception as e:
+            traceback.print_exc()
+            print(f"处理弹幕时出错，跳过该条弹幕。错误信息: {e}")
+            continue
+
+    processed_danmu_count = 0
+    for item in processed_danmu:
+        if isinstance(item.get('推荐弹幕内容'), list):
+            processed_danmu_count += len(item['推荐弹幕内容'])
+
+    target_num = 25
+    # === 第二步（新增逻辑）：检查弹幕数量并补足到25条 ===
+    num_to_add = target_num - processed_danmu_count
+    num_to_add = min(num_to_add, len(common_danmu_list))  # 避免超出通用池范围
+    if num_to_add > 0:
+        print(f"弹幕数量为 {processed_danmu_count}，不足{target_num}条，需要补充 {num_to_add} 条。")
+        # 从通用弹幕池中随机选择 num_to_add 条
+        random_choices = random.sample(common_danmu_list, k=num_to_add)
+
+        for content in random_choices:
+            # 2. 在视频时长范围内随机分配一个时间戳（秒）
+            timestamp = random.randint(2, total_seconds - 10)
+
+            # 3. 创建新的弹幕字典并添加到列表中
+            new_danmu = {
+                '建议时间戳': timestamp,
+                '推荐弹幕内容': [content]
+            }
+            processed_danmu.append(new_danmu)
+
+    # 增加固定的三连弹幕
+    random_choices = random.sample(danmaku_zouxin_sanlian_gongmian, k=2)
+    time_diff = 6
+    for content in random_choices:
+        new_danmu = {
+            '建议时间戳': total_seconds - time_diff,
+            '推荐弹幕内容': [content]
+        }
+        time_diff += 4
+        processed_danmu.append(new_danmu)
+    return processed_danmu

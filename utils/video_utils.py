@@ -574,7 +574,7 @@ def get_scene(video_path, min_final_scenes=20):
         print(f"检测到已存在的合并时间戳文件，直接加载返回，场景数量为: {len(kept_sorted)} {kept_sorted}")
         return kept_sorted
 
-    start_time = time.time()
+    all_start_time = time.time()
     for attempt in range(max_attempts):
         # print(f"--- 第 {attempt + 1}/{max_attempts} 次尝试 ---")
         # print(f"当前使用的阈值列表: {thresholds} {video_path}")
@@ -622,7 +622,7 @@ def get_scene(video_path, min_final_scenes=20):
                 print(f" {video_path}已达到最大尝试次数，将使用当前结果。")
 
     # 循环结束后的收尾工作（保存文件等）
-    print(f"{video_path} 最终场景数量为: {len(kept_sorted)} 总共耗时: {time.time() - start_time:.2f} 秒 {kept_sorted} ")
+    print(f"{video_path} 最终场景数量为: {len(kept_sorted)} 总共耗时: {time.time() - all_start_time:.2f} 秒 {kept_sorted} ")
     save_json(
         merged_timestamps_path,
         kept_sorted)
