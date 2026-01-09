@@ -5,269 +5,76 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>抖音视频智能投稿系统</title>
     <style>
-        /* --- 1. 全局基础与字体优化 --- */
+        /* --- 样式保持完全一致，无变化 --- */
         :root {
-            --primary-color: #1890ff;
-            --primary-hover: #40a9ff;
-            --bg-color: #f4f7f9;
-            --card-bg: #ffffff;
-            --text-main: #333333;
-            --text-sub: #666666;
-            --border-color: #e8e8e8;
-            --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
-            --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
-            --warning-color: #faad14;
+            --primary-color: #1890ff; --primary-hover: #40a9ff; --bg-color: #f4f7f9;
+            --card-bg: #ffffff; --text-main: #333333; --text-sub: #666666;
+            --border-color: #e8e8e8; --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12); --warning-color: #faad14;
         }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            margin: 0;
-            background-color: var(--bg-color);
-            padding: 40px 0;
-            color: var(--text-main);
-            line-height: 1.5;
-        }
-
-        .container {
-            background: var(--card-bg);
-            padding: 40px;
-            border-radius: 16px;
-            box-shadow: var(--shadow-soft);
-            width: 90%;
-            max-width: 640px;
-            margin: 0 auto;
-            transition: transform 0.3s;
-        }
-
-        /* --- 2. 顶部用户信息 --- */
-        .user-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 25px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background-color: var(--bg-color); padding: 40px 0; color: var(--text-main); line-height: 1.5; }
+        .container { background: var(--card-bg); padding: 40px; border-radius: 16px; box-shadow: var(--shadow-soft); width: 90%; max-width: 640px; margin: 0 auto; transition: transform 0.3s; }
+        .user-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); }
         .welcome-text { font-size: 1.2rem; font-weight: 700; color: #2c3e50; }
         .stat-group { font-size: 0.85rem; color: var(--text-sub); margin-top: 4px; }
         .stat-badge { font-weight: 600; margin: 0 2px; }
-        .user-action {
-            color: var(--primary-color); cursor: pointer; font-size: 0.9rem;
-            transition: opacity 0.2s; text-decoration: none;
-        }
+        .user-action { color: var(--primary-color); cursor: pointer; font-size: 0.9rem; text-decoration: none; }
         .user-action:hover { opacity: 0.8; text-decoration: underline; }
-
-        /* --- 3. 提示气泡 (Tooltip) --- */
         .label-wrap { display: flex; align-items: center; gap: 6px; position: relative; width: fit-content; }
-
-        .info-icon {
-            display: inline-flex; justify-content: center; align-items: center;
-            width: 18px; height: 18px; border-radius: 50%;
-            background-color: #e6f7ff; color: var(--primary-color);
-            font-size: 12px; font-weight: bold; cursor: help;
-            transition: background-color 0.2s, color 0.2s;
-            flex-shrink: 0;
-        }
-
-        .info-icon:hover {
-            background-color: var(--primary-color); color: white;
-        }
-
-        .tooltip-text {
-            visibility: hidden; opacity: 0; width: 480px;
-            background-color: rgba(33, 33, 33, 0.95);
-            color: #fff; text-align: left;
-            border-radius: 8px; padding: 12px; font-size: 0.85rem; line-height: 1.5;
-            position: absolute; z-index: 1000; bottom: 150%; left: 50%;
-            transform: translateX(-50%);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-            transition: opacity 0.2s;
-            pointer-events: none; font-weight: normal;
-        }
-        .tooltip-text::after {
-            content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px;
-            border-width: 6px; border-style: solid; border-color: rgba(33, 33, 33, 0.95) transparent transparent transparent;
-        }
-        .info-icon:hover + .tooltip-text {
-            visibility: visible; opacity: 1;
-        }
-
-        /* --- 4. 视频卡片 --- */
-        .video-item-card {
-            background: #fff;
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-            position: relative;
-            transition: all 0.3s ease;
-            animation: slideDown 0.4s ease-out;
-        }
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .video-item-card:hover {
-            border-color: #b3d8ff;
-            box-shadow: var(--shadow-hover);
-        }
-
-        /* --- 字段同步高亮与历史记录样式 --- */
-        .field-synced {
-            border-color: var(--warning-color) !important;
-            background-color: #fffbe6 !important;
-            box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.2) !important;
-            transition: all 0.5s;
-        }
-
-        .history-row {
-            background-color: #fffbe6 !important;
-            border: 1px dashed #ffe58f !important;
-            position: relative;
-            margin-top: 8px;
-        }
-        .history-badge {
-            position: absolute;
-            top: -8px; left: 10px;
-            background-color: #faad14; color: white;
-            font-size: 10px; padding: 1px 6px;
-            border-radius: 4px; z-index: 10;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .sync-tip {
-            display: block; font-size: 11px; color: var(--warning-color);
-            margin-top: 4px; font-weight: bold; animation: fadeIn 0.5s;
-        }
+        .info-icon { display: inline-flex; justify-content: center; align-items: center; width: 18px; height: 18px; border-radius: 50%; background-color: #e6f7ff; color: var(--primary-color); font-size: 12px; font-weight: bold; cursor: help; flex-shrink: 0; }
+        .info-icon:hover { background-color: var(--primary-color); color: white; }
+        .tooltip-text { visibility: hidden; opacity: 0; width: 480px; background-color: rgba(33, 33, 33, 0.95); color: #fff; border-radius: 8px; padding: 12px; font-size: 0.85rem; position: absolute; z-index: 1000; bottom: 150%; left: 50%; transform: translateX(-50%); pointer-events: none; transition: opacity 0.2s; font-weight: normal; }
+        .tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: rgba(33, 33, 33, 0.95) transparent transparent transparent; }
+        .info-icon:hover + .tooltip-text { visibility: visible; opacity: 1; }
+        .video-item-card { background: #fff; border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 20px; position: relative; transition: all 0.3s ease; animation: slideDown 0.4s ease-out; }
+        @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .video-item-card:hover { border-color: #b3d8ff; box-shadow: var(--shadow-hover); }
+        .field-synced { border-color: var(--warning-color) !important; background-color: #fffbe6 !important; box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.2) !important; transition: all 0.5s; }
+        .history-row { background-color: #fffbe6 !important; border: 1px dashed #ffe58f !important; position: relative; margin-top: 8px; }
+        .history-badge { position: absolute; top: -8px; left: 10px; background-color: #faad14; color: white; font-size: 10px; padding: 1px 6px; border-radius: 4px; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .sync-tip { display: block; font-size: 11px; color: var(--warning-color); margin-top: 4px; font-weight: bold; animation: fadeIn 0.5s; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-        .input-styled {
-            width: 100%; padding: 10px 12px;
-            border: 1px solid #d9d9d9; border-radius: 6px;
-            font-size: 0.95rem; color: #333; background: #fff;
-            transition: all 0.3s; box-sizing: border-box;
-        }
-        .input-styled:focus {
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1);
-            outline: none;
-        }
-
+        .input-styled { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 0.95rem; background: #fff; box-sizing: border-box; }
+        .input-styled:focus { border-color: var(--primary-color); box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.1); outline: none; }
         .video-url-input { margin-bottom: 15px; padding: 12px; background: #fafafa; }
         .video-url-input:focus { background: #fff; }
-
-        .btn-remove-card {
-            position: absolute; top: -10px; right: -10px;
-            background: #ff4d4f; color: white; width: 26px; height: 26px;
-            border: none; border-radius: 50%; cursor: pointer;
-            box-shadow: 0 2px 8px rgba(255, 77, 79, 0.4);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 16px; line-height: 1; transition: transform 0.2s;
-        }
+        .btn-remove-card { position: absolute; top: -10px; right: -10px; background: #ff4d4f; color: white; width: 26px; height: 26px; border: none; border-radius: 50%; cursor: pointer; box-shadow: 0 2px 8px rgba(255, 77, 79, 0.4); display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; transition: transform 0.2s; }
         .btn-remove-card:hover { transform: scale(1.1) rotate(90deg); background: #ff7875; }
-
-        /* --- 5. 选项网格 --- */
-        .options-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px;
-            padding-top: 5px;
-        }
+        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px; padding-top: 5px; }
         .option-item { display: flex; flex-direction: column; gap: 6px; }
         .option-label { font-size: 0.85rem; color: #555; font-weight: 500; }
         .required-star { color: #ff4d4f; }
-
-        /* --- 动态时间段样式 --- */
-        .dynamic-section {
-            margin-top: 20px; padding-top: 15px; border-top: 1px dashed #eee;
-        }
+        .dynamic-section { margin-top: 20px; padding-top: 15px; border-top: 1px dashed #eee; }
         .dynamic-list-container { margin-top: 8px; }
-
-        .dynamic-row {
-            display: flex; align-items: flex-end; gap: 10px; margin-bottom: 12px;
-            background: #fafafa; padding: 8px; border-radius: 6px; border: 1px solid #f0f0f0;
-        }
-
+        .dynamic-row { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 12px; background: #fafafa; padding: 8px; border-radius: 6px; border: 1px solid #f0f0f0; }
         .time-group { display: flex; align-items: flex-end; gap: 4px; }
         .time-cell { display: flex; flex-direction: column; align-items: center; }
         .time-cell label { font-size: 10px; color: #888; margin-bottom: 2px; }
-        .time-cell input {
-            width: 48px; padding: 4px; text-align: center;
-            border: 1px solid #d9d9d9; border-radius: 4px;
-            font-family: monospace; font-size: 0.9rem;
-            -moz-appearance: textfield;
-        }
+        .time-cell input { width: 48px; padding: 4px; text-align: center; border: 1px solid #d9d9d9; border-radius: 4px; font-family: monospace; font-size: 0.9rem; -moz-appearance: textfield; }
         .time-cell input.t-ms { width: 70px; }
         .time-cell input:invalid { border-color: #ff4d4f; background-color: #fff1f0; }
         .time-sep { font-weight: bold; color: #333; padding-bottom: 6px; font-size: 1.1rem; }
         .range-sep { padding-bottom: 8px; color: #999; font-weight: bold; }
-
-        .btn-mini {
-            padding: 5px 10px; font-size: 0.85rem; border-radius: 4px;
-            cursor: pointer; border: 1px solid transparent; transition: all 0.2s;
-        }
-        .btn-add-row {
-            background-color: #f6ffed; border-color: #b7eb8f; color: #389e0d;
-            margin-top: 5px; display: inline-flex; align-items: center; gap: 4px;
-        }
+        .btn-mini { padding: 5px 10px; font-size: 0.85rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; transition: all 0.2s; }
+        .btn-add-row { background-color: #f6ffed; border-color: #b7eb8f; color: #389e0d; margin-top: 5px; display: inline-flex; align-items: center; gap: 4px; }
         .btn-add-row:hover { background-color: #d9f7be; }
-        .btn-del-row {
-            background-color: #fff1f0; border-color: #ffa39e; color: #f5222d;
-            margin-bottom: 1px;
-        }
+        .btn-del-row { background-color: #fff1f0; border-color: #ffa39e; color: #f5222d; margin-bottom: 1px; }
         .btn-del-row:hover { background-color: #ffccc7; }
-
-        /* --- 6. 全局设置区域 --- */
-        .global-settings-box {
-            border: none; border-radius: 12px; margin-top: 35px;
-            box-shadow: 0 0 0 1px #e6f7ff, 0 4px 15px rgba(24, 144, 255, 0.05);
-            background: #fff;
-        }
+        .global-settings-box { border: none; border-radius: 12px; margin-top: 35px; box-shadow: 0 0 0 1px #e6f7ff, 0 4px 15px rgba(24, 144, 255, 0.05); background: #fff; }
         .advanced-options { padding: 24px; }
-        .settings-header {
-            padding: 0 0 15px 0; margin-bottom: 20px;
-            border-bottom: 1px solid #f0f0f0; font-size: 1.1rem;
-            font-weight: 700; color: #003a8c;
-        }
-        .form-row {
-            display: grid; grid-template-columns: 140px 1fr;
-            align-items: center; margin-bottom: 18px;
-        }
+        .settings-header { padding: 0 0 15px 0; margin-bottom: 20px; border-bottom: 1px solid #f0f0f0; font-size: 1.1rem; font-weight: 700; color: #003a8c; }
+        .form-row { display: grid; grid-template-columns: 140px 1fr; align-items: center; margin-bottom: 18px; }
         textarea { resize: vertical; min-height: 80px; font-family: inherit; }
-
-        /* --- 7. 按钮交互 --- */
-        .btn {
-            width: 100%; padding: 15px; border: none; border-radius: 10px;
-            font-size: 1.05rem; cursor: pointer; font-weight: 600; margin-top: 15px; color: white;
-            transition: all 0.2s;
-        }
+        .btn { width: 100%; padding: 15px; border: none; border-radius: 10px; font-size: 1.05rem; cursor: pointer; font-weight: 600; margin-top: 15px; color: white; transition: all 0.2s; }
         .btn:active { transform: scale(0.98); }
-        .btn-primary {
-            background: linear-gradient(135deg, #1890ff, #096dd9);
-            box-shadow: 0 4px 15px rgba(24, 144, 255, 0.35);
-        }
+        .btn-primary { background: linear-gradient(135deg, #1890ff, #096dd9); box-shadow: 0 4px 15px rgba(24, 144, 255, 0.35); }
         .btn-primary:hover { background: linear-gradient(135deg, #40a9ff, #1890ff); }
-        .btn-secondary {
-            background: #fff; border: 1px dashed #d9d9d9; color: var(--text-sub);
-            width: auto; padding: 12px 30px; margin: 0 auto; display: block;
-        }
-        .btn-secondary:hover {
-            border-color: var(--primary-color); color: var(--primary-color); background: #f0f9ff;
-        }
+        .btn-secondary { background: #fff; border: 1px dashed #d9d9d9; color: var(--text-sub); width: auto; padding: 12px 30px; margin: 0 auto; display: block; }
+        .btn-secondary:hover { border-color: var(--primary-color); color: var(--primary-color); background: #f0f9ff; }
         .hidden { display: none !important; }
-        .loader {
-            width: 24px; height: 24px; border: 3px solid #f3f3f3;
-            border-top: 3px solid var(--primary-color); border-radius: 50%;
-            animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 10px;
-        }
+        .loader { width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top: 3px solid var(--primary-color); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 10px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        select.input-styled {
-            appearance: none;
-            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-            background-size: 16px;
-        }
+        select.input-styled { appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; }
     </style>
 </head>
 <body>
@@ -311,83 +118,35 @@
                     <div class="settings-header">🛠️ 创作参数设置</div>
 
                     <div class="form-row">
-                        <div class="label-wrap">
-                            <label class="option-label">视频风格类型</label>
-                            <i class="info-icon">?</i>
-                            <span class="tooltip-text">针对不同的类型题材能够有更好的创作效果</span>
-                        </div>
+                        <div class="label-wrap"><label class="option-label">视频风格类型</label><i class="info-icon">?</i><span class="tooltip-text">针对不同的类型题材能够有更好的创作效果</span></div>
                         <select id="video-type" class="input-styled">
-                            <option value="通用" selected>通用</option>
-                            <option value="游戏">游戏</option>
-                            <option value="体育">体育</option>
-                            <option value="娱乐">娱乐</option>
+                            <option value="通用" selected>通用</option><option value="游戏">游戏</option><option value="体育">体育</option><option value="娱乐">娱乐</option>
                         </select>
                     </div>
-
                     <div class="form-row">
-                        <div class="label-wrap">
-                            <label class="option-label">素材保留比例</label>
-                            <i class="info-icon">?</i>
-                            <span class="tooltip-text">• 无要求: 自动智能方案<br>• 全量保留: 所有场景保留<br>• 较多保留: 保留一半以上</span>
-                        </div>
-                        <select id="retention-ratio" class="input-styled">
-                            <option value="free" selected>无要求 (智能推荐)</option>
-                            <option value="full">全量保留</option>
-                            <option value="major">较多保留</option>
-                        </select>
+                        <div class="label-wrap"><label class="option-label">素材保留比例</label><i class="info-icon">?</i><span class="tooltip-text">• 无要求: 自动智能方案<br>• 全量保留: 所有场景保留<br>• 较多保留: 保留一半以上</span></div>
+                        <select id="retention-ratio" class="input-styled"><option value="free" selected>无要求 (智能推荐)</option><option value="full">全量保留</option><option value="major">较多保留</option></select>
                     </div>
-
                     <div class="form-row">
-                        <div class="label-wrap">
-                            <label class="option-label">预计投稿日期</label>
-                            <i class="info-icon">?</i>
-                            <span class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span>
-                        </div>
+                        <div class="label-wrap"><label class="option-label">预计投稿日期</label><i class="info-icon">?</i><span class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span></div>
                         <select id="schedule-date" class="input-styled"></select>
                     </div>
-
                     <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px;">
                         <div class="option-item">
-                            <div class="label-wrap">
-                                <span class="option-label">原作者音频替换</span>
-                                <i class="info-icon">?</i>
-                                <span class="tooltip-text">把原作者的旁白进行重新创作并进行新音色替换</span>
-                            </div>
-                            <select id="audio-replace" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
+                            <div class="label-wrap"><span class="option-label">原作者音频替换</span><i class="info-icon">?</i><span class="tooltip-text">把原作者的旁白进行重新创作并进行新音色替换</span></div>
+                            <select id="audio-replace" class="input-styled"><option value="yes" selected>是</option><option value="no">否</option></select>
                         </div>
                         <div class="option-item">
-                            <div class="label-wrap">
-                                <span class="option-label">场景标题与摘要</span>
-                                <i class="info-icon">?</i>
-                                <span class="tooltip-text">画面上方增加摘要及标题</span>
-                            </div>
-                            <select id="scene-title" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
+                            <div class="label-wrap"><span class="option-label">场景标题与摘要</span><i class="info-icon">?</i><span class="tooltip-text">画面上方增加摘要及标题</span></div>
+                            <select id="scene-title" class="input-styled"><option value="yes" selected>是</option><option value="no">否</option></select>
                         </div>
                         <div class="option-item">
-                            <div class="label-wrap">
-                                <span class="option-label">是否增加过渡解说</span>
-                                <i class="info-icon">?</i>
-                                <span class="tooltip-text">场景切换时增加衔接语</span>
-                            </div>
-                            <select id="allow-commentary" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
+                            <div class="label-wrap"><span class="option-label">是否增加过渡解说</span><i class="info-icon">?</i><span class="tooltip-text">场景切换时增加衔接语</span></div>
+                            <select id="allow-commentary" class="input-styled"><option value="yes" selected>是</option><option value="no">否</option></select>
                         </div>
                     </div>
-
                     <div style="margin-top: 5px;">
-                        <div class="label-wrap" style="margin-bottom: 8px;">
-                            <label class="option-label">创作指导 (Prompt)</label>
-                            <i class="info-icon">?</i>
-                            <span class="tooltip-text">关键字：标题，主题，视频节奏，场景。</span>
-                        </div>
+                        <div class="label-wrap" style="margin-bottom: 8px;"><label class="option-label">创作指导 (Prompt)</label><i class="info-icon">?</i><span class="tooltip-text">关键字：标题，主题，视频节奏，场景。</span></div>
                         <textarea id="creative-guidance" class="input-styled" placeholder="请填写对本次创作的具体要求..."></textarea>
                     </div>
                 </div>
@@ -402,9 +161,91 @@
     </div>
 </div>
 
+<!-- ================= TEMPLATES ================= -->
+
+<template id="tpl-time-group">
+    <div class="time-group">
+        <div class="time-cell">
+            <label>分</label>
+            <input type="number" min="0" max="59" class="t-min" placeholder="00">
+        </div>
+        <div class="time-sep">:</div>
+        <div class="time-cell">
+            <label>秒</label>
+            <input type="number" min="0" max="59" class="t-sec" placeholder="00">
+        </div>
+        <div class="time-sep">.</div>
+        <div class="time-cell">
+            <label style="white-space:nowrap;">秒的小数位</label>
+            <input type="number" min="0" class="t-ms" placeholder="0">
+        </div>
+    </div>
+</template>
+
+<template id="tpl-video-card">
+    <div class="video-item-card">
+        <button type="button" class="btn-remove-card" title="删除此素材">×</button>
+        <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required>
+
+        <div class="options-grid">
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">是否包含作者声音? <span class="required-star">*</span></span><i class="info-icon">?</i><span class="tooltip-text">客观的标识原视频中是否包含原作者的声音。</span></div>
+                <select class="input-styled select-voice">
+                    <option value="" disabled selected>请选择...</option><option value="yes">是</option><option value="no">否</option>
+                </select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">是否包含BGM?</span><i class="info-icon">?</i><span class="tooltip-text">标识原视频是否全局都包含背景音乐。</span></div>
+                <select class="input-styled select-bgm"><option value="yes" selected>是</option><option value="no">否</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">是否包含广告/原作者画面?</span><i class="info-icon">?</i><span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span></div>
+                <select class="input-styled select-ad-face"><option value="auto" selected>自动检测</option><option value="yes">是</option><option value="no">否</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">是否实时视频?</span><i class="info-icon">?</i><span class="tooltip-text">是否为新闻、热点事件等强时效素材。</span></div>
+                <select class="input-styled select-realtime"><option value="yes" selected>是</option><option value="no">否</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">自动配情绪文字?</span><i class="info-icon">?</i><span class="tooltip-text">自动在画面内添加文字</span></div>
+                <select class="input-styled select-text"><option value="yes" selected>是</option><option value="no">否</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">自动配表情包?</span><i class="info-icon">?</i><span class="tooltip-text">自动添加趣味表情包。</span></div>
+                <select class="input-styled select-emoji"><option value="yes" selected>是</option><option value="no">否</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">最多分解场景数</span><i class="info-icon">?</i><span class="tooltip-text">限制分解数量。</span></div>
+                <select class="input-styled select-max-scenes"><option value="0" selected>自动分割</option><option value="1">不超过1个场景</option><option value="5">不超过5个场景</option><option value="10">不超过10个场景</option></select>
+            </div>
+            <div class="option-item">
+                <div class="label-wrap"><span class="option-label">场景顺序是否固定</span><i class="info-icon">?</i><span class="tooltip-text">锁定素材的时间线顺序。</span></div>
+                <select class="input-styled select-scene-order-fixed"><option value="auto" selected>智能判断</option><option value="yes">是</option><option value="no">否</option></select>
+            </div>
+        </div>
+
+        <div style="margin-top: 15px;">
+            <div class="label-wrap"><span class="option-label">场景划分指导</span><i class="info-icon">?</i><span class="tooltip-text">关键字：场景，划分。</span></div>
+            <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
+        </div>
+
+        <div class="dynamic-section" data-type="segment">
+            <div class="label-wrap"><span class="option-label">待剔除画面时间段</span><i class="info-icon">?</i><span class="tooltip-text">指定视频中需要删除的时间范围。</span></div>
+            <div class="dynamic-list-container"></div>
+            <button type="button" class="btn-mini btn-add-row" data-action="add-segment"><span>+</span> 添加时间段</button>
+        </div>
+
+        <div class="dynamic-section" data-type="point">
+            <div class="label-wrap"><span class="option-label">场景分割点时间点</span><i class="info-icon">?</i><span class="tooltip-text">指定视频的强制分割点。</span></div>
+            <div class="dynamic-list-container"></div>
+            <button type="button" class="btn-mini btn-add-row" data-action="add-point"><span>+</span> 添加时间点</button>
+        </div>
+    </div>
+</template>
+
 <script>
-    const APP = { currentUser: localStorage.getItem('userName'), videoCounter: 0 };
-    const els = {
+    const APP = { currentUser: localStorage.getItem('userName'), videoCounter: 0, isConfigConfirmed: false };
+    const UI = {
         authSection: document.getElementById('auth-section'),
         mainApp: document.getElementById('main-app'),
         usernameInput: document.getElementById('username-input'),
@@ -414,49 +255,57 @@
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
         dateSelect: document.getElementById('schedule-date'),
-        stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') }
+        stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') },
+        tplCard: document.getElementById('tpl-video-card'),
+        tplTime: document.getElementById('tpl-time-group')
     };
-
-    // 状态标记
-    let isConfigConfirmed = false;
 
     document.addEventListener('DOMContentLoaded', () => {
         if (APP.currentUser) initMainApp();
-        else els.authSection.classList.remove('hidden');
+        else UI.authSection.classList.remove('hidden');
         initDateSelect();
+
+        // 绑定事件
+        UI.loginBtn.addEventListener('click', login);
+
+        // 点击“添加视频”意味着重新开始，必须重置状态
+        UI.addVideoBtn.addEventListener('click', () => { resetSubmitButtonState(true); addVideoCard(); });
+
+        UI.submitBtn.addEventListener('click', handleSubmit);
+
+        // 委托处理列表交互
+        UI.videoList.addEventListener('click', handleListClicks);
+        UI.videoList.addEventListener('input', handleListInputs);
     });
 
-    els.loginBtn.addEventListener('click', () => {
-        const name = els.usernameInput.value.trim();
+    function login() {
+        const name = UI.usernameInput.value.trim();
         if (!name) return alert('请输入名字');
         localStorage.setItem('userName', name);
         APP.currentUser = name;
-        els.authSection.classList.add('hidden');
+        UI.authSection.classList.add('hidden');
         initMainApp();
-    });
+    }
 
     function logout() {
         if(confirm('确定要退出登录吗？')) { localStorage.removeItem('userName'); location.reload(); }
     }
 
     function initMainApp() {
-        els.mainApp.classList.remove('hidden');
-        els.welcomeMsg.textContent = `Hi, ${APP.currentUser}`;
+        UI.mainApp.classList.remove('hidden');
+        UI.welcomeMsg.textContent = `Hi, ${APP.currentUser}`;
         fetchUploadStats();
         addVideoCard();
     }
 
     function initDateSelect() {
-        const options = [{l:'今天',o:0}, {l:'明天',o:1}, {l:'后天',o:2}];
-        els.dateSelect.innerHTML = '';
         const today = new Date();
-        options.forEach(opt => {
-            const date = new Date(today); date.setDate(today.getDate() + opt.o);
-            const optEl = document.createElement('option');
-            optEl.value = date.toISOString().split('T')[0];
-            optEl.textContent = `${opt.l} (${optEl.value})`;
-            els.dateSelect.appendChild(optEl);
-        });
+        const opts = ['今天', '明天', '后天'];
+        UI.dateSelect.innerHTML = opts.map((text, i) => {
+            const d = new Date(today); d.setDate(today.getDate() + i);
+            const val = d.toISOString().split('T')[0];
+            return `<option value="${val}">${text} (${val})</option>`;
+        }).join('');
     }
 
     async function fetchUploadStats() {
@@ -465,376 +314,198 @@
             if(r.ok) {
                 const d = await r.json();
                 if(d.status === 'success') {
-                    els.stats.uploaded.textContent = d.data.total_count_today;
-                    els.stats.pending.textContent = d.data.unprocessed_count_today;
-                    els.stats.remote.textContent = d.data.remote_upload_count || 0;
+                    UI.stats.uploaded.textContent = d.data.total_count_today;
+                    UI.stats.pending.textContent = d.data.unprocessed_count_today;
+                    UI.stats.remote.textContent = d.data.remote_upload_count || 0;
                 }
             }
         } catch(e) {}
     }
 
+    /* --- DOM 操作 & 模板渲染 --- */
+
+    function addVideoCard() {
+        APP.videoCounter++;
+        const card = UI.tplCard.content.cloneNode(true).firstElementChild;
+        card.id = `video-card-${APP.videoCounter}`;
+        if (UI.videoList.children.length === 0) card.querySelector('.btn-remove-card').style.display = 'none';
+        else {
+             const firstBtn = UI.videoList.firstElementChild?.querySelector('.btn-remove-card');
+             if(firstBtn) firstBtn.style.display = 'flex';
+        }
+        UI.videoList.appendChild(card);
+    }
+
+    function addDynamicRow(container, type, initialVal = null) {
+        const row = document.createElement('div');
+        row.className = `dynamic-row ${type === 'segment' ? 'time-segment-row' : 'split-point-row'}`;
+
+        const group1 = UI.tplTime.content.cloneNode(true).firstElementChild;
+        group1.className += type === 'segment' ? ' start-group' : ' point-group';
+        row.appendChild(group1);
+
+        if (type === 'segment') {
+            const sep = document.createElement('span'); sep.className = 'range-sep'; sep.innerText = '-';
+            row.appendChild(sep);
+            const group2 = UI.tplTime.content.cloneNode(true).firstElementChild;
+            group2.className += ' end-group';
+            row.appendChild(group2);
+        }
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button'; delBtn.className = 'btn-mini btn-del-row'; delBtn.innerText = '删除';
+        row.appendChild(delBtn);
+
+        container.appendChild(row);
+
+        if (initialVal) {
+            row.classList.add('history-row');
+            const badge = document.createElement('span'); badge.className = 'history-badge'; badge.innerText = '历史记录';
+            row.appendChild(badge);
+            if (type === 'segment') {
+                const [s, e] = initialVal.split('-');
+                fillTimeGroup(group1, s); fillTimeGroup(row.querySelector('.end-group'), e);
+            } else {
+                fillTimeGroup(group1, initialVal);
+            }
+        }
+        return row;
+    }
+
+    /* --- 核心修复：事件委托逻辑优化 --- */
+
+    function handleListClicks(e) {
+        const target = e.target;
+        // 1. 删除卡片：这是一个重大变更，必须重置状态，强制用户重新检查剩余卡片
+        if (target.matches('.btn-remove-card')) {
+            target.closest('.video-item-card').remove();
+            if (UI.videoList.children.length === 1) UI.videoList.firstElementChild.querySelector('.btn-remove-card').style.display = 'none';
+            resetSubmitButtonState(true); // 强制重置
+        }
+        // 2. 添加时间行：属于“修改配置”行为，不应该重置“已确认”状态，用户可直接提交修改
+        else if (target.closest('.btn-add-row')) {
+            const btn = target.closest('.btn-add-row');
+            const section = btn.closest('.dynamic-section');
+            const type = section.dataset.type;
+            addDynamicRow(section.querySelector('.dynamic-list-container'), type);
+            // 这里特意不调用 resetSubmitButtonState()
+        }
+        // 3. 删除时间行：属于“修改配置”行为，同上
+        else if (target.matches('.btn-del-row')) {
+            target.closest('.dynamic-row').remove();
+            // 这里特意不调用 resetSubmitButtonState()
+        }
+    }
+
+    function handleListInputs(e) {
+        const t = e.target;
+
+        // --- 核心修复点 ---
+        // 只有当修改的是 URL 时，才重置状态，因为这意味着变成了一个新视频。
+        // 如果修改的是下拉框、时间、文本域等配置，我们认为是用户在“覆盖历史配置”，
+        // 所以保持 APP.isConfigConfirmed = true，允许下一次点击直接提交。
+        if (t.classList.contains('video-url-input')) {
+            resetSubmitButtonState(true);
+        }
+
+        // 时间输入限制逻辑
+        if (t.tagName === 'INPUT' && t.type === 'number') {
+            if (t.classList.contains('t-min') || t.classList.contains('t-sec')) {
+                if (parseInt(t.value) > 59) t.value = 59;
+                if (t.value.length > 2) t.value = t.value.slice(0, 2);
+            } else if (t.classList.contains('t-ms')) {
+                if (t.value.length > 3) t.value = t.value.slice(0, 3);
+            }
+            if (e.data === 'e') t.value = t.value.replace('e', '');
+        }
+    }
+
+    /* --- 辅助功能 --- */
+
+    function resetSubmitButtonState(force = false) {
+        // 如果不是强制重置，且当前已经是“已确认”状态，则不进行重置
+        if (!force && !APP.isConfigConfirmed) return;
+
+        APP.isConfigConfirmed = false;
+        UI.submitBtn.innerText = '提交创作任务';
+        UI.submitBtn.className = 'btn btn-primary';
+        UI.submitBtn.style = '';
+        UI.submitBtn.disabled = false;
+        clearSyncHighlights();
+    }
+
     function clearSyncHighlights() {
         document.querySelectorAll('.field-synced').forEach(el => el.classList.remove('field-synced'));
         document.querySelectorAll('.sync-tip').forEach(el => el.remove());
-        document.querySelectorAll('.history-row').forEach(row => {
-            row.classList.remove('history-row');
-            const badge = row.querySelector('.history-badge');
-            if (badge) badge.remove();
+        document.querySelectorAll('.history-row').forEach(el => {
+            el.classList.remove('history-row');
+            el.querySelector('.history-badge')?.remove();
         });
     }
 
-    function resetSubmitButtonState(forceReset = false) {
-        if (!forceReset && !isConfigConfirmed) return;
-        isConfigConfirmed = false;
-        els.submitBtn.innerHTML = '提交创作任务';
-        els.submitBtn.className = 'btn btn-primary';
-        els.submitBtn.style.background = '';
-        els.submitBtn.style.borderColor = '';
-        els.submitBtn.disabled = false;
-        clearSyncHighlights();
-        console.log("状态已重置为：初始状态，已清除高亮样式");
+    function getCompositeTime(group) {
+        if (!group) return null;
+        const pad = (n, len=2) => (n || '0').toString().padStart(len, '0');
+        const min = group.querySelector('.t-min').value;
+        const sec = group.querySelector('.t-sec').value;
+        const ms = group.querySelector('.t-ms').value;
+        return `00:${pad(min)}:${pad(sec)}.${pad(ms, 3)}`;
     }
 
-    /* --- 辅助函数：生成时间输入组件 --- */
-    function generateTimeInputGroup(classNamePrefix) {
-        return `
-            <div class="time-group ${classNamePrefix}">
-                <div class="time-cell">
-                    <label>分</label>
-                    <input type="number" min="0" max="59" value="0" class="t-min" placeholder="00"
-                        onkeydown="return event.keyCode !== 69"
-                        oninput="if(parseInt(value) > 59) value = 59; if(value.length > 2) value = value.slice(0,2);">
-                </div>
-                <div class="time-sep">:</div>
-                <div class="time-cell">
-                    <label>秒</label>
-                    <input type="number" min="0" max="59" value="0" class="t-sec" placeholder="00"
-                        onkeydown="return event.keyCode !== 69"
-                        oninput="if(parseInt(value) > 59) value = 59; if(value.length > 2) value = value.slice(0,2);">
-                </div>
-                <div class="time-sep">.</div>
-                <div class="time-cell">
-                    <label style="white-space:nowrap;">秒的小数位</label>
-                    <input type="number" min="0" value="" class="t-ms" placeholder="0"
-                        onkeydown="return event.keyCode !== 69"
-                        oninput="if(value.length > 3) value = value.slice(0,3);">
-                </div>
-            </div>
-        `;
-    }
-
-    function getCompositeTime(containerElement) {
-        if (!containerElement) return null;
-        const min = containerElement.querySelector('.t-min').value || '0';
-        const sec = containerElement.querySelector('.t-sec').value || '0';
-        let msRaw = containerElement.querySelector('.t-ms').value || '0';
-        if (msRaw.length > 3) msRaw = msRaw.slice(0, 3);
-        const ms = msRaw.padEnd(3, '0');
-        // 优化：直接使用原生 padStart
-        return `00:${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${ms}`;
-    }
-
-    function fillTimeGroup(groupEl, timeStr) {
-        if (!timeStr || !groupEl) return;
-        const parts = timeStr.split(':');
-        if (parts.length < 3) return;
-        const min = parseInt(parts[1], 10);
-        const secParts = parts[2].split('.');
-        const sec = parseInt(secParts[0], 10);
-        const ms = secParts[1] ? parseInt(secParts[1], 10) : 0;
-        groupEl.querySelector('.t-min').value = min;
-        groupEl.querySelector('.t-sec').value = sec;
-        groupEl.querySelector('.t-ms').value = ms;
+    function fillTimeGroup(group, str) {
+        if (!str || !group) return;
+        const [_, m, rest] = str.split(':');
+        const [s, ms] = rest.split('.');
+        group.querySelector('.t-min').value = parseInt(m);
+        group.querySelector('.t-sec').value = parseInt(s);
+        group.querySelector('.t-ms').value = parseInt(ms || 0);
     }
 
     function compareTimeStrings(t1, t2) {
         return t1.localeCompare(t2, undefined, { numeric: true, sensitivity: 'base' });
     }
 
-    window.addTimeSegmentRow = function(cardId) {
-        const container = document.getElementById(`remove-segments-list-${cardId}`);
-        const row = document.createElement('div');
-        row.className = 'dynamic-row time-segment-row';
-        row.innerHTML = `
-            ${generateTimeInputGroup('start-group')}
-            <span class="range-sep">-</span>
-            ${generateTimeInputGroup('end-group')}
-            <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
-        `;
-        container.appendChild(row);
-        return row;
-    }
-
-    window.addSplitPointRow = function(cardId) {
-        const container = document.getElementById(`split-points-list-${cardId}`);
-        const row = document.createElement('div');
-        row.className = 'dynamic-row split-point-row';
-        row.innerHTML = `
-            ${generateTimeInputGroup('point-group')}
-            <button type="button" class="btn-mini btn-del-row" onclick="removeDynamicRow(this)">删除</button>
-        `;
-        container.appendChild(row);
-        return row;
-    }
-
-    window.removeDynamicRow = function(btn) { btn.parentElement.remove(); }
-
-    function addVideoCard() {
-        APP.videoCounter++;
-        const id = APP.videoCounter;
-        const card = document.createElement('div');
-        card.className = 'video-item-card';
-        card.id = `video-card-${id}`;
-
-        const delBtn = document.querySelectorAll('.video-item-card').length > 0
-            ? `<button type="button" class="btn-remove-card" onclick="removeCard(${id})" title="删除此素材">×</button>` : '';
-
-        card.innerHTML = `
-            ${delBtn}
-            <input type="text" class="input-styled video-url-input" placeholder="请在此处粘贴抖音分享链接..." required oninput="resetSubmitButtonState()">
-            <div class="options-grid">
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">是否包含作者声音? <span class="required-star">*</span></span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">客观的标识原视频中是否包含原作者的声音。</span>
-                    </div>
-                    <select class="input-styled select-voice">
-                        <option value="" disabled selected>请选择...</option>
-                        <option value="yes">是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">是否包含BGM?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识原视频是否全局都包含背景音乐。</span>
-                    </div>
-                    <select class="input-styled select-bgm">
-                        <option value="yes" selected>是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">是否包含广告/原作者画面?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span>
-                    </div>
-                    <select class="input-styled select-ad-face">
-                        <option value="auto" selected>自动检测</option>
-                        <option value="yes">是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">是否实时视频?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">是否为新闻、热点事件等强时效素材。</span>
-                    </div>
-                    <select class="input-styled select-realtime">
-                        <option value="yes" selected>是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">自动配情绪文字?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">自动在画面内添加文字</span>
-                    </div>
-                    <select class="input-styled select-text">
-                        <option value="yes" selected>是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">自动配表情包?</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">自动添加趣味表情包。</span>
-                    </div>
-                    <select class="input-styled select-emoji">
-                        <option value="yes" selected>是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">最多分解场景数</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">限制分解数量。</span>
-                    </div>
-                    <select class="input-styled select-max-scenes">
-                        <option value="0" selected>自动分割</option>
-                        <option value="1">不超过1个场景</option>
-                        <option value="5">不超过5个场景</option>
-                        <option value="10">不超过10个场景</option>
-                    </select>
-                </div>
-                <div class="option-item">
-                    <div class="label-wrap">
-                        <span class="option-label">场景顺序是否固定</span>
-                        <i class="info-icon">?</i>
-                        <span class="tooltip-text">锁定素材的时间线顺序。</span>
-                    </div>
-                    <select class="input-styled select-scene-order-fixed">
-                        <option value="auto" selected>智能判断</option>
-                        <option value="yes">是</option>
-                        <option value="no">否</option>
-                    </select>
-                </div>
-            </div>
-            <div style="margin-top: 15px;">
-                <div class="label-wrap">
-                    <span class="option-label">场景划分指导</span>
-                    <i class="info-icon">?</i>
-                    <span class="tooltip-text">关键字：场景，划分。</span>
-                </div>
-                <textarea class="input-styled textarea-split-guidance" style="min-height: 60px; margin-top:5px;" placeholder="请填写对素材分解场景的具体要求..."></textarea>
-            </div>
-            <div class="dynamic-section">
-                <div class="label-wrap">
-                    <span class="option-label">待剔除画面时间段</span>
-                    <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频中需要删除的时间范围。</span>
-                </div>
-                <div id="remove-segments-list-${id}" class="dynamic-list-container"></div>
-                <button type="button" class="btn-mini btn-add-row" onclick="addTimeSegmentRow(${id})">
-                    <span>+</span> 添加时间段
-                </button>
-            </div>
-            <div class="dynamic-section">
-                <div class="label-wrap">
-                    <span class="option-label">场景分割点时间点</span>
-                    <i class="info-icon">?</i>
-                    <span class="tooltip-text">指定视频的强制分割点。</span>
-                </div>
-                <div id="split-points-list-${id}" class="dynamic-list-container"></div>
-                <button type="button" class="btn-mini btn-add-row" onclick="addSplitPointRow(${id})">
-                    <span>+</span> 添加时间点
-                </button>
-            </div>
-        `;
-        els.videoList.appendChild(card);
-    }
-
-    els.addVideoBtn.addEventListener('click', () => {
-        resetSubmitButtonState();
-        addVideoCard();
-    });
-
-    window.removeCard = (id) => {
-        document.getElementById(`video-card-${id}`)?.remove();
-        resetSubmitButtonState();
-    };
-
-    function updateAndHighlight(element, newValue) {
-        if (!element) return;
-        if (element.value === String(newValue)) return;
-        if (element.tagName === 'TEXTAREA') {
-            const currentVal = element.value.trim();
-            if (!currentVal) {
-                element.value = String(newValue);
-            } else if (!currentVal.includes(newValue)) {
-                element.value = `${currentVal}\n\n[⬇️ 历史配置参考 ⬇️]\n${newValue}`;
-            }
+    function updateAndHighlight(el, newValue) {
+        if (!el || el.value === String(newValue)) return;
+        if (el.tagName === 'TEXTAREA' && el.value.trim() && !el.value.includes(newValue)) {
+            el.value += `\n\n[⬇️ 历史配置参考 ⬇️]\n${newValue}`;
         } else {
-            element.value = String(newValue);
+            el.value = String(newValue);
         }
-        element.classList.add('field-synced');
-        const parent = element.parentElement;
-        if (parent && !parent.querySelector('.sync-tip')) {
-            const tip = document.createElement('span');
-            tip.className = 'sync-tip';
-            tip.innerText = '⚠️ 发现历史配置差异';
-            parent.appendChild(tip);
+        el.classList.add('field-synced');
+        if (!el.parentNode.querySelector('.sync-tip')) {
+            const tip = document.createElement('span'); tip.className = 'sync-tip'; tip.innerText = '⚠️ 发现历史配置差异';
+            el.parentNode.appendChild(tip);
         }
     }
 
-    function rebuildDynamicRows(cardId, containerId, dataList, type) {
-        const container = document.getElementById(`${containerId}-${cardId}`);
-        if (!dataList || dataList.length === 0) return;
-        const existingSet = new Set();
-        const currentRows = container.querySelectorAll('.dynamic-row');
-
-        currentRows.forEach(row => {
-            let val = '';
-            if (type === 'segment') {
-                const s = getCompositeTime(row.querySelector('.start-group'));
-                const e = getCompositeTime(row.querySelector('.end-group'));
-                val = `${s}-${e}`;
-            } else {
-                val = getCompositeTime(row.querySelector('.point-group'));
-            }
-            existingSet.add(val);
-        });
-
-        let addedCount = 0;
-        dataList.forEach(item => {
-            if (existingSet.has(item)) return;
-            let row;
-            if (type === 'segment') {
-                row = window.addTimeSegmentRow(cardId);
-                const [start, end] = item.split('-');
-                fillTimeGroup(row.querySelector('.start-group'), start);
-                fillTimeGroup(row.querySelector('.end-group'), end);
-            } else if (type === 'point') {
-                row = window.addSplitPointRow(cardId);
-                fillTimeGroup(row.querySelector('.point-group'), item);
-            }
-            if (row) {
-                row.classList.add('history-row');
-                const badge = document.createElement('span');
-                badge.className = 'history-badge';
-                badge.innerText = '历史记录';
-                row.appendChild(badge);
-                addedCount++;
-            }
-        });
-
-        if (addedCount > 0) {
-            if (container.previousElementSibling && !container.previousElementSibling.querySelector('.sync-tip')) {
-                 const tip = document.createElement('span');
-                 tip.className = 'sync-tip';
-                 tip.innerText = `⚠️ 已追加 ${addedCount} 条缺失的历史记录`;
-                 container.previousElementSibling.appendChild(tip);
-            }
-        }
-    }
+    /* --- 数据收集与提交 --- */
 
     function collectFormData() {
         const cards = document.querySelectorAll('.video-item-card');
         const vList = [];
         let err = null;
 
-        cards.forEach((card, idx) => {
-            if(err) return;
+        for (let i = 0; i < cards.length; i++) {
+            const card = cards[i];
             const urlInput = card.querySelector('.video-url-input');
             const url = urlInput.value.trim();
-            if(!url) {
-                err = `第 ${idx + 1} 个视频卡片的链接为空！`;
-                urlInput.focus();
-                return;
-            }
+            if(!url) { err = `第 ${i + 1} 个视频链接为空！`; urlInput.focus(); break; }
+
             const voice = card.querySelector('.select-voice').value;
-            if(voice === "") { err = `请确认第 ${idx + 1} 个视频“是否包含作者声音”`; return; }
-            const maxScenesVal = parseInt(card.querySelector('.select-max-scenes').value, 10);
+            if(!voice) { err = `请确认第 ${i + 1} 个视频“是否包含作者声音”`; break; }
 
             const removeSegments = [];
-            card.querySelectorAll('.time-segment-row').forEach(row => {
-                 const startStr = getCompositeTime(row.querySelector('.start-group'));
-                 const endStr = getCompositeTime(row.querySelector('.end-group'));
-                 if (startStr !== endStr) {
-                    if (compareTimeStrings(startStr, endStr) >= 0) {
-                        err = `第 ${idx + 1} 个视频的剔除时间段有误：结束时间必须大于开始时间`;
-                        return;
-                    }
-                    removeSegments.push(`${startStr}-${endStr}`);
-                 }
-            });
+            const segRows = card.querySelectorAll('.time-segment-row');
+            for (const row of segRows) {
+                const s = getCompositeTime(row.querySelector('.start-group'));
+                const e = getCompositeTime(row.querySelector('.end-group'));
+                if(s !== e) {
+                    if (compareTimeStrings(s, e) >= 0) { err = `第 ${i + 1} 个视频剔除时间段结束时间必须大于开始时间`; break; }
+                    removeSegments.push(`${s}-${e}`);
+                }
+            }
+            if(err) break;
 
             const splitPoints = [];
             card.querySelectorAll('.split-point-row').forEach(row => {
@@ -846,30 +517,25 @@
                 _cardDomId: card.id,
                 original_url: url,
                 is_contains_author_voice: voice === 'yes',
-                is_contains_bgm: card.querySelector('.select-bgm').value === 'yes', // 新增字段
+                is_contains_bgm: card.querySelector('.select-bgm').value === 'yes',
                 is_realtime_video: card.querySelector('.select-realtime').value === 'yes',
                 is_requires_text: card.querySelector('.select-text').value === 'yes',
                 is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
-                max_scenes: maxScenesVal,
+                max_scenes: parseInt(card.querySelector('.select-max-scenes').value, 10),
                 has_ad_or_face: card.querySelector('.select-ad-face').value,
                 scene_order_fixed: card.querySelector('.select-scene-order-fixed').value,
                 split_guidance: card.querySelector('.textarea-split-guidance').value.trim(),
                 remove_time_segments: removeSegments,
                 split_time_points: splitPoints
             });
-        });
+        }
 
         if(err) { alert(err); return null; }
         if(!vList.length) { alert('请至少添加一个有效的视频链接'); return null; }
 
-        // 优化：移除了 const isOriginal = true; 直接执行判断逻辑
-        const audioReplaceSelect = document.getElementById('audio-replace');
-        if (audioReplaceSelect.value === 'yes') {
-            const isAllNoVoice = vList.every(v => v.is_contains_author_voice === false);
-            if (isAllNoVoice) {
-                alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
-                return null;
-            }
+        if (document.getElementById('audio-replace').value === 'yes' && vList.every(v => !v.is_contains_author_voice)) {
+            alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
+            return null;
         }
 
         return {
@@ -877,142 +543,128 @@
             global_settings: {
                 video_type: document.getElementById('video-type').value,
                 retention_ratio: document.getElementById('retention-ratio').value,
-                is_need_audio_replace: (document.getElementById('audio-replace').value === 'yes'),
-                is_need_scene_title: (document.getElementById('scene-title').value === 'yes'),
-                is_need_commentary: (document.getElementById('allow-commentary').value === 'yes'),
-                schedule_date: document.getElementById('schedule-date').value,
+                is_need_audio_replace: document.getElementById('audio-replace').value === 'yes',
+                is_need_scene_title: document.getElementById('scene-title').value === 'yes',
+                is_need_commentary: document.getElementById('allow-commentary').value === 'yes',
+                schedule_date: UI.dateSelect.value,
                 creative_guidance: document.getElementById('creative-guidance').value.trim()
             },
             video_list: vList
         };
     }
 
-    els.submitBtn.addEventListener('click', async () => {
+    async function handleSubmit() {
         const payload = collectFormData();
         if (!payload) return;
-
-        if (isConfigConfirmed) {
-            await performFinalSubmit(payload);
-        } else {
-            await performCheckPhase(payload);
-        }
-    });
+        if (APP.isConfigConfirmed) await performFinalSubmit(payload);
+        else await performCheckPhase(payload);
+    }
 
     async function performCheckPhase(payload) {
-        els.submitBtn.disabled = true;
-        els.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 正在检查已存在配置...';
+        UI.submitBtn.disabled = true;
+        UI.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 正在检查已存在配置...';
 
         try {
             const res = await fetch('/check-video-status', {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify(payload)
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
             });
             const d = await res.json();
 
             if (res.ok && d.status === 'success') {
                 let hasChanges = false;
-                const results = d.data;
-
-                results.forEach((item, index) => {
+                d.data.forEach((item, index) => {
                     if (item.status === 'exists') {
-                        const currentInput = payload.video_list[index];
-                        const cardDom = document.getElementById(currentInput._cardDomId);
-                        const dbConfig = item.stored_config;
+                        const db = item.stored_config;
+                        const curr = payload.video_list[index];
+                        const card = document.getElementById(curr._cardDomId);
+                        if (!card || !db) return;
 
-                        if (cardDom && dbConfig) {
-                            const dbVoice = dbConfig.is_contains_author_voice ? 'yes' : 'no';
-                            const currVoice = currentInput.is_contains_author_voice ? 'yes' : 'no';
-                            if (dbVoice !== currVoice) { updateAndHighlight(cardDom.querySelector('.select-voice'), dbVoice); hasChanges = true; }
+                        const checks = [
+                            ['.select-voice', db.is_contains_author_voice, curr.is_contains_author_voice, true],
+                            ['.select-bgm', db.is_contains_bgm, curr.is_contains_bgm, true],
+                            ['.select-realtime', db.is_realtime_video, curr.is_realtime_video, true],
+                            ['.select-ad-face', db.has_ad_or_face, curr.has_ad_or_face, false],
+                            ['.select-max-scenes', db.max_scenes, curr.max_scenes, false],
+                            ['.textarea-split-guidance', db.split_guidance || '', curr.split_guidance, false],
+                            ['.select-scene-order-fixed', typeof db.scene_order_fixed==='boolean' ? (db.scene_order_fixed?'yes':'no'):db.scene_order_fixed, curr.scene_order_fixed, false]
+                        ];
 
-                            // 新增：BGM 字段的同步逻辑
-                            const dbBgm = dbConfig.is_contains_bgm ? 'yes' : 'no';
-                            const currBgm = currentInput.is_contains_bgm ? 'yes' : 'no';
-                            if (dbBgm !== currBgm) { updateAndHighlight(cardDom.querySelector('.select-bgm'), dbBgm); hasChanges = true; }
+                        checks.forEach(([sel, dbVal, currVal, isBool]) => {
+                            const dbStr = isBool ? (dbVal ? 'yes' : 'no') : String(dbVal);
+                            const currStr = isBool ? (currVal ? 'yes' : 'no') : String(currVal);
+                            if (dbStr !== currStr) { updateAndHighlight(card.querySelector(sel), dbStr); hasChanges = true; }
+                        });
 
-                            const dbReal = dbConfig.is_realtime_video ? 'yes' : 'no';
-                            const currReal = currentInput.is_realtime_video ? 'yes' : 'no';
-                            if (dbReal !== currReal) { updateAndHighlight(cardDom.querySelector('.select-realtime'), dbReal); hasChanges = true; }
-
-                            if (String(dbConfig.has_ad_or_face) !== String(currentInput.has_ad_or_face)) { updateAndHighlight(cardDom.querySelector('.select-ad-face'), dbConfig.has_ad_or_face); hasChanges = true; }
-                            if (parseInt(dbConfig.max_scenes) !== currentInput.max_scenes) { updateAndHighlight(cardDom.querySelector('.select-max-scenes'), dbConfig.max_scenes); hasChanges = true; }
-                            if ((dbConfig.split_guidance || '') !== currentInput.split_guidance) { updateAndHighlight(cardDom.querySelector('.textarea-split-guidance'), dbConfig.split_guidance || ''); hasChanges = true; }
-
-                            let dbOrder = dbConfig.scene_order_fixed;
-                            if (typeof dbOrder === 'boolean') dbOrder = dbOrder ? 'yes' : 'no';
-                            if (String(dbOrder) !== String(currentInput.scene_order_fixed)) { updateAndHighlight(cardDom.querySelector('.select-scene-order-fixed'), dbOrder); hasChanges = true; }
-
-                            const cardIdNum = currentInput._cardDomId.split('-')[2];
-                            if (JSON.stringify(dbConfig.remove_time_segments) !== JSON.stringify(currentInput.remove_time_segments)) {
-                                rebuildDynamicRows(cardIdNum, 'remove-segments-list', dbConfig.remove_time_segments, 'segment');
-                                hasChanges = true;
-                            }
-                            if (JSON.stringify(dbConfig.split_time_points) !== JSON.stringify(currentInput.split_time_points)) {
-                                rebuildDynamicRows(cardIdNum, 'split-points-list', dbConfig.split_time_points, 'point');
-                                hasChanges = true;
-                            }
+                        if (JSON.stringify(db.remove_time_segments) !== JSON.stringify(curr.remove_time_segments)) {
+                            rebuildDynamicRows(card, 'segment', db.remove_time_segments); hasChanges = true;
+                        }
+                        if (JSON.stringify(db.split_time_points) !== JSON.stringify(curr.split_time_points)) {
+                            rebuildDynamicRows(card, 'point', db.split_time_points); hasChanges = true;
                         }
                     }
                 });
 
                 if (hasChanges) {
-                    isConfigConfirmed = true;
-                    els.submitBtn.innerHTML = '已同步历史配置，确认无误并提交';
-                    els.submitBtn.classList.remove('btn-primary');
-                    els.submitBtn.style.background = '#faad14';
-                    els.submitBtn.style.borderColor = '#d48806';
-                    els.submitBtn.disabled = false;
-                    alert('⚠️ 检测到部分素材在数据库中已存在配置。\n\n系统已自动将页面上的选项同步为历史配置，并进行了高亮标记。\n\n请检查无误后，再次点击按钮进行提交。');
+                    APP.isConfigConfirmed = true;
+                    UI.submitBtn.innerHTML = '已同步历史配置，确认无误并提交';
+                    UI.submitBtn.className = 'btn';
+                    UI.submitBtn.style.background = '#faad14'; UI.submitBtn.style.color = 'white';
+                    UI.submitBtn.disabled = false;
+                    alert('⚠️ 检测到配置差异，已自动同步历史配置并高亮。如有需要修改的地方，可直接修改后点击按钮提交。');
                 } else {
                     await performFinalSubmit(payload);
                 }
             } else {
-                alert('检查状态失败：' + (d.message || '未知错误'));
-                resetSubmitButtonState();
+                alert('检查状态失败：' + (d.message || '未知错误')); resetSubmitButtonState(true);
             }
         } catch (e) {
-            console.error(e);
-            alert('网络错误，无法连接服务器检查状态');
-            resetSubmitButtonState();
+            console.error(e); alert('网络错误，无法连接服务器检查状态'); resetSubmitButtonState(true);
         }
     }
 
-    async function performFinalSubmit(oldPayload) {
-        const finalPayload = collectFormData();
-        if (!finalPayload) {
-            els.submitBtn.disabled = false;
-            return;
-        }
+    function rebuildDynamicRows(card, type, dbList) {
+        if (!dbList || !dbList.length) return;
+        const container = card.querySelector(`.dynamic-section[data-type="${type}"] .dynamic-list-container`);
+        const existing = new Set(Array.from(container.querySelectorAll('.dynamic-row')).map(r =>
+            type==='segment' ? `${getCompositeTime(r.querySelector('.start-group'))}-${getCompositeTime(r.querySelector('.end-group'))}`
+                             : getCompositeTime(r.querySelector('.point-group'))
+        ));
 
-        els.submitBtn.disabled = true;
-        els.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 处理中...';
+        let added = 0;
+        dbList.forEach(item => {
+            if(!existing.has(item)) {
+                addDynamicRow(container, type, item);
+                added++;
+            }
+        });
+        if(added > 0) {
+            const tip = document.createElement('span'); tip.className = 'sync-tip'; tip.innerText = `⚠️ 已追加 ${added} 条缺失的历史记录`;
+            container.parentNode.insertBefore(tip, container);
+        }
+    }
+
+    async function performFinalSubmit(payload) {
+        UI.submitBtn.disabled = true;
+        UI.submitBtn.innerHTML = '<div class="loader" style="width:16px;height:16px;"></div> 处理中...';
         document.getElementById('loading-mask').classList.remove('hidden');
 
         try {
             const res = await fetch('/one-click-generate', {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify(finalPayload)
+                method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
             });
             const d = await res.json();
-
             if(res.ok) {
-                alert(`✅ 提交结果：\n\n${d.message}`);
-                fetchUploadStats();
+                alert(`✅ 提交结果：\n\n${d.message}`); fetchUploadStats();
             } else {
-                let errorDetails = d.message || '未知错误';
-                if (d.errors && Array.isArray(d.errors) && d.errors.length > 0) {
-                    errorDetails += '\n\n----------------\n❌ 详细错误列表：\n' + d.errors.join('\n');
-                }
-                alert(`❌ 提交失败：\n\n${errorDetails}`);
+                let err = d.message || '未知错误';
+                if (d.errors?.length) err += '\n\n❌ 详细错误：\n' + d.errors.join('\n');
+                alert(`❌ 提交失败：\n\n${err}`);
             }
         } catch(e) {
-            console.error(e);
-            alert('❌ 网络请求发生错误，请检查网络连接。');
+            console.error(e); alert('❌ 网络错误');
         } finally {
             document.getElementById('loading-mask').classList.add('hidden');
             resetSubmitButtonState(true);
-            els.submitBtn.disabled = false;
         }
     }
 </script>
