@@ -213,6 +213,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if not (5 <= datetime.now().hour < 24):
             cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
             print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
+            return False
 
         need_waite_minutes = get_wait_minutes()
         latest_upload_time = user_upload_info.get(user_name, {}).get('latest_upload_time', datetime.min)
@@ -789,10 +790,10 @@ def auto_upload(manager):
     for task_info in sort_tasks_to_upload:
         check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config,
                                          config_map)
-        user_name = task_info.get('userName')
 
         if not check_result:
             continue
+        user_name = task_info.get('userName')
 
         failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config,
                                                                                    manager)

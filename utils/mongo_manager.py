@@ -44,6 +44,52 @@ class MongoManager:
         }
         return self.db.find_many(self.tasks_collection, query)
 
+    def delete_tasks_by_ids(self, task_list: list):
+        """
+        根据传入的任务列表，批量删除 publish_tasks 表中的记录。
+        会自动从列表中提取 '_id' 字段进行匹配删除。
+
+        Args:
+            task_list (list): 包含任务信息的字典列表 (每个元素需包含 '_id')。
+
+        Returns:
+            int: 成功删除的文档数量。
+        """
+        if not task_list:
+            return 0
+
+        # 1. 提取 _id
+        ids_to_delete = []
+        for item in task_list:
+            # 如果是字典（通常情况），提取 _id
+            if isinstance(item, dict) and '_id' in item:
+                ids_to_delete.append(item['_id'])
+            # 兼容处理：如果列表里直接装的是id而不是字典
+            elif not isinstance(item, dict):
+                ids_to_delete.append(item)
+
+        if not ids_to_delete:
+            print("警告: 传入的列表中没有提取到有效的 _id")
+            return 0
+
+        # 2. 构建查询条件
+        query = {
+            "_id": {
+                "$in": ids_to_delete
+            }
+        }
+
+        # 3. 执行删除
+        # 这里使用了你代码底部演示的 get_collection 方法来获取原生集合对象
+        try:
+            collection = self.db.get_collection(self.tasks_collection)
+            result = collection.delete_many(query)
+            # print(f"已删除 {result.deleted_count} 条任务数据。")
+            return result.deleted_count
+        except Exception as e:
+            print(f"删除任务数据时出错: {e}")
+            return 0
+
     def _ensure_indexes(self):
         """
         确保核心查询字段已建立索引，以提高查询性能。
@@ -127,7 +173,7 @@ class MongoManager:
         """
         query = {
             "status": {
-                "$ne": "已投稿"  # 使用 $ne (not equal) 操作符
+                "$nin": ["已投稿", "方案已生成"]
             }
         }
         # 同时，我们也可以排除那些根本没有 status 字段的旧数据（可选，但建议）
