@@ -109,6 +109,10 @@ def _process_single_video(video_id, video_info):
         detected_box = find_overall_subtitle_box_target_number(
             video_path, merged_timerange_list, output_dir=box_dir
         )
+        if not detected_box:
+            return {"error_info": "字幕区域检测失败，未能获取有效的字幕区域坐标。",
+                "error_level": ERROR_STATUS.ERROR
+            }
         save_json(subtitle_box_path, detected_box)
 
     # 7. 读取并调整字幕区域坐标
