@@ -596,8 +596,8 @@ def fun(manager):
         all_found_videos = []
         for uid in config_map.keys():
             name = config_map[uid].get('name', uid)
-            if name != 'mama':
-                continue
+            # if name != 'mama':
+            #     continue
 
             if NEED_UPDATE_SIGN:
                 detail_config = config_map[uid]
@@ -620,7 +620,7 @@ def fun(manager):
         manager.upsert_tasks(recent_uploaded_tasks)
 
         filter_tasks = []
-        three_hours_ago = datetime.now() - timedelta(hours=3)
+        three_hours_ago = datetime.now() - timedelta(hours=20)
 
         for task_info in recent_uploaded_tasks:
             uploaded_time = task_info.get('uploaded_time')

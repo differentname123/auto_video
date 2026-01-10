@@ -1281,9 +1281,10 @@ def gen_video_script_llm(task_info, video_info_dict):
         raw_response = ""
         error_info = ""
         try:
-            # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
 
-            gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
+            gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+
+            # gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
             # 解析和校验
             video_script_info = string_to_object(raw_response)
             check_result, check_info = check_video_script(video_script_info, final_info_list, allow_commentary, is_need_narration)

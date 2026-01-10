@@ -204,7 +204,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) >= 1:
+    if len(already_upload_users) >= 5:
         print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
@@ -713,21 +713,15 @@ def build_hudong_info(task_info, video_info_dict, video_duration):
         all_emote_list = read_json(ALL_BILIBILI_EMOTE_PATH)
 
         hudong_info = {}
-        upload_info = task_info.get('upload_result', {})
+        upload_info = task_info.get('upload_info', {})
         total_seconds = int(video_duration)
         interaction_prompts, supplementary_notes = extract_guides(upload_info)
         if len(interaction_prompts) == 0:
             interaction_prompts = ["刷到这个视频的你，希望今天能有个好心情呀~",
-                                   "叮！你收到一份来自UP主的好运，请注意查收哦！",
-                                   "不管此刻你在做什么，都要记得好好照顾自己。",
-                                   "嘿，朋友，为你正在付出的一切点赞，你超棒的！",
-                                   "很高兴遇见你，愿所有美好都向你奔赴而来。"]
+                                   "叮！你收到一份来自UP主的好运，请注意查收哦！"]
         if len(supplementary_notes) == 0:
             supplementary_notes = ["感谢你愿意花时间看到最后，愿这份好运能一直陪着你。",
-                                   "如果觉得视频还不错，不妨点个赞，把这份快乐和祝福一起带走吧！",
-                                   "视频虽已结束，但我的祝福不会。祝你，不止今天，天天开心！",
-                                   "感谢我们的这次相遇，我们下期再见，在那之前，要一切顺利哦！",
-                                   "那么，就到这里啦。晚安，祝你好梦，忘掉所有烦恼。"]
+                                   "如果觉得视频还不错，不妨点个赞，把这份快乐和祝福一起带走吧！"]
         interaction_danmu_list = [{'建议时间戳': 1, '推荐弹幕内容': interaction_prompts}]
         supplementary_notes_list = [{'建议时间戳': total_seconds - 8, '推荐弹幕内容': supplementary_notes}]
 
