@@ -16,14 +16,16 @@ import random
 import re
 import shutil
 import string
+import time
 import traceback
 from collections import defaultdict
+from functools import wraps
 from pathlib import Path
 from typing import Union, List, Optional
 
 import aiofiles
 import aiohttp
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 
 def read_json(json_path):
@@ -927,3 +929,80 @@ def delete_files_in_dir_except_target(keep_file_path):
         print(f"清理目录函数发生错误: {e}")
         # 这里可以选择打印堆栈信息用于调试，但在生产环境中可以注释掉
         # traceback.print_exc()
+
+
+
+def safe_process_limit(limit, name, lock_dir="./process_locks"):
+    """
+    基于文件锁的稳定并发控制装饰器，带等待时间统计。
+
+    :param limit: 允许的并发数量
+    :param name: 业务名称（不同函数用不同名称）
+    :param lock_dir: 锁文件存放位置
+    """
+    # 确保锁目录存在
+    if not os.path.exists(lock_dir):
+        try:
+            os.makedirs(lock_dir, exist_ok=True)
+        except OSError:
+            # 多进程并发创建目录时可能会报错，忽略即可
+            pass
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # 1. 记录开始排队的时间
+            start_wait_time = time.time()
+
+            acquired_lock = None
+            slot_index = -1
+
+            # 2. 进入抢锁循环
+            while True:
+                # 尝试遍历所有的“槽位” (0 到 limit-1)
+                for i in range(limit):
+                    lock_path = os.path.join(lock_dir, f"{name}_{i}.lock")
+                    lock = FileLock(lock_path)
+
+                    try:
+                        # timeout=0 表示“非阻塞”，抢不到立刻报错，不傻等
+                        lock.acquire(timeout=0)
+
+                        # 抢到了！
+                        acquired_lock = lock
+                        slot_index = i
+                        break
+                    except Timeout:
+                        # 这个槽位被人占了，继续试下一个
+                        continue
+
+                if acquired_lock:
+                    # 成功获取锁，跳出死循环
+                    break
+
+                # 如果所有槽位都满了，稍微睡一会再试
+                # 随机睡眠 0.05 ~ 0.15 秒，避免“惊群效应”（所有进程同时醒来抢）
+                time.sleep(random.uniform(1, 5))
+
+            # 3. 计算等待时间
+            end_wait_time = time.time()
+            wait_duration = end_wait_time - start_wait_time
+
+            # 打印等待信息（如果等待时间 > 0.1秒，说明发生排队了，可以重点关注）
+            if wait_duration > 0.01:
+                print(f"函数 [{name}] 槽位[{slot_index}] 获取成功。排队耗时: {wait_duration:.4f} 秒")
+            else:
+                print(f"函数 [{name}] 槽位[{slot_index}] 秒抢成功。无需等待。")
+
+            # 4. 执行真正的业务逻辑
+            try:
+                return func(*args, **kwargs)
+            finally:
+                # 5. 无论代码是否报错，必须释放锁
+                # 操作系统保证：即使进程被 Kill，这个锁也会被内核释放
+                if acquired_lock:
+                    acquired_lock.release()
+
+        return wrapper
+
+    return decorator

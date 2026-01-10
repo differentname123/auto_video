@@ -10,7 +10,7 @@
     整体逻辑：
         1.查询需要处理的任务
 """
-import json
+import multiprocessing
 import os
 import shutil
 import time
@@ -29,7 +29,8 @@ from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH,
 _configure_third_party_paths()
 
 from third_party.TikTokDownloader.douyin_downloader import download_douyin_video_sync, get_comment
-from utils.common_utils import is_valid_target_file_simple, time_to_ms, merge_intervals, get_remaining_segments
+from utils.common_utils import is_valid_target_file_simple, time_to_ms, merge_intervals, get_remaining_segments, \
+    safe_process_limit
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -59,55 +60,10 @@ def query_need_process_tasks():
 
     return tasks_to_process
 
-def run():
-    """
-    主运行函数，处理所有需要处理的任务
-    :return:
-    """
-    # 引入线程池执行器 (放在此处是为了不修改函数外部代码，也可移至文件顶部)
-    from concurrent.futures import ThreadPoolExecutor
 
-    # 不为"已投稿", "待投稿"且次数小于5
-    tasks_to_process = query_need_process_tasks()
-    # 过滤掉 方案已生成 状态的任务
-    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
-    print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    mongo_base_instance = gen_db_object()
-    manager = MongoManager(mongo_base_instance)
 
-    def _task_worker(task_info):
-        """
-        线程工作函数，封装原本循环体内的逻辑
-        """
-        failure_details = {}
-        try:
-            failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager)
-        except Exception as e:
-            traceback.print_exc()
-            error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
-            print(error_info)
-            failure_details[str(task_info.get('_id', 'N/A'))] = {
-                "error_info": error_info,
-                "error_level": ERROR_STATUS.CRITICAL
-            }
-            # 原代码在循环中使用了 continue，此处函数执行完异常处理后会自动进入 finally，效果一致
-        finally:
-            if check_failure_details(failure_details):
-                failed_count = task_info.get('failed_count', 0)
-                task_info['failed_count'] = failed_count + 1
-                task_info['status'] = TaskStatus.FAILED
-            else:
-                # task_info['status'] = TaskStatus.COMPLETED
-                pass
-
-            task_info['failure_details'] = str(failure_details)
-            manager.upsert_tasks([task_info])
-
-    # 使用线程池并发处理，设置线程数量为 5
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        executor.map(_task_worker, tasks_to_process)
-
+@safe_process_limit(limit=2, name="cutoff_target_segment")
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
     """
     按照期望的时间段，剔除指定时间段的视频
@@ -116,6 +72,8 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
     :param output_path:
     :return:
     """
+    start_time = time.time()
+    print(f"开始剔除视频 {video_path} 的时间段: {remove_time_segments}，输出路径: {output_path} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     all_timestamp_list = []
     for remove_time_segment in remove_time_segments:
         # 简单校验格式，防止 crash
@@ -173,6 +131,7 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
 
     # 使用ffmpeg命令行工具进行视频剪辑
     clip_and_merge_segments(video_path, remaining_segments, output_path)
+    print(f"完成剔除视频 {video_path} 的时间段，输出路径: {output_path} 耗时 {time.time() - start_time:.2f}s  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     return fixed_remove_time_segments
 
 
@@ -653,18 +612,114 @@ def process_single_task(task_info, manager, gen_video=False):
 
 
 
+def _task_process_worker(task_queue):
+    """
+    抽取出的进程工作函数：消费者模式
+    """
+    # 在进程内部初始化数据库连接
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
+
+    while True:
+        try:
+            task_info = task_queue.get()
+            if task_info is None:
+                break
+            failure_details = {}
+            try:
+                failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager)
+            except Exception as e:
+                traceback.print_exc()
+                error_info = f"严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
+                print(error_info)
+                failure_details[str(task_info.get('_id', 'N/A'))] = {
+                    "error_info": error_info,
+                    "error_level": ERROR_STATUS.CRITICAL
+                }
+            finally:
+                is_failed = check_failure_details(failure_details)
+
+                if is_failed:
+                    current_failed_count = task_info.get('failed_count', 0) + 1
+                    task_info['failed_count'] = current_failed_count
+
+                    if current_failed_count < 3:
+                        print(f"任务 {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...")
+
+                        task_info['failure_details'] = str(failure_details)
+                        manager.upsert_tasks([task_info])
+
+                        # 2. 稍微延迟后放回队列，避免瞬间频繁重试
+                        time.sleep(2)
+                        task_queue.put(task_info)
+                        continue
+                    else:
+                        print(f"任务 {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。")
+                        task_info['status'] = TaskStatus.FAILED
+                else:
+                    pass
+
+                # 保存最终状态（失败超过3次 或 成功）
+                task_info['failure_details'] = str(failure_details)
+                manager.upsert_tasks([task_info])
+
+        except Exception as outer_e:
+            print(f"Worker 进程发生未捕获异常: {outer_e}")
+            time.sleep(1)  # 防止死循环打印日志
+
+
+def run():
+    """
+    主运行函数
+    :return:
+    """
+    # 不为"已投稿", "待投稿"且次数小于5
+    tasks_to_process = query_need_process_tasks()
+    # 过滤掉 方案已生成 状态的任务
+    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
+    print(f"初始加载 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    task_queue = multiprocessing.Queue()
+
+    # 初始填充任务
+    for task in tasks_to_process:
+        task_queue.put(task)
+
+    processes = []
+    max_workers = 10
+
+    print(f"启动 {max_workers} 个消费者进程...")
+
+    # 1. 初始启动所有进程
+    for _ in range(max_workers):
+        p = multiprocessing.Process(target=_task_process_worker, args=(task_queue,))
+        p.daemon = True  # 设置为守护进程，主程序挂了子进程也会跟着挂（可选，建议加上）
+        p.start()
+        processes.append(p)
+
+    try:
+        while True:
+            for i in range(len(processes)):
+                p = processes[i]
+                if not p.is_alive():
+                    print(f"警告: 监测到进程 (PID: {p.pid}) 已停止工作/崩溃，正在重启新进程...")
+
+                    # 移除旧的进程对象（可选，主要是为了释放资源，不过Python会自动回收）
+                    # 创建一个新的替代者
+                    new_p = multiprocessing.Process(target=_task_process_worker, args=(task_queue,))
+                    new_p.daemon = True
+                    new_p.start()
+
+                    # 在列表中替换掉旧进程
+                    processes[i] = new_p
+                    print(f"新进程 (PID: {new_p.pid}) 已启动，并发数恢复。")
+            time.sleep(60)
+
+    except KeyboardInterrupt:
+        print("接收到终止信号，正在停止所有进程...")
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+        print("所有进程已停止。")
 
 if __name__ == '__main__':
-    I = 3600  # 秒
-    while True:
-        t0 = time.monotonic()
-        try:
-            run()
-        except Exception:
-            traceback.print_exc()
-        dt = time.monotonic() - t0
-        if dt < I:
-            try:
-                time.sleep(I - dt)
-            except KeyboardInterrupt:
-                break
+    run()

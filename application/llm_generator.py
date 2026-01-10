@@ -14,19 +14,20 @@ import re
 import time
 import traceback
 from collections import Counter
-import threading  # 需要确保导入 threading 模块
+
+from utils.paddle_ocr_base import run_subtitle_ocr
 
 # 定义全局信号量，限制 fix_logical_scene_info 的最大并发数为 3
-_fix_scene_semaphore = threading.Semaphore(1)
 import numpy as np
 
 from application.video_common_config import correct_owner_timestamps
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.find_paid_topics import get_all_paid_topics
-from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json
+from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json, \
+    safe_process_limit
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 from utils.gemini_web import generate_gemini_content_managed
-from utils.paddle_ocr import SubtitleOCR, analyze_and_filter_boxes
+from utils.paddle_ocr import analyze_and_filter_boxes
 from utils.video_utils import probe_duration, get_scene, \
     save_frames_around_timestamp_ffmpeg
 
@@ -300,9 +301,7 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         # 1. 保存关键帧 (涉及IO，易报错)
         image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
-        # 2. 运行OCR (涉及显存/模型，易报错)
-        ocr = SubtitleOCR(use_gpu=True)
-        result_json = ocr.run_batch(image_path_list)
+        result_json = run_subtitle_ocr(image_path_list)
 
         # 提取所有原始框用于计算范围
         detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in
@@ -421,6 +420,7 @@ def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_m
             # 字幕对齐也失败，返回原始时间
             return target_ts, 'failed', {'reason': reason}
 
+@safe_process_limit(limit=3, name="fix_logical_scene_info")
 def fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000):
     strat_time = time.time()
     time_map = {}  # 用于缓存已处理的时间戳，避免重复计算
@@ -592,10 +592,9 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             cost_time_info['get_scene_time'] = time.time() - start_time
 
             # 使用信号量控制并发，最多3个线程同时进入此代码块
-            with _fix_scene_semaphore:
-                start_time = time.time()
-                logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
-                cost_time_info['fix_scene_time'] = time.time() - start_time
+            start_time = time.time()
+            logical_scene_info = fix_logical_scene_info(video_path, merged_timestamps, logical_scene_info, max_delta_ms=1000)
+            cost_time_info['fix_scene_time'] = time.time() - start_time
 
             return None, logical_scene_info, cost_time_info
         except Exception as e:
