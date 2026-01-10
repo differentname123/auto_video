@@ -570,6 +570,8 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
     max_scenes = extra.get('max_scenes', 0)
     guidance_text = extra.get('split_guidance', '')
     full_prompt = append_segmentation_constraints(full_prompt, fixed_points, max_scenes, guidance_text)
+    if need_remove_frames == 'no':
+        full_prompt += "\n注意：本次不需要删除任何场景中的广告或作者身份暴露内容。"
 
     error_info = ""
     gen_error_info = ""

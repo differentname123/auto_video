@@ -24,7 +24,8 @@ from rich.table import Table
 
 from application.process_video import process_single_task, query_need_process_tasks
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths, \
-    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths, ALL_BILIBILI_EMOTE_PATH
+    SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths, ALL_BILIBILI_EMOTE_PATH, \
+    USER_BVID_FILE
 from utils.bilibili.bilibili_uploader import upload_to_bilibili
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json, get_top_comments, \
     extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu
@@ -43,22 +44,38 @@ def gen_user_upload_info(uploaded_tasks_today):
     """
     通过今日投稿的任务生成用户投稿的信息
     """
+    remote_upload_dict = {}
+    today_start = datetime.combine(datetime.today(), datetime.min.time()).timestamp()
+    # 检查用户今日上传数量（本地 + 平台）
+    try:
+        bvid_file_data = read_json(USER_BVID_FILE)
+    except Exception as e:
+        print(f"❌ 读取 {USER_BVID_FILE} 失败：{e}")
+        bvid_file_data = {}
+    for userName, user_videos in bvid_file_data.items():
+        recent_videos = [v for v in user_videos if v.get("created") and v["created"] >= today_start]
+        remote_upload_count = len(recent_videos)
+        remote_upload_dict[userName] = remote_upload_count
+
     # 定义默认值结构
     user_upload_info = defaultdict(lambda: {'today_upload_count': 0, 'platform_upload_count': 0, 'latest_upload_time': datetime.min})
 
     for task in uploaded_tasks_today:
         user_name = task['userName']
         upload_time = task['uploaded_time']
-        play_count = task.get('play_count', None)
+        play_count = task.get('play_comment_info_list', None)
 
         # 更新数据
         info = user_upload_info[user_name]
         info['today_upload_count'] += 1
         if play_count:
-            info['platform_upload_count'] += play_count
+            info['platform_upload_count'] += 1
         # 比较并保留较大的时间
         if upload_time > info['latest_upload_time']:
             info['latest_upload_time'] = upload_time
+    for user_name, remote_count in remote_upload_dict.items():
+        info = user_upload_info[user_name]
+        info['platform_upload_count_local'] = remote_count
 
     return dict(user_upload_info)  # 转回普通字典返回
 
@@ -118,7 +135,7 @@ def check_type(task_info, user_config):
             video_type = "game"
         elif "运动" in category_name_list_str or "体育" in category_name_list_str:
             video_type = "sport"
-        elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str:
+        elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
             video_type = "fun"
     user_type = "other"
     user_type_info = user_config.get('user_type_info')
@@ -226,7 +243,8 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
 
     platform_upload_count = user_upload_info.get(user_name, {}).get('platform_upload_count', 0)
     today_upload_count = user_upload_info.get(user_name, {}).get('today_upload_count', 0)
-    if platform_upload_count >= max_count or today_upload_count > 25:
+    platform_upload_count_local = user_upload_info.get(user_name, {}).get('platform_upload_count_local', 0)
+    if platform_upload_count >= max_count or today_upload_count > 25 or platform_upload_count_local >= max_count:
         print(f"{user_name}  今天投稿 {today_upload_count} 实际数量{platform_upload_count} 今日投稿次数已达上限 {max_count} 次，跳过 {log_pre}")
         return False
 
@@ -535,7 +553,7 @@ def print_simple_stats(statistic_data):
         row = (
             f"{user:<12}"  # 对应 "用户名      "
             f"{info.get('today_upload_count', 0):>10}"  # 对应 "  今日已投"
-            f"{info.get('platform_upload_count', 0):>10}"  # 对应 "  平台存量"
+            f"{info.get('platform_upload_count_local', 0):>10}"  # 对应 "  平台存量"
             f"{info.get('tobe_upload_count', 0):>10}"  # 对应 "  准备就绪"
             f"{info.get('today_process', 0):>10}"  # 对应 "  今日待传"
             f"{info.get('tomorrow_process', 0):>10}"  # 对应 "  明日待传"
@@ -658,9 +676,19 @@ def gen_all_files_to_cleanup(task_info):
     exclude_file_list = ['merged_timestamps.json']
     file_path_list = []
 
+    tasks_to_process = query_need_process_tasks()
+    # 统计所有的 video_id
+    video_ids_in_process = set()
+    for task in tasks_to_process:
+        video_ids_in_process.update(task.get('video_id_list', []))
+    skip_id_list = []
     # 2. 获取视频相关的路径和排除文件
     video_id_list = task_info.get('video_id_list', [])
     for video_id in video_id_list:
+        if video_id in video_ids_in_process:
+            print(f"跳过正在处理的 video_id {video_id} 的文件清理")
+            skip_id_list.append(video_id)
+            continue
         # 假设 build_video_paths 是外部定义的函数
         video_path_info = build_video_paths(video_id)
         origin_video_path = video_path_info.get('origin_video_path')
@@ -700,7 +728,7 @@ def gen_all_files_to_cleanup(task_info):
                     clean_files.append(str(full_path))
                 else:
                     keep_files.append(file_name)
-
+    print(f"🧹 文件清理 清理所有清理 所有文件所有 {task_info.get('userName', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 清理文件列表：{len(clean_files)}，保留文件列表：{len(keep_files)} 已跳过的id {skip_id_list}")
     return clean_files, keep_files
 
 

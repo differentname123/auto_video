@@ -69,7 +69,7 @@ def run():
 
     tasks_to_process = query_need_process_tasks()
     # 过滤掉 方案已生成 状态的任务
-    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
+    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED and '7469233367276440890' in task.get('video_id_list', [])]
     print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     mongo_base_instance = gen_db_object()
@@ -574,7 +574,7 @@ def process_single_task(task_info, manager, gen_video=False):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
-    print(f"🚀 视频开始视频处理任务 {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"🚀 视频开始视频处理任务{task_info.get('userName', 'N/A')} {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
     all_cost_time_info = {}
     start_time = time.time()
