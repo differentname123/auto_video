@@ -50,7 +50,7 @@ class MongoBase:
             else:
                 uri = f"mongodb://{host}:{port}/"
 
-            print(f"正在连接 MongoDB: {host}:{port}...")
+            # print(f"正在连接 MongoDB: {host}:{port}...")
 
             # 2. 建立连接
             # connect=False: 延迟连接，这对多进程(multiprocessing)安全非常重要

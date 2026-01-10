@@ -3,6 +3,7 @@ import time
 import requests
 import json
 
+from application.video_common_config import USER_STATISTIC_INFO_PATH
 from utils.common_utils import read_json, save_json
 
 
@@ -108,6 +109,8 @@ if __name__ == "__main__":
     used_video_list = read_json(used_video_file)
     plans_video = read_json(video_content_plans_file)
     video_play_comment_info = read_json(video_play_comment_file)
+    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
 
     for key, info in plans_video.items():
         video_id_list = key.split('_')
@@ -125,16 +128,53 @@ if __name__ == "__main__":
     # 将plans_video按照score降序排序
     sorted_videos = sorted(plans_video.items(), key=lambda x: x[1].get('score', 0), reverse=True)
 
-    for sorted_video in sorted_videos:
-        video_key = sorted_video[0]
-        if video_key in used_video_list:
-            print(f"视频对 {video_key} 已使用，跳过。")
-            continue
+    need_process_users = ['lin', 'dahao', 'shun', 'zhong', 'ping', "qizhu", 'mama', 'hong']
+    user_type_info = user_config.get('user_type_info', {})
+    select_info = {}
+    for user_name in need_process_users:
+        tobe_upload_count = user_statistic_info.get(user_name, {}).get('tobe_upload_count', 0)
+        today_processed_count = user_statistic_info.get(user_name, {}).get('today_processed_count', 0)
+        total_count = tobe_upload_count + today_processed_count
+        target_count = 30
+        need_count = max(target_count - total_count, 0)
+        preferred_video_type= 'fun'
+        for video_type, user_list in user_type_info.items():
+            if user_name in user_list:
+                preferred_video_type = video_type
+                break
+        print(f"用户 {user_name} 今日已处理 {today_processed_count} 个，待处理 {tobe_upload_count} 个，还需处理 {need_count} 个。才能够达到目标 {target_count} 个。题材{preferred_video_type}")
+        count = 0
+        for sorted_video in sorted_videos:
+            video_key = sorted_video[0]
+            if video_key in used_video_list or video_key in select_info:
+                # print(f"视频对 {video_key} 已使用，跳过。")
+                continue
+            value = sorted_video[1]
+            video_type_cn = value.get('video_type', '娱乐')
+            video_type_en = 'fun'
+            if video_type_cn == '娱乐':
+                video_type_en = 'fun'
+            if video_type_cn == '游戏':
+                video_type_en = 'game'
+            if video_type_cn == '体育':
+                video_type_en = 'sport'
+            if video_type_en == preferred_video_type:
+                value['user_name'] = user_name
+                select_info[video_key] = value
+                count += 1
+                if count >= need_count:
+                    break
+        print(f"用户 {user_name} 选择了 {count} 个视频对用于处理。当前总共选择了 {len(select_info)} 个视频对。")
+    print(f"总共选择了 {len(select_info)} 个视频对用于处理。")
+
+    for video_key, value in select_info.items():
         used_video_list.append(video_key)
-        value = sorted_video[1]
+        user_name = value.get('user_name', '未知')
         video_keys = value.get('video_keys', [])
         id_1 = video_keys[0]
         id_2 = video_keys[1]
-        print(f"当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 正在处理视频对: {id_1} 和 {id_2}，分数: {value.get('score', 0)}")
-        result = send_generate_request(id_1, id_2)
+        print(f"{user_name} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 正在处理视频对: {id_1} 和 {id_2}，分数: {value.get('score', 0)}")
+        result = send_generate_request(id_1, id_2, user_name=user_name)
         save_json(used_video_file, used_video_list)
+
+

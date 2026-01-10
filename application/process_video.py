@@ -91,6 +91,9 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
     else:
         # 复制一份video_path到output_path
         shutil.copy2(video_path, output_path)
+        print(
+            f"完成剔除视频 {video_path} 的时间段，输出路径: {output_path} 耗时 {time.time() - start_time:.2f}s  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
         return []
     time_map = {}
     merged_timestamps = get_scene(video_path)
@@ -611,22 +614,32 @@ def process_single_task(task_info, manager, gen_video=False):
     return failure_details, video_info_dict, chosen_script
 
 
-
-def _task_process_worker(task_queue):
+def _task_process_worker(task_queue, running_task_ids):
     """
     抽取出的进程工作函数：消费者模式
+    修改说明：
+    1. 增加了 running_task_ids 参数
+    2. 在任务结束（成功或彻底失败）时，从 running_task_ids 移除对应的 video_id
     """
     # 在进程内部初始化数据库连接
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
 
+    # print(f"[消费者-{os.getpid()}] 启动...")
+
     while True:
         try:
+            start_time = time.time()
             task_info = task_queue.get()
             if task_info is None:
                 break
+
+            # 获取当前任务关联的视频ID列表，用于后续解锁
+            current_video_ids = task_info.get('video_id_list', [])
+
             failure_details = {}
             try:
+                # 执行具体任务逻辑
                 failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager)
             except Exception as e:
                 traceback.print_exc()
@@ -637,6 +650,7 @@ def _task_process_worker(task_queue):
                     "error_level": ERROR_STATUS.CRITICAL
                 }
             finally:
+                # --- 状态判断与重试逻辑 ---
                 is_failed = check_failure_details(failure_details)
 
                 if is_failed:
@@ -644,82 +658,172 @@ def _task_process_worker(task_queue):
                     task_info['failed_count'] = current_failed_count
 
                     if current_failed_count < 3:
-                        print(f"任务 {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...")
+                        print(f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
                         task_info['failure_details'] = str(failure_details)
                         manager.upsert_tasks([task_info])
 
-                        # 2. 稍微延迟后放回队列，避免瞬间频繁重试
+                        # 稍微延迟后放回队列
                         time.sleep(2)
                         task_queue.put(task_info)
                         continue
                     else:
-                        print(f"任务 {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。")
+                        print(f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                         task_info['status'] = TaskStatus.FAILED
                 else:
+                    print(f"任务成功 {task_info.get('userName')}{task_info.get('video_id_list')} 成功完成。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                     pass
-
-                # 保存最终状态（失败超过3次 或 成功）
                 task_info['failure_details'] = str(failure_details)
                 manager.upsert_tasks([task_info])
+                if current_video_ids:
+                    for v_id in current_video_ids:
+                        running_task_ids.pop(v_id, None)
 
         except Exception as outer_e:
+            traceback.print_exc()
             print(f"Worker 进程发生未捕获异常: {outer_e}")
-            time.sleep(1)  # 防止死循环打印日志
+            time.sleep(1)
 
-
-def run():
+def check_task_queue(running_task_ids, task_info, check_time=True):
     """
-    主运行函数
+
+    :param running_task_ids:
+    :param task:
     :return:
     """
-    # 不为"已投稿", "待投稿"且次数小于5
-    tasks_to_process = query_need_process_tasks()
-    # 过滤掉 方案已生成 状态的任务
-    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
-    print(f"初始加载 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    task_queue = multiprocessing.Queue()
+    update_time = task_info.get('update_time')
+    # 如果在10分钟以内，那就false
+    if check_time:
+        if update_time and (time.time() - update_time.timestamp()) < 600:
+            print(f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 更新时间过近，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            return False
+    video_id_list = task_info.get('video_id_list', [])
+    # 只要有一个视频id在运行中，就返回false
+    for video_id in video_id_list:
+        if video_id in running_task_ids:
+            print(f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 中的视频 {video_id} 正在处理中，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # 初始填充任务
-    for task in tasks_to_process:
-        task_queue.put(task)
+            return False
+    return True
 
-    processes = []
-    max_workers = 10
 
-    print(f"启动 {max_workers} 个消费者进程...")
+def _task_producer_worker(task_queue, running_task_ids):
+    # 定义超时时间，例如 2 小时 (7200秒)
+    LOCK_TIMEOUT = 7200
 
-    # 1. 初始启动所有进程
-    for _ in range(max_workers):
-        p = multiprocessing.Process(target=_task_process_worker, args=(task_queue,))
-        p.daemon = True  # 设置为守护进程，主程序挂了子进程也会跟着挂（可选，建议加上）
-        p.start()
-        processes.append(p)
+    while True:
+        try:
+            now = time.time()
+            stale_keys = []
+            try:
+                # 转换为普通字典做检查，避免长时间占用 Manager 锁
+                snapshot = dict(running_task_ids)
+                for v_id, timestamp in snapshot.items():
+                    if now - timestamp > LOCK_TIMEOUT:
+                        stale_keys.append(v_id)
 
-    try:
-        while True:
-            for i in range(len(processes)):
-                p = processes[i]
-                if not p.is_alive():
-                    print(f"警告: 监测到进程 (PID: {p.pid}) 已停止工作/崩溃，正在重启新进程...")
+                for k in stale_keys:
+                    print(f"[生产者] 发现僵尸锁 {k} (超时 {(now - snapshot[k]) / 60:.1f} 分钟)，强制移除。")
+                    running_task_ids.pop(k, None)
+            except Exception as e:
+                print(f"清理僵尸锁时出错: {e}")
 
-                    # 移除旧的进程对象（可选，主要是为了释放资源，不过Python会自动回收）
-                    # 创建一个新的替代者
-                    new_p = multiprocessing.Process(target=_task_process_worker, args=(task_queue,))
-                    new_p.daemon = True
-                    new_p.start()
+            # 2. 查询任务
+            tasks_to_process = query_need_process_tasks()
+            # 过滤掉 方案已生成 状态的任务
+            tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
+            print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            count = 0
+            for task in tasks_to_process:
+                # 检查队列是否过满，防止生产者阻塞太久
+                if task_queue.qsize() > 1000:
+                    print("队列过满，暂停生产")
+                    break
 
-                    # 在列表中替换掉旧进程
-                    processes[i] = new_p
-                    print(f"新进程 (PID: {new_p.pid}) 已启动，并发数恢复。")
-            time.sleep(60)
+                # 检查逻辑
+                if not check_task_queue(running_task_ids, task):
+                    continue
 
-    except KeyboardInterrupt:
-        print("接收到终止信号，正在停止所有进程...")
-        for p in processes:
-            if p.is_alive():
-                p.terminate()
-        print("所有进程已停止。")
+                # 加锁
+                v_ids = task.get('video_id_list', [])
+                for v_id in v_ids:
+                    running_task_ids[v_id] = time.time()  # 确保写入当前时间
+
+                task_queue.put(task)
+                count += 1
+
+            print(f"入队 {count} 个任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
+
+        except Exception as e:
+            print(f"生产者异常: {e}")
+
+        # 3. 优化休眠：如果有任务入队，说明系统忙，休眠短一点；如果没任务，休眠长一点
+        # 或者固定为较短时间，例如 60 秒
+        time.sleep(3600)
+
 
 if __name__ == '__main__':
-    run()
+    manager = multiprocessing.Manager()
+
+    # 共享去重字典 (Key: TaskID)
+    running_task_ids = manager.dict()
+    # 任务队列
+    task_queue = multiprocessing.Queue()
+
+    # --- 启动消费者集群 ---
+    consumers = []
+    max_workers = 10
+    print(f"主线程: 启动 {max_workers} 个消费者进程...")
+
+    for _ in range(max_workers):
+        p = multiprocessing.Process(
+            target=_task_process_worker,
+            args=(task_queue, running_task_ids)
+        )
+        p.daemon = True
+        p.start()
+        consumers.append(p)
+
+    # --- 启动生产者进程 ---
+    print(f"主线程: 启动 1 个生产者进程...")
+    producer_p = multiprocessing.Process(
+        target=_task_producer_worker,
+        args=(task_queue, running_task_ids)
+    )
+    producer_p.daemon = True
+    producer_p.start()
+
+    # --- 进程监控循环 ---
+    try:
+        while True:
+            # 1. 监控消费者
+            for i in range(len(consumers)):
+                p = consumers[i]
+                if not p.is_alive():
+                    print(f"警告: 消费者进程 {p.pid} 挂了，重启中...")
+                    new_p = multiprocessing.Process(
+                        target=_task_process_worker,
+                        args=(task_queue, running_task_ids)
+                    )
+                    new_p.daemon = True
+                    new_p.start()
+                    consumers[i] = new_p
+
+            # 2. 监控生产者 (非常重要，如果生产者挂了整个系统就停滞了)
+            if not producer_p.is_alive():
+                print(f"严重警告: 生产者进程 {producer_p.pid} 挂了，立即重启！")
+                producer_p = multiprocessing.Process(
+                    target=_task_producer_worker,
+                    args=(task_queue, running_task_ids)
+                )
+                producer_p.daemon = True
+                producer_p.start()
+
+            time.sleep(60)  # 主线程每分钟检查一次进程状态
+
+    except KeyboardInterrupt:
+        print("主线程接收到停止信号，正在终止所有子进程...")
+        if producer_p.is_alive(): producer_p.terminate()
+        for p in consumers:
+            if p.is_alive(): p.terminate()
+        print("已退出。")

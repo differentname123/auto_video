@@ -1,26 +1,13 @@
-"""
-视频处理与发布任务管理服务
-
-该模块提供Flask Web服务，用于接收前端提交的视频处理任务，
-解析抖音视频元数据，并将任务信息存储到MongoDB中。
-重构版：函数式编程风格，扁平化结构，逻辑解耦。
-包含优化：
-1. 优先利用本地映射和数据库缓存，减少重复解析。
-2. 任务查重加入 creative_guidance 校验，支持同素材不同指令的多次生成。
-3. 确保所有涉及的素材（无论新旧）都会再次执行保存操作。
-4. [新增] 统一返回格式 {status, message, errors}。
-5. [新增] 批次内 video_id 查重，防止单次请求包含重复视频内容。
-6. [修复] 修复了 build_video_material_data 返回值解包错误，并正确集成了 validate_timestamp。
-7. [重构] process_one_click_generate 逻辑完全重写：先解ID(含Meta缓存)->查库->补全缺失Meta。
-"""
-
 import time
 import traceback
+import multiprocessing
+import threading  # [新增] 用于后台运行监控循环
 from typing import Optional, List, Tuple, Dict, Any, Set
 
 from flask import Flask, request, jsonify, render_template, Response
 
-from application.process_video import query_need_process_tasks
+from application.process_video import query_need_process_tasks, _task_process_worker, _task_producer_worker, \
+    check_task_queue
 from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
@@ -34,17 +21,22 @@ from third_party.TikTokDownloader.douyin_downloader import get_meta_info
 
 app = Flask(__name__)
 
-
 # =============================================================================
-# 0. 基础设施初始化
+# 0. 全局多进程共享对象 (新增部分)
 # =============================================================================
+# 定义全局变量，以便在 Flask 视图函数中访问
+global_manager = None
+running_task_ids = None # 共享去重字典 (Key: video_id)
+task_queue = None       # 任务队列
+consumers = []          # 消费者进程列表
+producer_p = None       # 生产者进程
 
 def _init_mongo_manager() -> MongoManager:
     """初始化MongoDB管理器"""
-    print("Initializing MongoDB connection...")
+    # print("Initializing MongoDB connection...")
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    print("✅ MongoDB Manager is ready.")
+    # print("✅ MongoDB Manager is ready.")
     return manager
 
 
@@ -430,7 +422,7 @@ def _check_task_duplication(user_name: str, valid_materials: List[Dict], global_
     return False
 
 # =============================================================================
-# 3. 核心业务流程 (重构后)
+# 3. 核心业务流程 (重构后 - 集成入队逻辑)
 # =============================================================================
 
 def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
@@ -487,11 +479,26 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         response_structure['errors'] = ['可尝试采用不同的素材或者调整创作指导也能创建新任务']
         return response_structure, 500
 
-    # 5. 保存数据
+    # 5. 保存数据并入队
     try:
         mongo_manager.upsert_materials(valid_materials)
         task_data = build_publish_task_data(user_name, global_settings, valid_materials, input_video_list)
         mongo_manager.upsert_tasks([task_data])
+
+        # =========================================================
+        # [修改] 成功保存后，将 video_id 入队并维护 running_task_ids
+        # =========================================================
+        if task_queue is not None:
+            if check_task_queue(running_task_ids, task_data, check_time=False):
+                # 加锁
+                v_ids = task_data.get('video_id_list', [])
+                for v_id in v_ids:
+                    running_task_ids[v_id] = time.time()  # 确保写入当前时间
+                task_queue.put(task_data)
+                print(f"收到新{user_name} 入队成功个任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} {request_data}")
+        else:
+            print("⚠️ 警告: 任务队列未初始化，仅保存到数据库，未实时触发处理。")
+        # =========================================================
 
         print(f"成功创建新任务，包含 {len(valid_materials)} 个视频。")
         response_structure['status'] = ResponseStatus.SUCCESS
@@ -652,6 +659,84 @@ def get_user_upload_info() -> Response:
     return jsonify(response_data)
 
 
+# =============================================================================
+# 5. 进程监控与主程序入口
+# =============================================================================
+
+def _monitor_processes():
+    """
+    [新增] 后台监控线程：专门用于监控和重启挂掉的子进程。
+    必须放在独立线程中，否则会阻塞 Flask 的运行。
+    """
+    global producer_p, consumers, task_queue, running_task_ids
+    print("👀 进程监控线程已启动...")
+
+    while True:
+        try:
+            # 1. 监控消费者
+            for i in range(len(consumers)):
+                p = consumers[i]
+                if not p.is_alive():
+                    print(f"警告: 消费者进程 {p.pid} 挂了，重启中...")
+                    new_p = multiprocessing.Process(
+                        target=_task_process_worker,
+                        args=(task_queue, running_task_ids)
+                    )
+                    new_p.daemon = True
+                    new_p.start()
+                    consumers[i] = new_p
+
+            # 2. 监控生产者
+            if producer_p and not producer_p.is_alive():
+                print(f"严重警告: 生产者进程 {producer_p.pid} 挂了，立即重启！")
+                producer_p = multiprocessing.Process(
+                    target=_task_producer_worker,
+                    args=(task_queue, running_task_ids)
+                )
+                producer_p.daemon = True
+                producer_p.start()
+
+            time.sleep(60)  # 每分钟检查一次
+        except Exception as e:
+            print(f"监控线程发生错误: {e}")
+            time.sleep(60)
+
 if __name__ == "__main__":
+    # 1. 初始化 Multiprocessing Manager
+    global_manager = multiprocessing.Manager()
+
+    # 2. 初始化共享对象
+    # 共享去重字典 (Key: video_id)
+    running_task_ids = global_manager.dict()
+    # 任务队列
+    task_queue = multiprocessing.Queue()
+
+    # 3. 启动消费者集群
+    max_workers = 10
+    print(f"主线程: 启动 {max_workers} 个消费者进程...")
+
+    for _ in range(max_workers):
+        p = multiprocessing.Process(
+            target=_task_process_worker,
+            args=(task_queue, running_task_ids)
+        )
+        p.daemon = True
+        p.start()
+        consumers.append(p)
+
+    # 4. 启动生产者进程
+    print(f"主线程: 启动 1 个生产者进程...")
+    producer_p = multiprocessing.Process(
+        target=_task_producer_worker,
+        args=(task_queue, running_task_ids)
+    )
+    producer_p.daemon = True
+    producer_p.start()
+
+    # 5. 启动后台监控线程 (关键：不能阻塞主线程，因为主线程要运行 Flask)
+    monitor_thread = threading.Thread(target=_monitor_processes, daemon=True)
+    monitor_thread.start()
+
+    # 6. 启动 Flask
     print("Flask 接口服务启动...")
-    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=5002, debug=True, use_reloader=False)
