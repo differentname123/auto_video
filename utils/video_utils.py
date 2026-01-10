@@ -1581,7 +1581,7 @@ def redub_video_with_ffmpeg(video_path: str,
                             segments_info: list,
                             output_path: str = "final_video_ffmpeg.mp4",
                             keep_original_audio: bool = False,
-                            max_speed_up: float = 2) -> str:
+                            max_speed_up: float = 1.1) -> str:
     """
     使用 FFmpeg 直接为视频重新配音。
     自动调整视频速度以精确匹配音频时长，但增加了最大加速限制。
