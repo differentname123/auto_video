@@ -67,9 +67,10 @@ def run():
     # 引入线程池执行器 (放在此处是为了不修改函数外部代码，也可移至文件顶部)
     from concurrent.futures import ThreadPoolExecutor
 
+    # 不为"已投稿", "待投稿"且次数小于5
     tasks_to_process = query_need_process_tasks()
     # 过滤掉 方案已生成 状态的任务
-    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED and '7469233367276440890' in task.get('video_id_list', [])]
+    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
     print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     mongo_base_instance = gen_db_object()

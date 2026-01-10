@@ -137,6 +137,7 @@ def check_type(task_info, user_config):
             video_type = "sport"
         elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
             video_type = "fun"
+        task_info['video_type'] = video_type
     user_type = "other"
     user_type_info = user_config.get('user_type_info')
     for user_type , user_list in user_type_info.items():
@@ -417,22 +418,32 @@ def statistic_tasks_with_video(tasks_to_upload_list):
     existing_video_tasks = []
     tobe_upload_video_info = {}
     not_existing_video_tasks = []
+    not_existing_video_info = {}
+    all_video_info = {}
     for task_info in tasks_to_upload_list:
         task_path_info = build_task_video_paths(task_info)
         final_output_path = task_path_info['final_output_path']
+        user_name = task_info.get('userName')
         if is_valid_target_file_simple(final_output_path):
             existing_video_tasks.append(task_info)
-            user_name = task_info.get('userName')
             if user_name not in tobe_upload_video_info:
                 tobe_upload_video_info[user_name] = 0
             tobe_upload_video_info[user_name] += 1
         else:
             not_existing_video_tasks.append(task_info)
+            if user_name not in not_existing_video_info:
+                not_existing_video_info[user_name] = 0
+            not_existing_video_info[user_name] += 1
+        if user_name not in all_video_info:
+            all_video_info[user_name] = 0
+        all_video_info[user_name] += 1
 
     # 将tobe_upload_video_info变成字符串，也就是 username: count 然后拼接一个长的字符串
     tobe_upload_video_info_str = ", ".join([f"{k}: {v}" for k, v in tobe_upload_video_info.items()])
+    not_existing_video_info_str = ", ".join([f"{k}: {v}" for k, v in not_existing_video_info.items()])
+    all_video_info_str = ", ".join([f"{k}: {v}" for k, v in all_video_info.items()])
 
-    print(f"总共 {len(tasks_to_upload_list)} 个待投稿任务，其中已有视频 {len(existing_video_tasks)} 个，未生成视频 {len(not_existing_video_tasks)}  已有视频的分布情况：{tobe_upload_video_info_str}")
+    print(f"总共 {len(tasks_to_upload_list)} 个待投稿任务，其中已有视频 {len(existing_video_tasks)} 个，未生成视频 {len(not_existing_video_tasks)}  已有视频的分布情况：{tobe_upload_video_info_str} 未生成视频的分布情况：{not_existing_video_info_str} 全部任务的分布情况：{all_video_info_str} ")
     return existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info
 
 
@@ -782,7 +793,17 @@ def build_hudong_info(task_info, video_info_dict, video_duration):
     return hudong_info
 
 
-
+def fix_user_name(tasks, user_config, manager):
+    for task_info in tasks:
+        check_type(task_info, user_config)
+        video_type = task_info.get('video_type', '未知')
+        if video_type == 'fun':
+            task_info['userName'] = random.choice(["shun", "ping", "ping"])
+        if video_type == 'game':
+            task_info['userName'] = random.choice(["lin", "zhong", "qizhu", "mama", "hong"])
+        if video_type == 'sport':
+            task_info['userName'] = random.choice(["nana"])
+    manager.upsert_tasks(tasks)
 
 def auto_upload(manager):
     """
@@ -793,10 +814,15 @@ def auto_upload(manager):
     current_time = datetime.now()
     config_map = build_user_config()
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    stop_flag = user_config.get('stop_flag', False)
+    if stop_flag:
+        print("检测到停止投稿开关已开启，暂停本轮投稿。")
+        return
+
     start_time = time.time()
 
     # 1. 获取并统计任务
-    tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED])
+    tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED, TaskStatus.TO_UPLOADED])
     print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
     existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload)
 
@@ -811,6 +837,8 @@ def auto_upload(manager):
     sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks,
                                                                                                 not_existing_video_tasks,
                                                                                                 tobe_upload_video_info)
+    # fix_user_name(sort_tasks_to_upload, user_config, manager)
+    # return
 
     # 2. 循环提交上传任务
     for task_info in sort_tasks_to_upload:

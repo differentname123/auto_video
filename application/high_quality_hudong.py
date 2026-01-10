@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from application.video_common_config import TaskStatus, USER_BVID_FILE, ALL_BVID_FILE, COMMENTER_USAFE_FILE
-from utils.bilibili.bili_utils import update_bili_user_sign
+from utils.bilibili.bili_utils import update_bili_user_sign, block_all_author
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
@@ -656,6 +656,10 @@ def fun(manager):
 
 
 if __name__ == '__main__':
+    config_map = init_config()
+    mid_list = config_map.keys()
+    block_all_author(mid_list, action_type=6)
+
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     # 启动定时任务线程
