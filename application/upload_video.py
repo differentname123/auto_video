@@ -247,7 +247,7 @@ def gen_video(task_info, config_map, user_config, manager):
         return failure_details, video_info_dict, chosen_script, upload_params
     except Exception as e:
         traceback.print_exc()
-        error_info = f"❌  严重错误: 处理任务 {task_info.get('_id', 'N/A')} 时发生未知异常: {str(e)}"
+        error_info = f"❌  严重错误: 处理任务 {task_info.get('_id', 'N/A')} 制作视频时发生未知异常: {str(e)}"
         print(error_info)
         failure_details[str(task_info.get('_id', 'N/A'))] = {
             "error_info": error_info,
@@ -272,14 +272,18 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text):
     :return:
     """
     available_cover_path_list = []
-    for video_id, video_info in video_info_dict.items():
-        meta_data = video_info.get('metadata')[0]
-        is_duplicate = video_info.get('is_duplicate', False)
-        if is_duplicate:
-            continue
-        abs_cover_path = meta_data.get('abs_cover_path', '')
-        if is_valid_target_file_simple(abs_cover_path):
-            available_cover_path_list.append(abs_cover_path)
+    try:
+        for video_id, video_info in video_info_dict.items():
+            meta_data = video_info.get('metadata')[0]
+            is_duplicate = video_info.get('is_duplicate', False)
+            if is_duplicate:
+                continue
+            abs_cover_path = meta_data.get('abs_cover_path', '')
+            if is_valid_target_file_simple(abs_cover_path):
+                available_cover_path_list.append(abs_cover_path)
+    except Exception as e:
+        traceback.print_exc()
+        print(f"⚠️ 生成封面时发生错误：{e}")
 
     if not available_cover_path_list:
         output_dir = os.path.dirname(final_output_path)
@@ -792,7 +796,7 @@ def auto_upload(manager):
         failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config,
                                                                                    manager)
         print(upload_params)
-        if not chosen_script:
+        if check_failure_details(failure_details):
             print(f"❌ 生成视频失败，跳过上传 {task_info.get('video_id_list', [])} 用户 {user_name} ")
             continue
 

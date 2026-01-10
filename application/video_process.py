@@ -15,6 +15,7 @@ import os
 import random
 import shutil
 import time
+import traceback
 
 import cv2
 
@@ -52,6 +53,52 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
     return merge_intervals_list
 
 
+def get_owner_asr_info_list(video_info):
+    """
+    获取作者说话的 ASR 信息列表，并过滤掉与 deleted_scene 有交集的片段
+    :param video_info:
+    :return: List[dict]
+    """
+    owner_asr_info_list = video_info.get('owner_asr_info', [])
+    logical_scene_info = video_info.get('logical_scene_info', {})
+    deleted_scene_list = logical_scene_info.get('deleted_scene', [])
+
+    # 如果没有需要删除的场景，直接返回原始列表，节省计算
+    if not deleted_scene_list:
+        return owner_asr_info_list
+
+    valid_asr_list = []
+
+    for asr in owner_asr_info_list:
+        asr_start = asr.get('start')
+        asr_end = asr.get('end')
+
+        # 简单的防御性编程：确保时间戳存在
+        if asr_start is None or asr_end is None:
+            continue
+
+        is_intersected = False
+
+        # 遍历所有被删除的场景，检查是否有交集
+        for deleted in deleted_scene_list:
+            del_start = deleted.get('start')
+            del_end = deleted.get('end')
+
+            if del_start is None or del_end is None:
+                continue
+
+            # 核心逻辑：判断两个时间段是否有重叠
+            # 如果 max(开始时间) < min(结束时间)，则说明有重叠
+            if max(asr_start, del_start) < min(asr_end, del_end):
+                is_intersected = True
+                break  # 只要和一个被删片段有交集，这个 ASR 就不要了，跳出内层循环
+
+        # 如果没有和任何 deleted_scene 产生交集，则保留
+        if not is_intersected:
+            valid_asr_list.append(asr)
+
+    return valid_asr_list
+
 def _process_single_video(video_id, video_info):
     """
     处理单个视频的字幕遮挡逻辑
@@ -84,7 +131,7 @@ def _process_single_video(video_id, video_info):
         return {"error_info": error_msg, "error_level": ERROR_STATUS.ERROR}
 
     # 4. 计算作者说话时间段
-    owner_asr_info_list = video_info.get('owner_asr_info')
+    owner_asr_info_list = video_info.get('owner_asr_info', [])
     owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
     merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
 
@@ -163,6 +210,7 @@ def gen_subtitle_box_and_cover_subtitle(video_info_dict):
 
 
         except Exception as e:
+            traceback.print_exc()
             # 捕获未预料的异常，防止整个任务中断
             error_msg = f"处理视频 {video_id} 时发生未知错误: {str(e)}"
             failure_details[video_id] = {
@@ -437,7 +485,7 @@ def build_all_need_data_map(video_info_dict):
             scene_key = f"{video_id}_{scene_number}"
             all_logical_scene_dict[scene_key] = scene
 
-        owner_asr_info_list = video_info.get('owner_asr_info')
+        owner_asr_info_list = video_info.get('owner_asr_info', [])
 
         for asr_info in owner_asr_info_list:
             speaker = asr_info.get('speaker')
@@ -565,7 +613,7 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
             need_merge_video_file_list.append(transition_video_output_path)
 
     # 生成不同的分割段，然后进行每一段视频的生成
-    new_narration_script_list = new_script_scene.get('new_narration_script')
+    new_narration_script_list = new_script_scene.get('new_narration_script', [])
     new_narration_script_info_list = []
     for new_narration_script in new_narration_script_list:
         asr_info = narration_detail_info.get(new_narration_script)
