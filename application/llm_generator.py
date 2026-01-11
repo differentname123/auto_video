@@ -1201,7 +1201,7 @@ def build_prompt_data(task_info, video_info_dict):
 
 
 
-    for video_id in video_id_list():
+    for video_id in video_id_list:
         video_info = video_info_dict.get(video_id, {})
         max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
         owner_asr_info = video_info.get('owner_asr_info', {})

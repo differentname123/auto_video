@@ -745,7 +745,7 @@ def check_task_queue(running_task_ids, task_info, check_time=True):
 
 def _task_producer_worker(task_queue, running_task_ids):
     # 定义超时时间，例如 2 小时 (7200秒)
-    LOCK_TIMEOUT = 7200
+    LOCK_TIMEOUT = 7200 * 4
 
     while True:
         try:
@@ -844,7 +844,7 @@ if __name__ == '__main__':
     #     "userName": {"$in": ["jie", "qiqixiao"]},
     #     "status": "失败"
     # }
-    query_2 = {"video_id_list": "6897610140825046272"}
+    query_2 = {"video_id_list": "7290100816990506298"}
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
