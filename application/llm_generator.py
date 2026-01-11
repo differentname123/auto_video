@@ -852,10 +852,10 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                 if is_need_narration:
                     scene_info = all_scene_dict.get(scene_id, {})
                     narration_script_list = scene_info.get('narration_script_list', [])
-                    new_narration_script_list = scene.get('new_narration_script', [])
+                    new_narration_script_list = scene.get('new_narration_script_list', [])
                     # 检查 narration_script_list 和 new_narration_script_list 的长度是否一致
                     if len(narration_script_list) != len(new_narration_script_list):
-                        return False, f"方案 {solution_num} 的场景 {scene_num}  {scene_id} 中，narration_script_list 长度 ({len(narration_script_list)}) 与 new_narration_script 长度 ({len(new_narration_script_list)}) 不一致。"
+                        return False, f"方案 {solution_num} 的场景 {scene_num}  {scene_id} 中，narration_script_list 长度 ({len(narration_script_list)}) 与 new_narration_script_list 长度 ({len(new_narration_script_list)}) 不一致。"
 
                 # 更新检查状态
                 seen_scene_ids.add(scene_id)

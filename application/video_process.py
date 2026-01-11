@@ -415,13 +415,13 @@ def fill_time_gaps(start, end, data):
 
         if current_time < item_start:
             result.append({
-                "new_narration_script": "",
+                "new_narration_script_list": "",
                 "narration_script_start": current_time,
                 "narration_script_end": item_start
             })
 
         result.append({
-            "new_narration_script": item.get("new_narration_script", item.get("narration_script", "")),
+            "new_narration_script_list": item.get("new_narration_script_list", item.get("narration_script", "")),
             "narration_script_start": item_start,
             "narration_script_end": item_end
         })
@@ -430,7 +430,7 @@ def fill_time_gaps(start, end, data):
 
     if current_time < end:
         result.append({
-            "new_narration_script": "",
+            "new_narration_script_list": "",
             "narration_script_start": current_time,
             "narration_script_end": end
         })
@@ -456,13 +456,13 @@ def merge_short_clips(clips, min_duration=500):
 
         if last_duration < min_duration:
             current_clip["narration_script_start"] = last_clip["narration_script_start"]
-            if last_clip["new_narration_script"] and not current_clip["new_narration_script"]:
-                current_clip["new_narration_script"] = last_clip["new_narration_script"]
+            if last_clip["new_narration_script_list"] and not current_clip["new_narration_script_list"]:
+                current_clip["new_narration_script_list"] = last_clip["new_narration_script_list"]
             merged_list[-1] = current_clip
         elif current_duration < min_duration:
             last_clip["narration_script_end"] = current_clip["narration_script_end"]
-            if current_clip["new_narration_script"] and not last_clip["new_narration_script"]:
-                last_clip["new_narration_script"] = current_clip["new_narration_script"]
+            if current_clip["new_narration_script_list"] and not last_clip["new_narration_script_list"]:
+                last_clip["new_narration_script_list"] = current_clip["new_narration_script_list"]
         else:
             merged_list.append(current_clip)
 
@@ -497,7 +497,7 @@ def build_all_need_data_map(video_info_dict):
 
 
 def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box, voice_info):
-    new_narration_script = split_scene.get('new_narration_script', '')
+    new_narration_script_list = split_scene.get('new_narration_script_list', '')
     narration_script_start = split_scene.get('narration_script_start', 0)
     narration_script_end = split_scene.get('narration_script_end', 0)
     segment_output_scene_file = os.path.join(output_dir,
@@ -511,7 +511,7 @@ def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_
     if not is_valid_target_file_simple(segment_output_scene_file):
         clip_video_ms(video_path, narration_script_start, narration_script_end, segment_output_scene_file)
 
-    if new_narration_script.strip() != '':
+    if new_narration_script_list.strip() != '':
         output_path = segment_output_scene_file.replace('.mp4', '_with_text.mp4')
         origin_video_path = segment_output_scene_file
         keep_original_audio = False
@@ -524,7 +524,7 @@ def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_
             # replace_video_audio(segment_output_scene_file,seg_start, seg_end, pure_audio_path, segment_output_scene_background_file)
             # origin_video_path = segment_output_scene_background_file
             # keep_original_audio = True
-            gen_video(new_narration_script, output_path, origin_video_path, keep_original_audio=keep_original_audio,
+            gen_video(new_narration_script_list, output_path, origin_video_path, keep_original_audio=keep_original_audio,
                       fixed_rect=subtitle_box, voice_info=voice_info)
         need_merge_video_file = output_path
     else:
@@ -613,16 +613,16 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
             need_merge_video_file_list.append(transition_video_output_path)
 
     # 生成不同的分割段，然后进行每一段视频的生成
-    new_narration_script_list = new_script_scene.get('new_narration_script', [])
-    new_narration_script_info_list = []
-    for new_narration_script in new_narration_script_list:
-        asr_info = narration_detail_info.get(new_narration_script)
-        new_narration_script_info_list.append({
-            'new_narration_script': new_narration_script,
+    new_narration_script_list = new_script_scene.get('new_narration_script_list', [])
+    new_narration_script_list_info_list = []
+    for new_narration_script_list in new_narration_script_list:
+        asr_info = narration_detail_info.get(new_narration_script_list)
+        new_narration_script_list_info_list.append({
+            'new_narration_script_list': new_narration_script_list,
             'narration_script_start': asr_info.get('fix_start', asr_info.get('start')),
             'narration_script_end': asr_info.get('fix_end', asr_info.get('end'))
         })
-    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_info_list, min_duration=500)
+    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, min_duration=500)
     count = 0
     for split_scene in split_scene_list:
         count += 1
@@ -787,7 +787,7 @@ def _calculate_bgm_ratio(new_script_scenes, video_info_dict):
     need_bgm_count = 0
     for scene in new_script_scenes:
         # 1. 如果加了新旁白，原声肯定没了，需要BGM
-        if len(scene.get('new_narration_script', [])) > 0:
+        if len(scene.get('new_narration_script_list', [])) > 0:
             need_bgm_count += 1
             continue
 
@@ -895,7 +895,7 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
     # 4. 处理旁白脚本对应关系
     scene_number_list = scene_info.get('scene_number_list')
     narration_script_list = scene_info.get('narration_script_list', [])
-    target_narration_scripts = new_script_scene.get('new_narration_script', [])  # 重命名变量以避免混淆
+    target_narration_scripts = new_script_scene.get('new_narration_script_list', [])  # 重命名变量以避免混淆
 
     new_narration_detail_info = {}
 

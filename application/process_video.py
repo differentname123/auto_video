@@ -488,7 +488,7 @@ def gen_video_script(task_info, video_info_dict, manager):
     task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
     failure_details = {}
     video_script_info = task_info.get('video_script_info', {})
-    if video_script_info:
+    if not video_script_info:
         error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
         if not error_info:
             task_info['video_script_info'] = video_script_info
@@ -763,7 +763,7 @@ def _task_producer_worker(task_queue, running_task_ids):
                     running_task_ids.pop(k, None)
             except Exception as e:
                 print(f"清理僵尸锁时出错: {e}")
-
+            queue_size = task_queue.qsize()
             # 2. 查询任务
             tasks_to_process = query_need_process_tasks()
             # 过滤掉 方案已生成 状态的任务
@@ -775,9 +775,10 @@ def _task_producer_worker(task_queue, running_task_ids):
                 if task_queue.qsize() > 1000:
                     print("队列过满，暂停生产")
                     break
-
+                if queue_size <= 1:
+                    check_time = False
                 # 检查逻辑
-                if not check_task_queue(running_task_ids, task):
+                if not check_task_queue(running_task_ids, task, check_time=check_time):
                     continue
 
                 # 加锁
@@ -800,7 +801,7 @@ def _task_producer_worker(task_queue, running_task_ids):
 
 def update_narration_key(data_list):
     """
-    接收一个列表，将内部结构中的 'new_narration_script' 键名修改为 'new_new_narration_script'。
+    接收一个列表，将内部结构中的 'new_narration_script_list' 键名修改为 'new_new_narration_script_list'。
     如果处理过程中发生任何错误，返回原始列表。
     """
     try:
@@ -815,9 +816,9 @@ def update_narration_key(data_list):
             if isinstance(scenes, list):
                 for scene in scenes:
                     # 检查是否存在目标 key
-                    if "new_narration_script" in scene:
+                    if "new_narration_script_list" in scene:
                         # 使用 pop 方法取出旧 key 的值并赋值给新 key，同时删除旧 key
-                        scene["new_narration_script_list"] = scene.pop("new_narration_script")
+                        scene["new_narration_script_list"] = scene.pop("new_narration_script_list")
 
         return result_list
 
@@ -835,8 +836,13 @@ if __name__ == '__main__':
     #     "7590735140998101617",
     #     "7593362953408105780"
     # ])
+    # query_2 = {
+    #     "status": {"$ne": "666"}
+    # }
+
     query_2 = {
-        "status": {"$ne": "666"}
+        "userName": {"$in": ["jie", "qiqixiao"]},
+        "status": "失败"
     }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
 
