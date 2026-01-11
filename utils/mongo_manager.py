@@ -142,6 +142,30 @@ class MongoManager:
         # 4. 执行查询
         return self.db.find_many(self.tasks_collection, query)
 
+    def find_by_custom_query(self, collection_name: str, query: dict):
+        """
+        通用查询接口：支持对任意集合执行任意合法的 MongoDB 查询语句。
+
+        Args:
+            collection_name (str): 集合名称。
+                                   可以直接传字符串 (如 "users")，
+                                   也可以使用类属性 (如 self.tasks_collection)。
+            query (dict): 标准的 MongoDB 查询字典。
+                          支持操作符 (如 {"$gt": 10}, {"$in": [...]}, {"$regex": "pattern"})。
+
+        Returns:
+            list: 包含匹配文档的列表。
+        """
+        if not collection_name:
+            print("错误: 未指定集合名称")
+            return []
+
+        if query is None:
+            query = {}
+
+        # 调用 MongoBase 的底层查询方法
+        return self.db.find_many(collection_name, query)
+
     def find_tasks_by_status(self, status_list: list):
         """
         查询 publish_tasks 表中指定状态的数据。

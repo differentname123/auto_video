@@ -2,6 +2,7 @@ import time
 import traceback
 import multiprocessing
 import threading  # [新增] 用于后台运行监控循环
+from datetime import datetime
 from typing import Optional, List, Tuple, Dict, Any, Set
 
 from flask import Flask, request, jsonify, render_template, Response
@@ -146,7 +147,8 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
         'original_url_info_list': url_info_list,
         'creation_guidance_info': global_settings,
         'new_video_script_info': None,
-        'upload_info': None
+        'upload_info': None,
+        'create_time': datetime.now(),
     }
 
 
@@ -500,7 +502,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
             print("⚠️ 警告: 任务队列未初始化，仅保存到数据库，未实时触发处理。")
         # =========================================================
 
-        print(f"成功创建新任务，包含 {len(valid_materials)} 个视频。")
+        print(f"成功创建新任务，包含 {len(valid_materials)} 个视频。{task_data.get('userName')} {task_data.get('video_id_list')} ")
         response_structure['status'] = ResponseStatus.SUCCESS
         response_structure['message'] = f'新任务已成功创建，包含 {len(valid_materials)} 个视频。'
         return response_structure, 200

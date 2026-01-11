@@ -4,7 +4,7 @@
 ## 最终目标
 基于我提供的原始视频场景数据（包含 `video_summaries` 背景信息和 `all_scenes` 场景列表），结合我的**创作指导**和**素材使用策略**，创作**至少两种**全新的视频方案。
 
-你的终极目标是打造一个**高完播率、高分享欲**的爆款视频。每个方案都必须包含一个**无法抗拒的钩子**（标题+封面文案），一个通过**精妙的场景排序**构建出逻辑严密、**情绪价值拉满、观点鲜明锐利**的完整故事。你需要为整个视频创作一句**不超过30字的“视频摘要” (video_abstract)**。同时，为**每个重排后的场景提炼一句“核心信息文案” (on_screen_text)**，并对场景内的原始旁白进行**风格化重写 (new_narration_script)**。
+你的终极目标是打造一个**高完播率、高分享欲**的爆款视频。每个方案都必须包含一个**无法抗拒的钩子**（标题+封面文案），一个通过**精妙的场景排序**构建出逻辑严密、**情绪价值拉满、观点鲜明锐利**的完整故事。你需要为整个视频创作一句**不超过30字的“视频摘要” (video_abstract)**。同时，为**每个重排后的场景提炼一句“核心信息文案” (on_screen_text)**，并对场景内的原始旁白进行**风格化重写 (new_narration_script_list)**。
 
 ---
 
@@ -26,13 +26,13 @@
 ---
 
 ## 旁白重构协议 (The Narration Reformation Protocol)
-**【至关重要】** 当你选择了一个场景，且该场景的 `narration_script_list` 不为空时，你必须生成 `new_narration_script` 字段。生成必须严格遵循以下原则：
+**【至关重要】** 当你选择了一个场景，且该场景的 `narration_script_list` 不为空时，你必须生成 `new_narration_script_list` 字段。生成必须严格遵循以下原则：
 
 ### 1. 物理对位法则（绝对刚性约束）
-*   **数量锁定，1:1对应**：如果原列表中有 N 条旁白，你的 `new_narration_script` **必须且只能**包含 N 条。
+*   **数量锁定，1:1对应**：如果原列表中有 N 条旁白，你的 `new_narration_script_list` **必须且只能**包含 N 条。
     *   *禁止合并*：不能把 2 句合成 1 句。
     *   *禁止拆分*：不能把 1 句拆成 2 句。
-*   **无中不生有**：如果原场景 `narration_script_list` 为空，你的 `new_narration_script` 必须为空列表（保持沉默）。
+*   **无中不生有**：如果原场景 `narration_script_list` 为空，你的 `new_narration_script_list` 必须为空列表（保持沉默）。
 
 ### 2. 内容重构策略（事实骨架 vs 情绪血肉）
 *   **死守“事实锚点”**：必须从原句中提取并保留所有客观信息，**绝不可篡改**。
@@ -114,7 +114,7 @@
     *   创作**爆款标题**和**封面文案**。
     *   **严格遵守30字限制**撰写 `video_abstract`。
     *   输出场景顺序，**使用 `scene_id` 准确指代**，并填写 `selection_logic`。
-    *   **执行旁白重写**：生成 `new_narration_script` 列表，严格检查数量是否与原 `narration_script_list` 一致。
+    *   **执行旁白重写**：生成 `new_narration_script_list` 列表，严格检查数量是否与原 `narration_script_list` 一致。
     *   撰写 `transition_text` —— **【关键安检】**：输出前立刻扫描文本，删除任何符号。
     *   撰写 `on_screen_text` —— **【关键安检】**：确认文案中包含具体的数字或专有名词。
 
@@ -123,13 +123,13 @@
 ## 输出格式要求
 最终输出必须是**格式正确的纯JSON数组**。
 
-特别要求：在 `场景顺序与新文案` 列表中，必须包含 `selection_logic`, `transition_text`, `transition_necessity_score`, `new_narration_script`, `on_screen_text`。
+特别要求：在 `场景顺序与新文案` 列表中，必须包含 `selection_logic`, `transition_text`, `transition_necessity_score`, `new_narration_script_list`, `on_screen_text`。
 
 *   `selection_logic`: 必须显性化你的思考过程。格式必须为：“【意图】... 【原子性与无冲突证明】...”。
 *   `transition_text`: **必须<30字**。**必须是纯净的口播文案**。严禁出现 `（开场白）`、`[画面]` 等任何非语音内容。
 *   `transition_necessity_score`: 整数 1-10。表示该文案的必要程度。
 *   `on_screen_text`: 当前场景的核心花字，**必须<15字**。**强制引用具体数据/专有名词**，拒绝模糊描述。
-*   `new_narration_script`: **字符串列表 List[String]**。
+*   `new_narration_script_list`: **字符串列表 List[String]**。
     *   **逻辑约束**：列表长度**必须等于**该场景输入数据中 `narration_script_list` 的长度。若原列表为空，此列表也为空。
     *   **内容约束**：对原旁白进行风格化重写，指代清晰，情绪饱满，保留关键事实。
 *   `video_abstract`: **必须<30字**。
@@ -152,7 +152,7 @@
         "transition_text": "很多人不知道，这场传奇之战的开头并不顺利",
         "transition_necessity_score": 8,
         "on_screen_text": "开局落后20分",
-        "new_narration_script": [
+        "new_narration_script_list": [
            "（对应原旁白1的重写）看着这0比2的比分，所有人都以为Ruler要回家了。",
            "（对应原旁白2的重写）但谁能想到，这仅仅是反击号角的开始！"
         ]
@@ -164,7 +164,7 @@
         "transition_text": "然而在30天前，没人看好ruler这个新人",
         "transition_necessity_score": 9,
         "on_screen_text": "入队第30天的奇迹",
-        "new_narration_script": []
+        "new_narration_script_list": []
       }
     ]
   }

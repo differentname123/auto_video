@@ -10,6 +10,7 @@
     整体逻辑：
         1.查询需要处理的任务
 """
+import copy
 import multiprocessing
 import os
 import shutil
@@ -487,7 +488,7 @@ def gen_video_script(task_info, video_info_dict, manager):
     task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
     failure_details = {}
     video_script_info = task_info.get('video_script_info', {})
-    if not video_script_info:
+    if video_script_info:
         error_info, video_script_info, final_scene_info = gen_video_script_llm(task_info, video_info_dict)
         if not error_info:
             task_info['video_script_info'] = video_script_info
@@ -797,68 +798,50 @@ def _task_producer_worker(task_queue, running_task_ids):
         time.sleep(3600)
 
 
-if __name__ == '__main__':
-    manager = multiprocessing.Manager()
-
-    # 共享去重字典 (Key: TaskID)
-    running_task_ids = manager.dict()
-    # 任务队列
-    task_queue = multiprocessing.Queue()
-
-    # --- 启动消费者集群 ---
-    consumers = []
-    max_workers = 10
-    print(f"主线程: 启动 {max_workers} 个消费者进程...")
-
-    for _ in range(max_workers):
-        p = multiprocessing.Process(
-            target=_task_process_worker,
-            args=(task_queue, running_task_ids)
-        )
-        p.daemon = True
-        p.start()
-        consumers.append(p)
-
-    # --- 启动生产者进程 ---
-    print(f"主线程: 启动 1 个生产者进程...")
-    producer_p = multiprocessing.Process(
-        target=_task_producer_worker,
-        args=(task_queue, running_task_ids)
-    )
-    producer_p.daemon = True
-    producer_p.start()
-
-    # --- 进程监控循环 ---
+def update_narration_key(data_list):
+    """
+    接收一个列表，将内部结构中的 'new_narration_script' 键名修改为 'new_new_narration_script'。
+    如果处理过程中发生任何错误，返回原始列表。
+    """
     try:
-        while True:
-            # 1. 监控消费者
-            for i in range(len(consumers)):
-                p = consumers[i]
-                if not p.is_alive():
-                    print(f"警告: 消费者进程 {p.pid} 挂了，重启中...")
-                    new_p = multiprocessing.Process(
-                        target=_task_process_worker,
-                        args=(task_queue, running_task_ids)
-                    )
-                    new_p.daemon = True
-                    new_p.start()
-                    consumers[i] = new_p
+        # 使用 deepcopy 创建数据的副本进行操作
+        # 这样做是为了确保如果中间出错，原始数据 data_list 不会被部分修改
+        result_list = copy.deepcopy(data_list)
 
-            # 2. 监控生产者 (非常重要，如果生产者挂了整个系统就停滞了)
-            if not producer_p.is_alive():
-                print(f"严重警告: 生产者进程 {producer_p.pid} 挂了，立即重启！")
-                producer_p = multiprocessing.Process(
-                    target=_task_producer_worker,
-                    args=(task_queue, running_task_ids)
-                )
-                producer_p.daemon = True
-                producer_p.start()
+        for item in result_list:
+            # 定位到 "场景顺序与新文案" 列表
+            scenes = item.get("场景顺序与新文案")
 
-            time.sleep(60)  # 主线程每分钟检查一次进程状态
+            if isinstance(scenes, list):
+                for scene in scenes:
+                    # 检查是否存在目标 key
+                    if "new_narration_script" in scene:
+                        # 使用 pop 方法取出旧 key 的值并赋值给新 key，同时删除旧 key
+                        scene["new_narration_script_list"] = scene.pop("new_narration_script")
 
-    except KeyboardInterrupt:
-        print("主线程接收到停止信号，正在终止所有子进程...")
-        if producer_p.is_alive(): producer_p.terminate()
-        for p in consumers:
-            if p.is_alive(): p.terminate()
-        print("已退出。")
+        return result_list
+
+    except Exception as e:
+        # 打印错误日志（可选）
+        print(f"处理数据时发生错误: {e}")
+        # 发生异常，直接返回传入的原始列表
+        return data_list
+
+if __name__ == '__main__':
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
+    # tasks_to_process = query_need_process_tasks()
+    # tasks_to_process = manager.find_task_by_exact_video_ids([
+    #     "7590735140998101617",
+    #     "7593362953408105780"
+    # ])
+    query_2 = {
+        "status": {"$ne": "666"}
+    }
+    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+
+    for task_info in all_task:
+        video_script_info = task_info.get('video_script_info', [])
+        updated_video_script_info = update_narration_key(video_script_info)
+        task_info['video_script_info'] = updated_video_script_info
+    manager.upsert_tasks(all_task)
