@@ -752,18 +752,16 @@ def check_owner_asr(owner_asr_info, video_duration):
 def check_video_script(video_script_info, final_scene_info, allow_commentary, is_need_narration):
     """
     检查 video_script_info 列表中的每个方案是否符合预设的规则。
+    如果违反多样性规则，会直接从列表种移除不合规的方案。
 
     Args:
-        video_script_info (list): 包含一个或多个视频脚本方案的列表。
+        video_script_info (list): 包含一个或多个视频脚本方案的列表。**注意：此列表可能会在函数内部被修改（删除元素）**。
         final_scene_info (dict): 包含有效场景ID列表等信息的字典。
-                                示例: {'all_scenes': [{'scene_id': 'id1'}, ...], 'material_usage_mode': 'full'}
-        allow_commentary (bool): 是否允许/包含解说词。如果为True，需要检查 transition_text。
+        allow_commentary (bool): 是否允许/包含解说词。
         is_need_narration (bool): 是否需要旁白检查。
 
     Returns:
         tuple: (bool, str)
-               第一个元素为布尔值，True表示检查通过，False表示检查失败。
-               第二个元素为字符串，检查通过时为空字符串，失败时为具体的错误信息。
     """
     try:
         all_scene_list = final_scene_info.get('all_scenes', [])
@@ -780,114 +778,123 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
         if 'all_scenes' not in final_scene_info or not isinstance(final_scene_info['all_scenes'], list):
             return False, "输入的数据 'final_info_list' 格式错误，缺少 'all_scenes' 列表。"
 
-        # 提取final_info_list中的所有scene_id，并放入set中以提高查询效率
         valid_scene_ids = {scene['scene_id'] for scene in final_scene_info['all_scenes']}
         valid_source_video_ids = {scene['source_video_id'] for scene in final_scene_info['all_scenes']}
 
-        # 标记是否至少有一个方案使用了>=2个素材源 (用于规则2检查)
-        has_multi_source_solution = False
+        # 用于记录每个方案使用的素材源数量，用于后续的多样性过滤
+        # 这个列表的索引与 video_script_info 的索引是一一对应的
+        solutions_source_usage = []
 
-        # 遍历每个方案进行检查
+        # === 阶段一：遍历检查基本规则并收集信息 ===
+        # 注意：在此循环中严禁修改 video_script_info 的长度，否则会导致索引错乱
         for i, solution in enumerate(video_script_info):
-            solution_num = i + 1  # 方案编号，从1开始
+            solution_num = i + 1
 
             if not isinstance(solution, dict):
                 return False, f"方案 {solution_num} 的数据格式不是一个字典。"
 
-            # 1. 检查每个方案的 title, cover_text, video_abstract, 方案整体评分, 场景顺序与新文案 字段不能为空。
+            # 1. 检查必要字段
             required_fields = ['title', 'cover_text', 'video_abstract', '方案整体评分', '场景顺序与新文案']
             for field in required_fields:
                 value = solution.get(field)
                 if value is None:
                     return False, f"方案 {solution_num} 缺少必要字段: '{field}'。"
-                # 检查字符串或列表是否为空
                 if isinstance(value, (str, list)) and not value:
                     return False, f"方案 {solution_num} 的字段 '{field}' 的值不能为空。"
 
-            # 2. 检查 方案整体评分 字段必须是数字且在0到10之间。
+            # 2. 检查评分
             score = solution.get('方案整体评分')
             if not isinstance(score, (int, float)):
                 return False, f"方案 {solution_num} 的 '方案整体评分' ({score}) 不是数字类型。"
             if not (0 <= score <= 10):
                 return False, f"方案 {solution_num} 的 '方案整体评分' ({score}) 不在 0 到 10 的范围内。"
 
-            # 开始检查 '场景顺序与新文案' 内部的细节
+            # 3. 检查场景细节
             scenes = solution.get('场景顺序与新文案', [])
             if not isinstance(scenes, list):
                 return False, f"方案 {solution_num} 的 '场景顺序与新文案' 不是一个列表。"
 
             seen_scene_ids = set()
-            source_video_ids_in_solution = set()
+            source_video_ids_in_solution = set()  # 当前方案用到的所有源视频ID
             expected_scene_number = 1
 
             for j, scene in enumerate(scenes):
-                scene_num = j + 1  # 场景编号，从1开始
-
+                scene_num = j + 1
                 if not isinstance(scene, dict):
                     return False, f"方案 {solution_num} 的场景 {scene_num} 的数据格式不是一个字典。"
 
-                # 4. 检查 new_scene_number 是否从1开始连续增长。
+                # 4. 检查编号连续性
                 current_scene_number = scene.get('new_scene_number')
                 if current_scene_number != expected_scene_number:
-                    return False, f"方案 {solution_num} 的 'new_scene_number' 不连续。在场景 {scene_num} 期望值为 {expected_scene_number}，实际值为 {current_scene_number}。"
+                    return False, f"方案 {solution_num} 的 'new_scene_number' 不连续。期望 {expected_scene_number}，实际 {current_scene_number}。"
 
-                # 3. 检查 scene_id 是否有效且无重复。
+                # 3. 检查 scene_id 有效性
                 scene_id = scene.get('scene_id')
                 if not scene_id:
-                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'scene_id' 或其值为空。"
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'scene_id'。"
                 if scene_id not in valid_scene_ids:
-                    return False, f"方案 {solution_num} 的场景 {scene_num} 中，scene_id '{scene_id}' 是无效的，不存在于 valid_scene_ids 列表中。"
+                    return False, f"方案 {solution_num} 的场景 {scene_num} ID无效。"
                 if scene_id in seen_scene_ids:
                     return False, f"方案 {solution_num} 中存在重复的 scene_id: '{scene_id}'。"
 
-                # 5. 检查 on_screen_text 字段是否存在。
-                if 'on_screen_text' not in scene:  # 检查key是否存在，允许其值为空字符串
-                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text' 字段。"
+                # 5. 检查 on_screen_text
+                if 'on_screen_text' not in scene:
+                    return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text'。"
 
-                # 6. 如果 allow_commentary 为 True，检查 transition_text 字段是否存在
+                # 6. 检查 transition_text
                 if allow_commentary:
                     if 'transition_text' not in scene:
-                        return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'transition_text' 字段 (因为 allow_commentary=True)。"
+                        return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'transition_text'。"
 
+                # 检查旁白
                 if is_need_narration:
                     scene_info = all_scene_dict.get(scene_id, {})
                     narration_script_list = scene_info.get('narration_script_list', [])
                     new_narration_script_list = scene.get('new_narration_script_list', [])
-                    # 检查 narration_script_list 和 new_narration_script_list 的长度是否一致
                     if len(narration_script_list) != len(new_narration_script_list):
-                        return False, f"方案 {solution_num} 的场景 {scene_num}  {scene_id} 中，narration_script_list 长度 ({len(narration_script_list)}) 与 new_narration_script_list 长度 ({len(new_narration_script_list)}) 不一致。"
+                        return False, f"方案 {solution_num} 的场景 {scene_num} 旁白列表长度不一致。"
 
-                # 更新检查状态
                 seen_scene_ids.add(scene_id)
-                # 记录该场景所属的 source_video_id
                 source_video_ids_in_solution.add(all_scene_dict[scene_id].get('source_video_id'))
                 expected_scene_number += 1
 
-            # =================== 新增规则检查 1：素材使用模式检查 (在单个方案遍历结束后) ===================
+            # 记录该方案使用的素材源数量
+            solutions_source_usage.append(len(source_video_ids_in_solution))
+
+            # 检查素材使用模式 (full/major)
             if material_usage_mode == 'full':
                 if len(seen_scene_ids) != len(valid_scene_ids):
-                    return False, f"方案 {solution_num} 违反 'full' 模式规则：必须使用所有场景。实际使用了 {len(seen_scene_ids)} 个，总共有 {len(valid_scene_ids)} 个。"
+                    return False, f"方案 {solution_num} 违反 'full' 模式规则：需使用全部场景。"
             elif material_usage_mode == 'major':
-                # 注意：这里使用 >=，一半如果不是整数，按数学值比较即可
                 if len(seen_scene_ids) < (len(valid_scene_ids) / 2):
-                    return False, f"方案 {solution_num} 违反 'major' 模式规则：使用场景数量 ({len(seen_scene_ids)}) 必须大于等于总数 ({len(valid_scene_ids)}) 的一半。"
+                    return False, f"方案 {solution_num} 违反 'major' 模式规则：需使用过半场景。"
 
-            # 更新多素材源方案的标记
-            if len(source_video_ids_in_solution) >= 2:
-                has_multi_source_solution = True
+        # === 阶段二：多样性规则过滤与删除逻辑 ===
+        # 逻辑：当总有效素材源 >= 2 时，方案内必须混合使用 >= 2 个素材源。
+        # 我们在这里进行“后处理”，安全地移除不满足条件的方案。
 
-        # =================== 新增规则检查 2：多视频源混合检查 (在所有方案遍历结束后) ===================
-        # 如果总的有效视频源 >= 2，必须至少有一个方案是混合了 >= 2 个视频源的
         if len(valid_source_video_ids) >= 2:
-            if not has_multi_source_solution:
-                return False, "违反多样性规则：当有效素材视频源数量大于等于2时，不能所有方案都只使用单一视频源的素材，至少需要有一个方案混合使用了2个或以上的视频源。"
+            filtered_solutions = []
 
-        # 如果所有检查都通过
+            # 使用平行列表 solutions_source_usage 来判断保留哪些方案
+            # 因为目前为止 video_script_info 没有被修改，索引 k 是对应的
+            for k, usage_count in enumerate(solutions_source_usage):
+                if usage_count >= 2:
+                    filtered_solutions.append(video_script_info[k])
+
+            # 检查是否有方案被过滤掉
+            if len(filtered_solutions) != len(video_script_info):
+                # 使用切片赋值，在原内存地址上修改列表内容，这是安全的修改方式
+                video_script_info[:] = filtered_solutions
+
+            # 如果过滤后列表为空，说明所有方案都不合格
+            if not video_script_info:
+                return False, "违反多样性规则：当有效素材视频源数量大于等于2时，所有方案均未混合使用多种素材源。"
+
         return True, ""
 
     except (KeyError, TypeError, AttributeError) as e:
-        # 捕获可能的数据结构错误，确保程序不崩溃
-        error_info = f"处理数据时发生结构性错误，请检查输入格式是否正确。错误详情: {type(e).__name__}: {e}"
+        error_info = f"处理数据时发生结构性错误，请检查输入格式。错误详情: {type(e).__name__}: {e}"
         return False, error_info
 
 
@@ -1190,10 +1197,12 @@ def build_prompt_data(task_info, video_info_dict):
     is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
     video_summary_info = {}
     all_scene_info_list = []
+    video_id_list = task_info.get('video_id_list', [])
 
 
 
-    for video_id, video_info in video_info_dict.items():
+    for video_id in video_id_list():
+        video_info = video_info_dict.get(video_id, {})
         max_scenes = video_info.get('base_info', {}).get('max_scenes', 0)
         owner_asr_info = video_info.get('owner_asr_info', {})
         if max_scenes == 1: # 如果不需要原创就应该全量保留而且不能够改变顺序

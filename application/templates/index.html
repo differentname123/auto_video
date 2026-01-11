@@ -167,9 +167,9 @@
             <div>
                 <div class="welcome-text" id="welcome-msg"></div>
                 <div class="stat-group">
-                    今日投稿 <span id="stat-uploaded" class="stat-badge" style="color:#ff4d4f">--</span> /
-                    待处理 <span id="stat-pending" class="stat-badge" style="color:#faad14">--</span> /
-                    已上传 <span id="stat-remote" class="stat-badge" style="color:#52c41a">--</span>
+                    已上传B站 <span id="stat-uploaded-platform" class="stat-badge" style="color:#52c41a">--</span> /
+                    今日待处理 <span id="stat-process-today" class="stat-badge" style="color:#ff4d4f">--</span> /
+                    明日待处理 <span id="stat-process-tomorrow" class="stat-badge" style="color:#faad14">--</span>
                 </div>
             </div>
             <a class="user-action" onclick="logout()">[退出登录]</a>
@@ -330,8 +330,11 @@
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
         dateSelect: document.getElementById('schedule-date'),
-        stats: { uploaded: document.getElementById('stat-uploaded'), pending: document.getElementById('stat-pending'), remote: document.getElementById('stat-remote') },
-        tplCard: document.getElementById('tpl-video-card'),
+       stats: {
+            uploadedPlatform: document.getElementById('stat-uploaded-platform'),
+            processToday: document.getElementById('stat-process-today'),
+            processTomorrow: document.getElementById('stat-process-tomorrow')
+        },        tplCard: document.getElementById('tpl-video-card'),
         tplTime: document.getElementById('tpl-time-group')
     };
 
@@ -384,18 +387,29 @@
     }
 
     async function fetchUploadStats() {
-        try {
-            const r = await fetch(`/get_user_upload_info?userName=${encodeURIComponent(APP.currentUser)}`);
-            if(r.ok) {
-                const d = await r.json();
-                if(d.status === 'success') {
-                    UI.stats.uploaded.textContent = d.data.total_count_today;
-                    UI.stats.pending.textContent = d.data.unprocessed_count_today;
-                    UI.stats.remote.textContent = d.data.remote_upload_count || 0;
+            try {
+                const r = await fetch(`/get_user_upload_info?userName=${encodeURIComponent(APP.currentUser)}`);
+                if(r.ok) {
+                    const d = await r.json();
+                    if(d.status === 'success') {
+                        // --- 修改开始：根据你的要求映射新字段 ---
+
+                        // 平台已上传 -> today_upload_count
+                        UI.stats.uploadedPlatform.textContent = d.data.today_upload_count || 0;
+
+                        // 今日待处理 -> today_process
+                        UI.stats.processToday.textContent = d.data.today_process || 0;
+
+                        // 明日待处理 -> tomorrow_process
+                        UI.stats.processTomorrow.textContent = d.data.tomorrow_process || 0;
+
+                        // --- 修改结束 ---
+                    }
                 }
+            } catch(e) {
+                console.error("获取统计数据失败", e);
             }
-        } catch(e) {}
-    }
+        }
 
     /* --- DOM 操作 & 模板渲染 --- */
 

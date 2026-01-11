@@ -818,9 +818,22 @@ def auto_upload(manager):
         return
 
     start_time = time.time()
+    all_task = []
+    exist_id_list = []
+    filter_task_list = []
+    tasks_to_process = query_need_process_tasks()
 
     # 1. 获取并统计任务
     tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED, TaskStatus.TO_UPLOADED])
+    all_task.extend(tasks_to_upload)
+    all_task.extend(tasks_to_process)
+    for task in all_task:
+        id_str = str(task.get('_id'))
+        if id_str in exist_id_list:
+            continue
+        exist_id_list.append(id_str)
+        filter_task_list.append(task)
+
     print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
     existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload)
 
@@ -884,7 +897,7 @@ def auto_upload(manager):
     need_process_tasks = query_need_process_tasks()
 
     # 注意：tobe_upload_video_info 在 process_idle_tasks 中可能被修改，这里使用修改后的值，逻辑正确
-    gen_all_statistic_info(already_upload_users, user_upload_info, need_process_tasks, tobe_upload_video_info)
+    gen_all_statistic_info(already_upload_users, user_upload_info, filter_task_list, tobe_upload_video_info)
     concurrent.futures.wait(futures, timeout=None)
 
 

@@ -18,7 +18,7 @@ def send_generate_request(video_id1, video_id2, user_name='dahao'):
     Returns:
         dict: 接口返回的JSON响应，如果请求失败返回None
     """
-    url = "http://127.0.0.1:5002/one-click-generate"
+    url = "http://127.0.0.1:5001/one-click-generate"
 
     # 构造请求头
     headers = {
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     # 将plans_video按照score降序排序
     sorted_videos = sorted(plans_video.items(), key=lambda x: x[1].get('score', 0), reverse=True)
 
-    need_process_users = ['lin', 'dahao', 'shun', 'zhong', 'ping', "qizhu", 'mama', 'hong']
+    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong']
     user_type_info = user_config.get('user_type_info', {})
     select_info = {}
     for user_name in need_process_users:

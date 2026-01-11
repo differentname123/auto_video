@@ -37,7 +37,7 @@ class MongoManager:
             return None
 
         # 确保列表排序，与存储时保持一致
-        video_id_list.sort()
+        # video_id_list.sort()
 
         query = {
             "video_id_list": video_id_list
@@ -299,9 +299,9 @@ class MongoManager:
         now = datetime.now()
         for item in data_list:
             item['update_time'] = now
-            # 对 video_id_list 排序，确保列表比较时的唯一性
-            if 'video_id_list' in item and isinstance(item['video_id_list'], list):
-                item['video_id_list'].sort()
+            # # 对 video_id_list 排序，确保列表比较时的唯一性
+            # if 'video_id_list' in item and isinstance(item['video_id_list'], list):
+            #     item['video_id_list'].sort()
 
         # 修改点：将唯一键改为由三个字段组成的列表
         unique_keys = ["video_id_list", "creation_guidance_info"]

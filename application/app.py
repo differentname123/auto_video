@@ -12,7 +12,7 @@ from application.process_video import query_need_process_tasks, _task_process_wo
 from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
-    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths
+    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths, USER_STATISTIC_INFO_PATH
 
 _configure_third_party_paths()
 
@@ -644,21 +644,31 @@ def check_video_status() -> Tuple[Response, int]:
 
 @app.route('/get_user_upload_info', methods=['GET'])
 def get_user_upload_info() -> Response:
-    """获取用户上传统计信息 (Mock)"""
-    response_data = {
-        'status': ResponseStatus.SUCCESS,
-        'message': '获取成功',
-        'errors': [],
-        'data': {
-            'total_count_today': 0,
-            'unprocessed_count_today': 0,
-            'remote_upload_count': 0
+    try:
+        user_name = request.args.get('userName', '').strip()
+        user_upload_info = read_json(USER_STATISTIC_INFO_PATH)
+        user_info = user_upload_info.get(user_name, {})
+        response_data = {
+            'status': ResponseStatus.SUCCESS,
+            'message': '获取成功',
+            'errors': [],
+            'data': {
+                'tomorrow_process': user_info.get('tomorrow_process', 0),
+                'today_process': user_info.get('today_process', 0),
+                'today_upload_count': user_info.get('today_upload_count', 0),
+            }
         }
-    }
-    # 增加日志输出：打印返回给前端的信息
-    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Upload-Info Response: {response_data}")
+        # 增加日志输出：打印返回给前端的信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Upload-Info Response: {response_data}")
 
-    return jsonify(response_data)
+        return jsonify(response_data)
+    except Exception as e:
+        traceback.print_exc()
+        app.logger.exception("get_user_upload_info 接口异常")
+        error_response = {'status': 'error', 'message': str(e)}
+        # 增加日志输出：打印错误返回信息
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Upload-Info Error Response: {error_response}")
+        return jsonify(error_response)
 
 
 # =============================================================================
