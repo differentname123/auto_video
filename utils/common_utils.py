@@ -19,6 +19,7 @@ import string
 import time
 import traceback
 from collections import defaultdict
+from datetime import timedelta, datetime
 from functools import wraps
 from pathlib import Path
 from typing import Union, List, Optional
@@ -1006,3 +1007,98 @@ def safe_process_limit(limit, name, lock_dir="./process_locks"):
         return wrapper
 
     return decorator
+
+
+def get_simple_play_distribution(data_list, start_timestamp, interval_minutes=30, max_elapsed_minutes=60*48):
+    clean_data = []
+    for item in data_list:
+        time_str = next(iter(item))
+        clean_data.append((datetime.strptime(time_str, "%Y-%m-%d %H:%M:%S"), item[time_str]['play_count']))
+    clean_data.sort(key=lambda x: x[0])
+
+    result = {}
+    elapsed_minutes = interval_minutes
+    # start_timestamps是一个时间戳， 将start_timestamp转换为datetime对象
+    start_time = datetime.fromtimestamp(start_timestamp)
+
+    current_time = start_time
+
+    while True:
+        # Step 1: 找到最近的 Next (列表里第一个时间 > 当前时间的点)
+        # 使用 enumerate 是为了方便拿到索引，从而知道 pre 是谁
+        next_index = -1
+        for i, (t, c) in enumerate(clean_data):
+            if t > current_time:
+                next_index = i
+                break
+
+        # 如果找不到 Next (说明当前时间已经超过了所有数据的时间)，直接结束
+        if next_index == -1:
+            break
+
+        # Step 2: 确定 Prev
+        next_time, next_val = clean_data[next_index]
+
+        if next_index > 0:
+            # 正常情况：Next的前一个就是 Prev
+            prev_time, prev_val = clean_data[next_index - 1]
+        else:
+            # 特殊情况：Next是第一个数据，说明当前时间比所有数据都早
+            # 按照你的逻辑：Prev默认为0，时间取起始时间(或当前时间)
+            prev_time = start_time
+            prev_val = 0
+
+        # Step 3: 计算增量和占比 (直接套公式)
+        total_seconds = (next_time - prev_time).total_seconds()
+        target_seconds = (current_time - prev_time).total_seconds()
+
+        # 防止除以0
+        ratio = target_seconds / total_seconds if total_seconds > 0 else 0
+        increase = next_val - prev_val
+
+        # 公式：(增数 * 占比) + 上个时间点数据
+        current_val = (increase * ratio) + prev_val
+
+        # 记录结果
+        result[elapsed_minutes] = int(current_val)
+
+        # Step 4: 时间推移
+        current_time += timedelta(minutes=interval_minutes)
+        elapsed_minutes += interval_minutes
+        if elapsed_minutes > max_elapsed_minutes:
+            break
+
+    return result
+
+
+def calculate_averages(data_list, min_count=20):
+    """
+    计算列表中字典 key 的平均值。
+
+    参数:
+    data_list: 包含字典的列表
+    min_count: 阈值，只有 key 出现的次数大于该值时才计算平均值
+
+    返回:
+    一个字典，包含满足条件的 key 及其平均值
+    """
+
+    # 用于存储每个 key 的累加值
+    key_sums = defaultdict(float)
+    # 用于存储每个 key 出现的次数
+    key_counts = defaultdict(int)
+
+    # 1. 遍历列表中的每个字典，收集数据
+    for item in data_list:
+        for key, value in item.items():
+            key_sums[key] += value
+            key_counts[key] += 1
+
+    # 2. 计算平均值，并过滤掉次数不足的 key
+    averages = {}
+    for key, count in key_counts.items():
+        # 注意题目要求是“大于” min_count
+        if count > min_count:
+            averages[key] = key_sums[key] / count
+
+    return averages

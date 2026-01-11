@@ -16,7 +16,8 @@ from utils.bilibili.bili_utils import update_bili_user_sign, block_all_author
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
-from utils.common_utils import get_config, read_json, init_config, save_json
+from utils.common_utils import get_config, read_json, init_config, save_json, get_simple_play_distribution, \
+    calculate_averages
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -364,6 +365,7 @@ def update_play_count(recent_uploaded_tasks, user_bvid_file_data):
             count += 1
             bvid = bvid_info.get('bvid', '')
             if bvid in task_bvid_map:
+                created = bvid_info.get('created', 0)
                 task_info = task_bvid_map[bvid]
                 play_count = bvid_info.get('play', 0)
                 comment_count = bvid_info.get('comment', 0)
@@ -377,6 +379,8 @@ def update_play_count(recent_uploaded_tasks, user_bvid_file_data):
                 play_comment_info_list = task_info.get('play_comment_info_list', [])
                 play_comment_info_list.append(single_info)
                 task_info['play_comment_info_list'] = play_comment_info_list
+                task_info['created'] = created
+
                 need_update_task_list.append(task_info)
     print(f"更新播放量信息，共 {len(need_update_task_list)} 个任务需要更新。 总共平台视频数: {count} 数据库最近记录数量: {len(recent_uploaded_tasks)}")
     return need_update_task_list
@@ -562,14 +566,63 @@ def process_single_hudong_task(task_info, commenter_map, uid):
     return hudong_info, False
 
 
+def statistic_good_video(tasks):
+    # 深拷贝一份任务列表，避免修改原始数据
+    new_tasks = [task.copy() for task in tasks]
+    filter_tasks = []
+    user_task_info = {}
+
+    for task_info in new_tasks:
+        play_comment_info_list = task_info.get('play_comment_info_list', [])
+        create_time = task_info.get('created')
+        if create_time:
+            play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, max_elapsed_minutes=60*6)
+            if play_count_info:
+                user_name = task_info.get('userName', '未知用户')
+                if user_name not in user_task_info:
+                    user_task_info[user_name] = []
+                user_task_info[user_name].append(task_info)
+                task_info['play_count_info'] = play_count_info
+                filter_tasks.append(task_info)
+
+    for user_name, task_list in user_task_info.items():
+        play_count_info_list = [task_info.get('play_count_info', {}) for task_info in task_list]
+        averages_info = calculate_averages(play_count_info_list)
+        print(f"用户 {user_name} 的平均播放量信息: {averages_info}")
+        for task_info in task_list:
+            play_count_info = task_info.get('play_count_info', {})
+            total_ratio_value = 0
+            valid_count = 0
+            copy_play_count_info = play_count_info.copy()
+            for key, play_count in play_count_info.items():
+                average_value = averages_info.get(key, 0)
+                if average_value > 0:
+                    ratio_key = f"ratio_to_avg_{key}"
+                    ratio_value = play_count / average_value
+                    copy_play_count_info[ratio_key] = ratio_value
+                    total_ratio_value += ratio_value
+                    valid_count += 1
+            avg_total_ratio_value = total_ratio_value / valid_count if valid_count > 0 else 0
+            copy_play_count_info['avg_total_ratio_value'] = avg_total_ratio_value
+            task_info['play_count_info'] = copy_play_count_info
+
+    # 将filter_tasks按照指定的ratio_key降序排序
+    sorted_tasks = sorted(filter_tasks, key=lambda x: x.get('play_count_info', {}).get("ratio_to_avg_180", 0), reverse=True)
+    print()
+
+
+
+
+
 def fun(manager):
     global NEED_UPDATE_SIGN
     try:
         now = datetime.now()
         today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        pre_midnight = today_midnight - timedelta(days=2)
+        pre_midnight = today_midnight - timedelta(days=5)
 
         recent_uploaded_tasks = manager.find_tasks_after_time_with_status(pre_midnight, [TaskStatus.UPLOADED])
+        # statistic_good_video(recent_uploaded_tasks)
 
         processed_count = 0
         print("开始执行 fun 函数...当前时间:", datetime.now().isoformat())

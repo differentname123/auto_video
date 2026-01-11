@@ -31,7 +31,7 @@ _configure_third_party_paths()
 
 from third_party.TikTokDownloader.douyin_downloader import download_douyin_video_sync, get_comment
 from utils.common_utils import is_valid_target_file_simple, time_to_ms, merge_intervals, get_remaining_segments, \
-    safe_process_limit, read_json
+    safe_process_limit, read_json, get_simple_play_distribution
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -844,8 +844,12 @@ if __name__ == '__main__':
     #     "userName": {"$in": ["jie", "qiqixiao"]},
     #     "status": "失败"
     # }
-    query_2 = {"video_id_list": "7290100816990506298"}
+    query_2 = {"video_id_list": "7414013878343945523"}
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
+        play_comment_info_list = task_info.get('play_comment_info_list', [])
+        create_time = task_info.get('created')
+        if create_time:
+            info = get_simple_play_distribution(play_comment_info_list, create_time)
+            print()
