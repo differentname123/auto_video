@@ -840,14 +840,12 @@ if __name__ == '__main__':
     #     "status": {"$ne": "666"}
     # }
 
-    query_2 = {
-        "userName": {"$in": ["jie", "qiqixiao"]},
-        "status": "失败"
-    }
+    # query_2 = {
+    #     "userName": {"$in": ["jie", "qiqixiao"]},
+    #     "status": "失败"
+    # }
+    query_2 = {"video_id_list": "6897610140825046272"}
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-
+    print()
     for task_info in all_task:
-        video_script_info = task_info.get('video_script_info', [])
-        updated_video_script_info = update_narration_key(video_script_info)
-        task_info['video_script_info'] = updated_video_script_info
-    manager.upsert_tasks(all_task)
+        process_single_task(task_info, manager, gen_video=True)

@@ -15,7 +15,7 @@ from PIL import Image
 
 from utils.common_utils import time_to_ms
 from utils.paddle_ocr_base import run_subtitle_ocr
-
+from utils.video_utils import get_video_dimensions
 
 
 def analyze_and_filter_boxes(
@@ -176,14 +176,68 @@ def adjust_subtitle_box(video_path, final_box):
     bottom_right = [new_x_right, y_bottom]
 
     return top_left, bottom_right, width, height
+def is_short_author_voice(video_path, video_duration, merged_timerange_list):
+    try:
+        # 获取merge_intervals_list中总共的时间
+        total_time = 0
+        for timerange in merged_timerange_list:
 
+            start_time = time_to_ms(timerange['startTime'])
+            end_time = time_to_ms(timerange['endTime'])
+            total_time += (end_time - start_time)
+        # 计算占比
+        proportion = total_time / video_duration
+        intervals_count = len(merged_timerange_list)
+        if proportion < 0.05 and intervals_count < 3:
+            print(f"原作者声音较少，采用合理默认字幕区域。原作者声音占比: {proportion}, 原作者说话数量: {intervals_count} {video_path}")
+            return True
+    except Exception as e:
+        traceback.print_exc()
+        print(f"判断原作者声音时失败: {e}")
+        return False
+    return False
+
+def gen_proper_box(video_path, video_duration, merged_timerange_list):
+    try:
+        is_short_author = is_short_author_voice(video_path, video_duration, merged_timerange_list)
+        if is_short_author:
+            video_width, video_height = get_video_dimensions(video_path)
+            short_size = min(video_width, video_height)
+            # --- 配置参数 ---
+            # 左右边距 (例如 5% 的宽度)
+            margin_x_ratio = 0.05
+            # 上下安全边距 (例如 8% 的高度，防止字幕贴边)
+            margin_y_ratio = 0.08
+            # 预估字幕框高度 (例如 15% 的高度，足以容纳双行字幕)
+            box_height_ratio = 0.15
+            margin_x = int(short_size * margin_x_ratio)
+            margin_y = int(short_size * margin_y_ratio)
+            box_height = int(short_size * box_height_ratio)
+            # --- 计算具体像素值 ---
+            min_x = margin_x
+            max_x = video_width - margin_x
+            max_y = video_height - margin_y
+            min_y = max_y - box_height # 或者 video_height - margin_y - box_height
+            box_bottom = [
+                [min_x, min_y],  # 左上 (min_x, min_y)
+                [max_x, min_y],  # 右上 (max_x, min_y)
+                [max_x, max_y],  # 右下 (max_x, max_y)
+                [min_x, max_y]   # 左下 (min_x, max_y)
+            ]
+            return box_bottom
+    except Exception as e:
+        traceback.print_exc()
+        print(f"生成合理字幕区域失败: {e}")
+        return None
+    return None
 
 
 def find_overall_subtitle_box_target_number(
     video_path: str,
     merged_timerange_list: list[dict],
     num_samples: int = 10,
-    output_dir = 'temp_dir'
+    output_dir = 'temp_dir',
+    video_duration_ms: int = 0
 ):
     """
     主函数，找到包围视频字幕的最小框，并将框绘制到所有抽帧图片上。
@@ -262,7 +316,11 @@ def find_overall_subtitle_box_target_number(
 
     # --- 阶段 2: 对抽出的帧进行字幕检测 ---
     # print(f"\n[阶段 2] 开始检测 {len(saved_frame_paths)} 张图片的字幕框...")
-    result_json = run_subtitle_ocr(saved_frame_paths)
+    is_short_author = is_short_author_voice(video_path, video_duration_ms, merged_timerange_list)
+    if is_short_author:
+        result_json = run_subtitle_ocr(saved_frame_paths, crop_ratio=0.5)
+    else:
+        result_json = run_subtitle_ocr(saved_frame_paths, crop_ratio=0.6)
 
     detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]
 
@@ -270,7 +328,7 @@ def find_overall_subtitle_box_target_number(
 
     if not detected_boxes:
         print(f"未找到任何字幕框。{video_path}")
-        return None
+        return gen_proper_box(video_path, video_duration_ms, merged_timerange_list)
 
 
     # --- 阶段 3: 分析并计算最终包围框 ---
@@ -279,7 +337,7 @@ def find_overall_subtitle_box_target_number(
 
     if not good_boxes:
         print("\n[结果] 所有检测到的框都被过滤为异常值。图片已保存在 'temp_dir' 目录中，但未做任何修改。")
-        return
+        return gen_proper_box(video_path, video_duration_ms, merged_timerange_list)
 
     print(f"[阶段 3] 过滤后剩余 {len(good_boxes)} 个有效字幕框。")
 
@@ -292,19 +350,6 @@ def find_overall_subtitle_box_target_number(
     ]
     print(f"[阶段 3] 计算出的最终包围框: {final_box}")
     return final_box
-
-    # --- 阶段 4: 将最终包围框绘制到所有抽取的帧上 ---
-    print(f"\n[阶段 4] 正在将最终包围框绘制到 '{output_dir}' 目录下的 {len(saved_frame_paths)} 张图片上...")
-    draw_box_on_images(saved_frame_paths, final_box)
-    print("[阶段 4] 绘制完成。")
-
-    # --- 任务结束 ---
-    print("\n" + "=" * 60)
-    print("任务成功！")
-    print(f"最终的字幕包围框为: {final_box}")
-    print(f"带有包围框的图片已全部保存在 '{output_dir}' 目录中。")
-    print("=" * 60)
-
 
 # ================= 测试调用 =================
 if __name__ == "__main__":

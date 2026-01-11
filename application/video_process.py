@@ -154,7 +154,7 @@ def _process_single_video(video_id, video_info):
     if not is_valid_target_file_simple(subtitle_box_path, 10):
         box_dir = os.path.dirname(subtitle_box_path)
         detected_box = find_overall_subtitle_box_target_number(
-            video_path, merged_timerange_list, output_dir=box_dir
+            video_path, merged_timerange_list, output_dir=box_dir,video_duration_ms=video_duration_ms
         )
         if not detected_box:
             return {"error_info": "字幕区域检测失败，未能获取有效的字幕区域坐标。",
