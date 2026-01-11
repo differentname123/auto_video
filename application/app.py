@@ -739,4 +739,4 @@ if __name__ == "__main__":
 
     # 6. 启动 Flask
     print("Flask 接口服务启动...")
-    app.run(host='0.0.0.0', port=5002, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=False)

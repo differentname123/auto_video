@@ -1026,6 +1026,25 @@ def merge_script_and_upload_info(video_script_info_list, upload_info_list):
         video_script_info['upload_info'] = upload_info
     return video_script_info_list
 
+def clear_exist_split_scene(video_info_dict):
+    """
+    清理已经存在的 split_scene 目录
+    :param video_info_dict:
+    :return:
+    """
+    try:
+        for video_id, video_info in video_info_dict.items():
+            all_path_info = build_video_paths(video_id)
+            video_path = all_path_info.get('cover_video_path')
+            base_dir = os.path.dirname(video_path)
+            split_scene_dir = os.path.join(base_dir, 'split_scene')
+            if os.path.exists(split_scene_dir):
+                shutil.rmtree(split_scene_dir)
+                print(f"清理已存在的 split_scene 目录: {split_scene_dir}")
+    except Exception as e:
+        print(f"清理 split_scene 目录时出错: {e}")
+
+
 
 def gen_new_video(task_info, video_info_dict):
     """
@@ -1074,6 +1093,7 @@ def gen_new_video(task_info, video_info_dict):
         scene_id = scene.get('scene_id')
         all_final_scene_dict[scene_id] = scene
 
+    clear_exist_split_scene(video_info_dict)
     # 生成好了的每一个场景视频
     all_scene_video_file_list = []
     for new_script_scene in new_script_scenes:

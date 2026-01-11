@@ -343,9 +343,7 @@ def build_bilibili_params(video_path, best_script, user_config, userName, video_
     target_keys = ["core_highlight", "value_promise", "interaction_guide", "supplement_info"]
     description = "\n".join(str(description_json[k]) for k in target_keys if k in description_json)
 
-
-
-    tags = upload_info.get('tags', [])
+    tags = list(upload_info.get('tags', []))
     video_recommend_user_list = user_config.get('video_recommend_user_list', [])
     fun_user_list = user_config.get('fun_user_list', [])
     if userName in video_recommend_user_list:

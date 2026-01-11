@@ -30,7 +30,7 @@ _configure_third_party_paths()
 
 from third_party.TikTokDownloader.douyin_downloader import download_douyin_video_sync, get_comment
 from utils.common_utils import is_valid_target_file_simple, time_to_ms, merge_intervals, get_remaining_segments, \
-    safe_process_limit
+    safe_process_limit, read_json
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -502,7 +502,41 @@ def gen_video_script(task_info, video_info_dict, manager):
     cost_time_info['生成视频脚本'] = time.time() - start_time
     return failure_details, cost_time_info
 
+def gen_true_type_and_tags(task_info, upload_info_list):
+    """
+    生成准确的视频类型以及实体标签
+    :return:
+    """
+    try:
+        all_tags_info = {}
+        for upload_info in upload_info_list:
+            tags = upload_info.get("tags", [])
+            for tag in tags:
+                all_tags_info[tag] = all_tags_info.get(tag, 0) + 1
 
+        category_id_list = [upload_info["category_id"] for upload_info in upload_info_list if "category_id" in upload_info]
+        category_data_info = read_json(r'W:\project\python_project\auto_video\config\bili_category_data.json')
+        category_name_list = []
+        for category_id in category_id_list:
+            category_name = category_data_info.get(str(category_id), {}).get("name", "")
+            if category_name:
+                category_name_list.append(category_name)
+        category_name_list_str = str(category_name_list)
+        video_type = "no"
+        if category_name_list_str:
+            if "游戏" in category_name_list_str:
+                video_type = "game"
+            elif "运动" in category_name_list_str or "体育" in category_name_list_str:
+                video_type = "sport"
+            elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
+                video_type = "fun"
+
+        task_info['video_type'] = video_type
+        task_info['entity_tags_info'] = all_tags_info
+        return task_info
+    except Exception as e:
+        traceback.print_exc()
+        return task_info
 def gen_upload_info(task_info, video_info_dict, manager):
     """
     生成投稿需要的信息
@@ -520,6 +554,7 @@ def gen_upload_info(task_info, video_info_dict, manager):
         if not error_info:
             task_info['upload_info'] = upload_info
             task_info['status'] = TaskStatus.PLAN_GENERATED
+            task_info = gen_true_type_and_tags(task_info, upload_info)
         else:
             failure_details[task_id] = {
                 "error_info": error_info,
