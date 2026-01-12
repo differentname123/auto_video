@@ -31,7 +31,9 @@
         .tags-wrapper { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; -webkit-overflow-scrolling: touch; display: flex; gap: 10px; }
         .tags-wrapper::-webkit-scrollbar { height: 6px; }
         .tags-wrapper::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
-        .tag-pill { display: inline-block; padding: 6px 14px; background-color: #e6f7ff; color: var(--primary-color); border: 1px solid #91d5ff; border-radius: 20px; font-size: 0.85rem; }
+        /* 修改点：增加了 cursor, user-select 以及 :active 点击效果 */
+        .tag-pill { display: inline-block; padding: 6px 14px; background-color: #e6f7ff; color: var(--primary-color); border: 1px solid #91d5ff; border-radius: 20px; font-size: 0.85rem; cursor: pointer; user-select: none; transition: all 0.2s; }
+        .tag-pill:active { transform: scale(0.95); background-color: #bae7ff; }
 
         /* 热门视频 - 纵向滚动列表 */
         .hot-video-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 10px; }
@@ -134,6 +136,29 @@
                 const span = document.createElement('span');
                 span.className = 'tag-pill';
                 span.textContent = tag;
+
+                // 修改点：添加点击复制功能
+                span.onclick = function() {
+                    navigator.clipboard.writeText(tag).then(() => {
+                        const originalText = span.textContent;
+                        // 视觉反馈
+                        span.textContent = '已复制';
+                        span.style.backgroundColor = '#d9f7be';
+                        span.style.color = '#389e0d';
+                        span.style.borderColor = '#b7eb8f';
+
+                        // 1秒后恢复原状
+                        setTimeout(() => {
+                            span.textContent = originalText;
+                            span.style.backgroundColor = '';
+                            span.style.color = '';
+                            span.style.borderColor = '';
+                        }, 1000);
+                    }).catch(err => {
+                        console.error('复制失败', err);
+                    });
+                };
+
                 container.appendChild(span);
             });
             contentArea.appendChild(tpl);

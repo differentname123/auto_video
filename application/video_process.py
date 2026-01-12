@@ -24,6 +24,8 @@ from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_
 from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json, \
     time_to_ms, first_greater, remove_last_punctuation
 from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
+from utils.mongo_base import gen_db_object
+from utils.mongo_manager import MongoManager
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
@@ -1177,7 +1179,11 @@ def gen_video_by_script(task_info, video_info_dict):
 
 
 if __name__ == "__main__":
-    video_path = r"W:\project\python_project\auto_video\videos\material\7214445666997767480\7214445666997767480_static_cut.mp4"
-    output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-
-    save_frames_around_timestamp(video_path, 64992 / 1000, 30, output_dir, time_duration_s=1)
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
+    video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
+    # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+    video_info_list = manager.find_materials_by_ids(['7576848259886691321'])
+    for video_info in video_info_list:
+        video_id = video_info.get('video_id')
+        _process_single_video(video_id, video_info)

@@ -235,7 +235,7 @@ def gen_proper_box(video_path, video_duration, merged_timerange_list):
 def find_overall_subtitle_box_target_number(
     video_path: str,
     merged_timerange_list: list[dict],
-    num_samples: int = 10,
+    num_samples: int = 20,
     output_dir = 'temp_dir',
     video_duration_ms: int = 0
 ):
