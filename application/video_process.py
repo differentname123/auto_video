@@ -767,7 +767,7 @@ def get_bgm_path(tags={}):
 
     # --- 选择策略 ---
     # 策略2：在匹配度最高的几个BGM中随机选择一个（例如前3个）
-    top_n = 3
+    top_n = 2
     top_choices = bgm_with_match_count[:top_n]
     if not top_choices:
         # 理论上，如果bgm_with_match_count不为空，这里就不会为空

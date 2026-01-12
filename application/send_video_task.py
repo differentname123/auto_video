@@ -1,10 +1,13 @@
 import time
+from collections import defaultdict
 
 import requests
 import json
 
-from application.video_common_config import USER_STATISTIC_INFO_PATH
-from utils.common_utils import read_json, save_json
+from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE
+from utils.common_utils import read_json, save_json, get_user_type
+from utils.mongo_base import gen_db_object
+from utils.mongo_manager import MongoManager
 
 
 def send_generate_request(video_id1, video_id2, user_name='dahao'):
@@ -100,9 +103,7 @@ def send_generate_request(video_id1, video_id2, user_name='dahao'):
                 print(response.text)
         return None
 
-
-# --- 使用示例 ---
-if __name__ == "__main__":
+def auto_send():
     video_content_plans_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_content_plans_similar_videos.json'
     video_play_comment_file = r'W:\project\python_project\watermark_remove\LLM\TikTokDownloader\back_up\video_play_comment.json'
     used_video_file = r'W:\project\python_project\auto_video\config\used_video.json'
@@ -177,4 +178,118 @@ if __name__ == "__main__":
         result = send_generate_request(id_1, id_2, user_name=user_name)
         save_json(used_video_file, used_video_list)
 
+def send_good_video_quest(payload):
+    url = "http://127.0.0.1:5001/one-click-generate"
+
+    # 构造请求头
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    try:
+        # 发送 POST 请求
+        response = requests.post(url, json=payload, headers=headers)
+
+        # 检查响应状态码
+        response.raise_for_status()
+
+        # 返回解析后的JSON数据
+        print(f"请求发送成功，状态码: {response.status_code}")
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        print(f"请求发送失败: {e}")
+    finally:
+        # 如果有响应内容（比如 400 错误通常会带回错误原因），在这里打印
+        if response is not None:
+            try:
+                # 尝试解析 JSON 并以中文显示
+                error_json = response.json()
+                print("服务器返回的错误详情:")
+                print(json.dumps(error_json, ensure_ascii=False, indent=2))
+            except json.JSONDecodeError:
+                # 如果不是 JSON，直接打印文本
+                print(response.text)
+
+def send_good_video():
+    # mongo_base_instance = gen_db_object()
+    # manager = MongoManager(mongo_base_instance)
+    # # 获取当前时间戳
+    # current_timestamp = int(time.time())
+    # # 往前推2天的时间戳
+    # pre_timestamp = current_timestamp - 2 * 24 * 60 * 60
+    # query_2 = {
+    #     "created": {"$gt": pre_timestamp},
+    #     "status": "已投稿"
+    # }
+    # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong']
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    good_video_list = statistic_play_info.get('good_video_list', [])
+    good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type_info = user_config.get('user_type_info', {})
+    for video_type, user_list in user_type_info.items():
+        # 删除没有在need_process_users列表中的用户
+        user_list[:] = [user for user in user_list if user in need_process_users]
+
+    final_video_list = []
+
+    for video_info in good_video_list:
+        user_name = video_info.get('userName', 'dahao')
+        user_type = get_user_type(user_name)
+        user_list = user_type_info.get(user_type, [])
+        for user_name in user_list:
+            # 深拷贝一份video_info
+            copy_video_info = video_info.copy()
+            copy_video_info['target_user_name'] = user_name
+            final_video_list.append(copy_video_info)
+
+    print(f"总共收集了 {len(final_video_list)} 个优质视频。")
+    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
+    user_count_info = defaultdict(dict)
+
+    for user_name in need_process_users:
+        tobe_upload_count = user_statistic_info.get(user_name, {}).get('tobe_upload_count', 0)
+        today_processed_count = user_statistic_info.get(user_name, {}).get('today_processed_count', 0)
+        total_count = tobe_upload_count + today_processed_count
+        target_count = 30
+        need_count = max(target_count - total_count, 0)
+        user_count_info[user_name]['need_count'] = need_count
+        user_count_info[user_name]['send_count'] = 0
+    print(user_count_info)
+    for video_info in final_video_list:
+        target_user_name = video_info.get('target_user_name', 'dahao')
+        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count']:
+            print(f"用户 {target_user_name} 已达到今日发送目标，跳过后续视频。")
+            continue
+        creation_guidance_info = video_info.get('creation_guidance_info')
+        upload_params = video_info.get('upload_params', {})
+        title = upload_params.get('title', '变得有吸引力一点')
+        creation_guidance_info['creative_guidance'] = f"标题尽量体现: {title}"
+        original_url_info_list = video_info.get('original_url_info_list', [])
+        play_load = {
+        'userName': target_user_name,
+            'global_settings':creation_guidance_info,
+            'video_list':original_url_info_list
+
+        }
+
+        play_comment_info_list = video_info.get('play_comment_info_list')
+        print(f"正在往 {target_user_name} 发送 {title} 数据为 {play_comment_info_list[-1]}")
+        data_info = send_good_video_quest(play_load)
+        if '新任务已成功创建' in str(data_info):
+            user_count_info[target_user_name]['send_count'] += 1
+
+
+
+
+
+
+
+
+
+# --- 使用示例 ---
+if __name__ == "__main__":
+    send_good_video()
 

@@ -163,7 +163,7 @@ def check_cached_material(cached_material, video_item):
     但排除 '_cardDomId', 'original_url', 'is_realtime_video' 这几个字段。
     """
     # 1. 定义不需要比较的字段集合
-    ignore_keys = {'_cardDomId', 'original_url', 'is_realtime_video'}
+    ignore_keys = {'_cardDomId', 'original_url', 'is_realtime_video', 'video_id'}
 
     # 2. 获取 DB 中的数据，处理可能为 None 的情况
     db_info = cached_material.get('extra_info') or {}
@@ -732,10 +732,9 @@ def get_good_video_info():
     print(f"接收到的用户名: {user_name}")
     user_type = get_user_type(user_name)
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
-    for key, value in statistic_play_info.items():
-        data_info = process_video_data(value, user_type)
-        print(f"处理后的视频数据: {data_info}")
-        return jsonify(data_info)
+    data_info = process_video_data(statistic_play_info, user_type)
+    print(f"处理后的视频数据: {data_info}")
+    return jsonify(data_info)
 
 
 # =============================================================================

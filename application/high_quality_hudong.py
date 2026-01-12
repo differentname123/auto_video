@@ -691,15 +691,14 @@ def statistic_good_video(tasks):
                 good_tags_info[video_type] = {}
             for tag, count in tags_info.items():
                 good_tags_info[video_type][tag] = good_tags_info[video_type].get(tag, 0) + count * choose_reason_len
-    statistic_play_info = {}
     temp_info = {}
     # 获取当前的时间，以字符串形式打出来
     current_time_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    temp_info['current_time_str'] = current_time_str
     temp_info['good_tags_info'] = good_tags_info
     temp_info['good_video_list'] = unique_final_good_task_list
-    statistic_play_info[current_time_str] = temp_info
     print(f"保存优质视频统计信息，时间点: {current_time_str} 共 {len(unique_final_good_task_list)} 个优质视频。")
-    save_json(STATISTIC_PLAY_COUNT_FILE, statistic_play_info)
+    save_json(STATISTIC_PLAY_COUNT_FILE, temp_info)
 
 
 

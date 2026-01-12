@@ -304,7 +304,7 @@ class MongoManager:
             #     item['video_id_list'].sort()
 
         # 修改点：将唯一键改为由三个字段组成的列表
-        unique_keys = ["video_id_list", "creation_guidance_info"]
+        unique_keys = ["video_id_list", "userName", "creation_guidance_info"]
         self.db.bulk_upsert(self.tasks_collection, data_list, unique_keys)
 
 
