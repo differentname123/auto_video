@@ -151,10 +151,8 @@ def build_task_video_paths(task_info):
     :param task_info:
     :return:
     """
-    video_id_list = task_info.get('video_id_list', [])
-    # 对video_id_list进行排序，确保路径的一致性
-    video_id_list.sort()
-    video_id_str = '_'.join(task_info.get('video_id_list', []))
+    video_id_list = sorted(task_info.get('video_id_list') or [])
+    video_id_str = '_'.join(video_id_list)
     str_id = str(task_info.get('_id'))
 
 
@@ -333,3 +331,5 @@ USER_BVID_FILE = r'W:\project\python_project\auto_video\config\user_bvid_file.js
 ALL_BVID_FILE = r'W:\project\python_project\auto_video\config\all_bvid_file.json'
 
 COMMENTER_USAFE_FILE = r'W:\project\python_project\auto_video\config\commenter_usage.json'
+
+STATISTIC_PLAY_COUNT_FILE = r'W:\project\python_project\auto_video\config\statistic_play_count.json'

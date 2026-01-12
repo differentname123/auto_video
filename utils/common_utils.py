@@ -63,7 +63,7 @@ def save_json(json_path, data):
         # 原子写入
         tmp_path = json_path + ".tmp"
         with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            json.dump(data, f, ensure_ascii=False, indent=4, default=str)
         os.replace(tmp_path, json_path)
 
 
@@ -1102,3 +1102,38 @@ def calculate_averages(data_list, min_count=20):
             averages[key] = key_sums[key] / count
 
     return averages
+
+
+def gen_true_type_and_tags(upload_info_list):
+    """
+    生成准确的视频类型以及实体标签
+    :return:
+    """
+    try:
+        all_tags_info = {}
+        for upload_info in upload_info_list:
+            tags = upload_info.get("tags", [])
+            for tag in tags:
+                all_tags_info[tag] = all_tags_info.get(tag, 0) + 1
+
+        category_id_list = [upload_info["category_id"] for upload_info in upload_info_list if "category_id" in upload_info]
+        category_data_info = read_json(r'W:\project\python_project\auto_video\config\bili_category_data.json')
+        category_name_list = []
+        for category_id in category_id_list:
+            category_name = category_data_info.get(str(category_id), {}).get("name", "")
+            if category_name:
+                category_name_list.append(category_name)
+        category_name_list_str = str(category_name_list)
+        video_type = "no"
+        if category_name_list_str:
+            if "游戏" in category_name_list_str:
+                video_type = "game"
+            elif "运动" in category_name_list_str or "体育" in category_name_list_str:
+                video_type = "sport"
+            elif "搞笑" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
+                video_type = "fun"
+
+        return video_type, all_tags_info
+    except Exception as e:
+        traceback.print_exc()
+        return None, None

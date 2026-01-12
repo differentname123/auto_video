@@ -11,13 +11,14 @@ from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from application.video_common_config import TaskStatus, USER_BVID_FILE, ALL_BVID_FILE, COMMENTER_USAFE_FILE
+from application.video_common_config import TaskStatus, USER_BVID_FILE, ALL_BVID_FILE, COMMENTER_USAFE_FILE, \
+    STATISTIC_PLAY_COUNT_FILE
 from utils.bilibili.bili_utils import update_bili_user_sign, block_all_author
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
 from utils.common_utils import get_config, read_json, init_config, save_json, get_simple_play_distribution, \
-    calculate_averages
+    calculate_averages, gen_true_type_and_tags
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -576,7 +577,7 @@ def statistic_good_video(tasks):
         play_comment_info_list = task_info.get('play_comment_info_list', [])
         create_time = task_info.get('created')
         if create_time:
-            play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, max_elapsed_minutes=60*6)
+            play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, interval_minutes=30, max_elapsed_minutes=60*6)
             if play_count_info:
                 user_name = task_info.get('userName', '未知用户')
                 if user_name not in user_task_info:
@@ -584,6 +585,7 @@ def statistic_good_video(tasks):
                 user_task_info[user_name].append(task_info)
                 task_info['play_count_info'] = play_count_info
                 filter_tasks.append(task_info)
+    final_good_task_list = []
 
     for user_name, task_list in user_task_info.items():
         play_count_info_list = [task_info.get('play_count_info', {}) for task_info in task_list]
@@ -592,23 +594,72 @@ def statistic_good_video(tasks):
         for task_info in task_list:
             play_count_info = task_info.get('play_count_info', {})
             total_ratio_value = 0
+            total_play_count = 0
             valid_count = 0
             copy_play_count_info = play_count_info.copy()
             for key, play_count in play_count_info.items():
+                total_play_count += play_count
                 average_value = averages_info.get(key, 0)
                 if average_value > 0:
-                    ratio_key = f"ratio_to_avg_{key}"
+                    ratio_key = f"{key}历史比例"
                     ratio_value = play_count / average_value
                     copy_play_count_info[ratio_key] = ratio_value
                     total_ratio_value += ratio_value
                     valid_count += 1
             avg_total_ratio_value = total_ratio_value / valid_count if valid_count > 0 else 0
-            copy_play_count_info['avg_total_ratio_value'] = avg_total_ratio_value
+            copy_play_count_info['平均历史比例'] = avg_total_ratio_value
+            copy_play_count_info['平均播放量'] = total_play_count / len(play_count_info) if len(play_count_info) > 0 else 0
             task_info['play_count_info'] = copy_play_count_info
+        sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get("平均历史比例", 0),reverse=True)
+        # 将第一个加入final_good_task_list
+        if sorted_tasks:
+            final_good_task_list.append(sorted_tasks[0])
+            sorted_tasks[0]['choose_reason'] = ['用户最高平均历史比例']
 
-    # 将filter_tasks按照指定的ratio_key降序排序
-    sorted_tasks = sorted(filter_tasks, key=lambda x: x.get('play_count_info', {}).get("ratio_to_avg_180", 0), reverse=True)
-    print()
+    target_key_list = [60, 90, 120, 180, "60历史比例", "90历史比例", "120历史比例", "180历史比例", "平均历史比例", "平均播放量"]
+    # 遍历选择出每个排行的前5个task
+    for key in target_key_list:
+        sorted_tasks = sorted(filter_tasks, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
+        for i, task_info in enumerate(sorted_tasks[:5]):
+            if 'choose_reason' not in task_info:
+                task_info['choose_reason'] = []
+            final_good_task_list.append(task_info)
+            task_info['choose_reason'].append(f'{key}  排行第{i+1}名的前5个视频')
+
+    # 对final_good_task_list进行去重，按照task_info的bvid去重
+    unique_bvids = set()
+    unique_final_good_task_list = []
+    for task_info in final_good_task_list:
+        bvid = task_info.get('upload_result', {}).get('bvid', '')
+        if bvid and bvid not in unique_bvids:
+            unique_bvids.add(bvid)
+            unique_final_good_task_list.append(task_info)
+    print(f"最终筛选出 {len(unique_final_good_task_list)} 个优质视频。去重前数量: {len(final_good_task_list)} 总共视频数量: {len(filter_tasks)}")
+    # 最终按照choose_reason的长度降序排序
+    unique_final_good_task_list.sort(key=lambda x: len(x.get('choose_reason', [])), reverse=True)
+
+    good_tags_info = {}
+    # 统计热门的tags
+    for task_info in unique_final_good_task_list:
+        upload_info_list = task_info.get('upload_info', [])
+        video_type, tags_info = gen_true_type_and_tags(upload_info_list)
+        choose_reason = task_info.get('choose_reason', [])
+        choose_reason_len = len(choose_reason)
+        if video_type:
+            if video_type not in good_tags_info:
+                good_tags_info[video_type] = {}
+            for tag, count in tags_info.items():
+                good_tags_info[video_type][tag] = good_tags_info[video_type].get(tag, 0) + count * choose_reason_len
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    temp_info = {}
+    # 获取当前的时间，以字符串形式打出来
+    current_time_str = datetime.now().strftime("%Y-%m-%d%H:%M:%S")
+    temp_info['good_tags_info'] = good_tags_info
+    temp_info['good_video_list'] = unique_final_good_task_list
+    statistic_play_info[current_time_str] = temp_info
+    print(f"保存优质视频统计信息，时间点: {current_time_str} 共 {len(unique_final_good_task_list)} 个优质视频。")
+    save_json(STATISTIC_PLAY_COUNT_FILE, temp_info)
+
 
 
 
@@ -622,7 +673,6 @@ def fun(manager):
         pre_midnight = today_midnight - timedelta(days=5)
 
         recent_uploaded_tasks = manager.find_tasks_after_time_with_status(pre_midnight, [TaskStatus.UPLOADED])
-        # statistic_good_video(recent_uploaded_tasks)
 
         processed_count = 0
         print("开始执行 fun 函数...当前时间:", datetime.now().isoformat())
@@ -671,6 +721,9 @@ def fun(manager):
 
         recent_uploaded_tasks = update_play_count(recent_uploaded_tasks, bvid_file_data)
         manager.upsert_tasks(recent_uploaded_tasks)
+        statistic_good_video(recent_uploaded_tasks)
+
+
 
         filter_tasks = []
         three_hours_ago = datetime.now() - timedelta(hours=20)
@@ -709,9 +762,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    config_map = init_config()
-    mid_list = config_map.keys()
-    block_all_author(mid_list, action_type=6)
+    # config_map = init_config()
+    # mid_list = config_map.keys()
+    # block_all_author(mid_list, action_type=6)
 
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
