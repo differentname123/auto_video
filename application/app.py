@@ -9,10 +9,11 @@ from flask import Flask, request, jsonify, render_template, Response
 
 from application.process_video import query_need_process_tasks, _task_process_worker, _task_producer_worker, \
     check_task_queue
-from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target
+from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target, get_user_type
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
-    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths, USER_STATISTIC_INFO_PATH
+    ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths, \
+    USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE
 
 _configure_third_party_paths()
 
@@ -48,6 +49,9 @@ mongo_manager = _init_mongo_manager()
 # =============================================================================
 # 1. 纯逻辑函数层 (数据解析与构建)
 # =============================================================================
+@app.route('/submission_details.html')
+def submission_details():
+    return render_template('submission_details.html')
 
 def parse_douyin_video(video_url: str):
     """
@@ -669,6 +673,69 @@ def get_user_upload_info() -> Response:
         # 增加日志输出：打印错误返回信息
         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Upload-Info Error Response: {error_response}")
         return jsonify(error_response)
+
+
+def process_video_data(data: dict, video_type: str) -> dict:
+    """
+    根据输入的 video_type 处理数据，返回包含 tags, hot_videos, today_videos 的字典。
+    """
+
+    # --- 1. 处理 tags 字段 ---
+    tags = []
+    # 检查 good_tags_info 是否存在以及 video_type 是否在其中
+    if "good_tags_info" in data and video_type in data["good_tags_info"]:
+        tag_dict = data["good_tags_info"][video_type]
+        sorted_tags = sorted(tag_dict.items(), key=lambda x: x[1], reverse=True)
+        # 取排序后的前 5 个元素的 key (tag名字)
+        tags = [item[0] for item in sorted_tags[:10]]
+
+    # --- 2. 处理 hot_videos 字段 ---
+    hot_videos = []
+    if "good_video_list" in data:
+        filtered_videos = [
+            v for v in data["good_video_list"]
+            if v.get("video_type") == video_type
+        ]
+        filtered_videos.sort(
+            key=lambda x: len(x.get("choose_reason", [])),
+            reverse=True
+        )
+
+        # 第三步：取前 5 个，并提取 title 和 bvid
+        for video in filtered_videos[:5]:
+            title = ""
+            # 尝试获取标题：优先从 upload_params 获取（通常是最终标题）
+            if "upload_params" in video and "title" in video["upload_params"]:
+                title = video["upload_params"]["title"]
+            # 备选：从 upload_info 列表的第一个元素获取
+            elif "upload_info" in video and isinstance(video["upload_info"], list) and len(video["upload_info"]) > 0:
+                title = video["upload_info"][0].get("title", "")
+
+            hot_videos.append({
+                "title": title,
+                "url": f"https://www.bilibili.com/video/{video.get("bvid", "")}"
+            })
+
+    # --- 3. 处理 today_videos 字段 ---
+    today_videos = []
+
+    # --- 返回结果 ---
+    return {
+        "tags": tags,
+        "hot_videos": hot_videos,
+        "today_videos": today_videos
+    }
+
+@app.route('/get_good_video', methods=['GET'])
+def get_good_video_info():
+    user_name = request.args.get('username')
+    print(f"接收到的用户名: {user_name}")
+    user_type = get_user_type(user_name)
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    for key, value in statistic_play_info.items():
+        data_info = process_video_data(value, user_type)
+        print(f"处理后的视频数据: {data_info}")
+        return jsonify(data_info)
 
 
 # =============================================================================

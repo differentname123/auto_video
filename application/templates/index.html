@@ -21,7 +21,7 @@
         .container { background: var(--card-bg); padding: 40px; border-radius: 16px; box-shadow: var(--shadow-soft); width: 90%; max-width: 640px; margin: 0 auto; transition: transform 0.3s; }
 
         .user-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 10px; }
-        .welcome-text { font-size: 1.2rem; font-weight: 700; color: #2c3e50; }
+        .welcome-text { font-size: 1.2rem; font-weight: 700; color: #2c3e50; display: inline-flex; align-items: center; gap: 10px; }
         .stat-group { font-size: 0.85rem; color: var(--text-sub); margin-top: 4px; white-space: nowrap; }
         .stat-badge { font-weight: 600; margin: 0 2px; }
         .user-action { color: var(--primary-color); cursor: pointer; font-size: 0.9rem; text-decoration: none; white-space: nowrap; }
@@ -34,7 +34,7 @@
 
         .tooltip-text {
             visibility: hidden; opacity: 0;
-            width: max-content; max-width: 300px; /* 限制最大宽度，适配小屏 */
+            width: max-content; max-width: 300px;
             background-color: rgba(33, 33, 33, 0.95); color: #fff;
             border-radius: 8px; padding: 12px; font-size: 0.85rem;
             position: absolute; z-index: 1000; bottom: 150%; left: 50%;
@@ -93,6 +93,19 @@
         .btn-add-row:hover { background-color: #d9f7be; }
         .btn-del-row { background-color: #fff1f0; border-color: #ffa39e; color: #f5222d; margin-left: auto; }
         .btn-del-row:hover { background-color: #ffccc7; }
+
+        /* 投稿详情按钮样式 */
+        .btn-outline-primary {
+            border: 1px solid var(--primary-color);
+            color: var(--primary-color);
+            background: transparent;
+            margin-left: 8px;
+            font-size: 0.8rem;
+            padding: 2px 8px;
+        }
+        .btn-outline-primary:hover {
+            background-color: #e6f7ff;
+        }
 
         /* 全局设置区域 */
         .global-settings-box { border: none; border-radius: 12px; margin-top: 35px; box-shadow: 0 0 0 1px #e6f7ff, 0 4px 15px rgba(24, 144, 255, 0.05); background: #fff; }
@@ -165,7 +178,11 @@
     <div id="main-app" class="hidden">
         <div class="user-info">
             <div>
-                <div class="welcome-text" id="welcome-msg"></div>
+                <!-- 新增：投稿详情按钮 -->
+                <div class="welcome-text">
+                    <span id="welcome-msg"></span>
+                    <button id="btn-submission-details" class="btn-mini btn-outline-primary" type="button">投稿详情</button>
+                </div>
                 <div class="stat-group">
                     已上传B站 <span id="stat-uploaded-platform" class="stat-badge" style="color:#52c41a">--</span> /
                     今日待处理 <span id="stat-process-today" class="stat-badge" style="color:#ff4d4f">--</span> /
@@ -330,7 +347,8 @@
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
         dateSelect: document.getElementById('schedule-date'),
-       stats: {
+        btnDetails: document.getElementById('btn-submission-details'), // 新增
+        stats: {
             uploadedPlatform: document.getElementById('stat-uploaded-platform'),
             processToday: document.getElementById('stat-process-today'),
             processTomorrow: document.getElementById('stat-process-tomorrow')
@@ -345,6 +363,11 @@
 
         // 绑定事件
         UI.loginBtn.addEventListener('click', login);
+
+        // 新增：跳转详情页
+        UI.btnDetails.addEventListener('click', () => {
+             window.location.href = 'submission_details.html';
+        });
 
         // 点击“添加视频”意味着重新开始，必须重置状态
         UI.addVideoBtn.addEventListener('click', () => { resetSubmitButtonState(true); addVideoCard(); });
@@ -392,18 +415,9 @@
                 if(r.ok) {
                     const d = await r.json();
                     if(d.status === 'success') {
-                        // --- 修改开始：根据你的要求映射新字段 ---
-
-                        // 平台已上传 -> today_upload_count
                         UI.stats.uploadedPlatform.textContent = d.data.today_upload_count || 0;
-
-                        // 今日待处理 -> today_process
                         UI.stats.processToday.textContent = d.data.today_process || 0;
-
-                        // 明日待处理 -> tomorrow_process
                         UI.stats.processTomorrow.textContent = d.data.tomorrow_process || 0;
-
-                        // --- 修改结束 ---
                     }
                 }
             } catch(e) {
@@ -465,39 +479,27 @@
 
     function handleListClicks(e) {
         const target = e.target;
-        // 1. 删除卡片：这是一个重大变更，必须重置状态，强制用户重新检查剩余卡片
         if (target.matches('.btn-remove-card')) {
             target.closest('.video-item-card').remove();
             if (UI.videoList.children.length === 1) UI.videoList.firstElementChild.querySelector('.btn-remove-card').style.display = 'none';
-            resetSubmitButtonState(true); // 强制重置
+            resetSubmitButtonState(true);
         }
-        // 2. 添加时间行：属于“修改配置”行为，不应该重置“已确认”状态，用户可直接提交修改
         else if (target.closest('.btn-add-row')) {
             const btn = target.closest('.btn-add-row');
             const section = btn.closest('.dynamic-section');
             const type = section.dataset.type;
             addDynamicRow(section.querySelector('.dynamic-list-container'), type);
-            // 这里特意不调用 resetSubmitButtonState()
         }
-        // 3. 删除时间行：属于“修改配置”行为，同上
         else if (target.matches('.btn-del-row')) {
             target.closest('.dynamic-row').remove();
-            // 这里特意不调用 resetSubmitButtonState()
         }
     }
 
     function handleListInputs(e) {
         const t = e.target;
-
-        // --- 核心修复点 ---
-        // 只有当修改的是 URL 时，才重置状态，因为这意味着变成了一个新视频。
-        // 如果修改的是下拉框、时间、文本域等配置，我们认为是用户在“覆盖历史配置”，
-        // 所以保持 APP.isConfigConfirmed = true，允许下一次点击直接提交。
         if (t.classList.contains('video-url-input')) {
             resetSubmitButtonState(true);
         }
-
-        // 时间输入限制逻辑
         if (t.tagName === 'INPUT' && t.type === 'number') {
             if (t.classList.contains('t-min') || t.classList.contains('t-sec')) {
                 if (parseInt(t.value) > 59) t.value = 59;
@@ -512,9 +514,7 @@
     /* --- 辅助功能 --- */
 
     function resetSubmitButtonState(force = false) {
-        // 如果不是强制重置，且当前已经是“已确认”状态，则不进行重置
         if (!force && !APP.isConfigConfirmed) return;
-
         APP.isConfigConfirmed = false;
         UI.submitBtn.innerText = '提交创作任务';
         UI.submitBtn.className = 'btn btn-primary';

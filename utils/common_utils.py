@@ -1137,3 +1137,14 @@ def gen_true_type_and_tags(upload_info_list):
     except Exception as e:
         traceback.print_exc()
         return None, None
+
+
+def get_user_type(user_name):
+    user_type = "fun"
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type_info = user_config.get('user_type_info')
+    for user_type, user_list in user_type_info.items():
+        if user_name in user_list:
+            return user_type
+    return user_type
+

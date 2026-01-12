@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>投稿详情与热门推荐</title>
+    <style>
+        /* 复用主页基础变量 */
+        :root {
+            --primary-color: #1890ff; --primary-hover: #40a9ff; --bg-color: #f4f7f9;
+            --card-bg: #ffffff; --text-main: #333333; --text-sub: #666666;
+            --border-color: #e8e8e8; --shadow-soft: 0 4px 20px rgba(0, 0, 0, 0.05);
+            --shadow-hover: 0 8px 30px rgba(0, 0, 0, 0.12);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background-color: var(--bg-color); padding: 20px 0; color: var(--text-main); }
+        .container { background: var(--card-bg); padding: 30px; border-radius: 16px; box-shadow: var(--shadow-soft); width: 90%; max-width: 640px; margin: 0 auto; min-height: 80vh; }
+
+        .header { display: flex; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); }
+        .back-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-sub); margin-right: 15px; padding: 5px; }
+        .back-btn:hover { color: var(--primary-color); }
+        .page-title { font-size: 1.2rem; font-weight: 700; color: #2c3e50; margin: 0; }
+
+        /* 通用区块样式 */
+        .section-box { margin-bottom: 30px; }
+        .section-title { font-size: 1rem; font-weight: 600; color: #333; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+        .section-title::before { content: ""; display: block; width: 4px; height: 16px; background: var(--primary-color); border-radius: 2px; }
+
+        /* 热门标签 - 横向滚动 */
+        .tags-wrapper { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; -webkit-overflow-scrolling: touch; display: flex; gap: 10px; }
+        .tags-wrapper::-webkit-scrollbar { height: 6px; }
+        .tags-wrapper::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        .tag-pill { display: inline-block; padding: 6px 14px; background-color: #e6f7ff; color: var(--primary-color); border: 1px solid #91d5ff; border-radius: 20px; font-size: 0.85rem; }
+
+        /* 热门视频 - 纵向滚动列表 */
+        .hot-video-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 10px; }
+        .hot-video-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; transition: background 0.2s; }
+        .hot-video-item:last-child { border-bottom: none; }
+        .hot-video-item:hover { background: #fff; }
+        .video-link { color: #333; text-decoration: none; font-size: 0.95rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .video-link:hover { color: var(--primary-color); text-decoration: underline; }
+        .play-icon { margin-right: 8px; font-size: 1.1rem; color: #ff4d4f; }
+
+        /* 今日投稿 - 卡片列表 */
+        .today-card { background: #fff; border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        .today-card:hover { border-color: #b3d8ff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .card-row { margin-bottom: 8px; font-size: 0.9rem; line-height: 1.5; }
+        .card-label { font-weight: 600; color: #555; margin-right: 5px; }
+        .guidance-text { color: #666; font-style: italic; background: #f9f9f9; padding: 5px 8px; border-radius: 4px; display: block; margin-top: 4px; }
+        .origin-link-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .origin-link-btn { font-size: 0.8rem; background: #f0f5ff; color: var(--primary-color); padding: 2px 8px; border-radius: 4px; text-decoration: none; border: 1px solid #d6e4ff; }
+        .origin-link-btn:hover { background: var(--primary-color); color: white; }
+
+        .upload-detail-text a { color: var(--primary-color); text-decoration: underline; word-break: break-all; }
+
+        .loading { text-align: center; color: #999; padding: 40px; }
+        .empty-tip { text-align: center; color: #bbb; padding: 20px; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <button class="back-btn" onclick="window.location.href='./'">←</button>
+        <h1 class="page-title">创作灵感与投稿详情</h1>
+    </div>
+
+    <div id="content-area">
+        <div class="loading">正在加载数据...</div>
+    </div>
+</div>
+
+<!-- 模板：热门标签区域 -->
+<template id="tpl-section-tags">
+    <div class="section-box">
+        <div class="section-title">热门标签</div>
+        <div class="tags-wrapper" id="tags-container"></div>
+    </div>
+</template>
+
+<!-- 模板：热门视频区域 -->
+<template id="tpl-section-hot-videos">
+    <div class="section-box">
+        <div class="section-title">热门视频推荐</div>
+        <div class="hot-video-list" id="hot-videos-container"></div>
+    </div>
+</template>
+
+<!-- 模板：今日投稿区域 -->
+<template id="tpl-section-today">
+    <div class="section-box">
+        <div class="section-title">今日投稿记录</div>
+        <div id="today-videos-container"></div>
+    </div>
+</template>
+
+<script>
+    const currentUser = localStorage.getItem('userName');
+    const contentArea = document.getElementById('content-area');
+
+    document.addEventListener('DOMContentLoaded', () => {
+        if (!currentUser) {
+            alert('请先登录');
+            window.location.href = './';
+            return;
+        }
+        fetchData();
+    });
+
+    async function fetchData() {
+        try {
+            // 调用接口，传入 username
+            const res = await fetch(`/get_good_video?username=${encodeURIComponent(currentUser)}`);
+            if (!res.ok) throw new Error('网络请求失败');
+
+            const json = await res.json();
+            renderPage(json);
+
+        } catch (e) {
+            console.error(e);
+            contentArea.innerHTML = `<div class="empty-tip" style="color:red">数据加载失败: ${e.message}</div>`;
+        }
+    }
+
+    function renderPage(data) {
+        contentArea.innerHTML = ''; // 清空 loading
+
+        // 1. 渲染热门标签
+        if (data.tags && data.tags.length > 0) {
+            const tpl = document.getElementById('tpl-section-tags').content.cloneNode(true);
+            const container = tpl.getElementById('tags-container');
+            data.tags.forEach(tag => {
+                const span = document.createElement('span');
+                span.className = 'tag-pill';
+                span.textContent = tag;
+                container.appendChild(span);
+            });
+            contentArea.appendChild(tpl);
+        }
+
+        // 2. 渲染热门视频
+        if (data.hot_videos && data.hot_videos.length > 0) {
+            const tpl = document.getElementById('tpl-section-hot-videos').content.cloneNode(true);
+            const container = tpl.getElementById('hot-videos-container');
+            data.hot_videos.forEach(video => {
+                const div = document.createElement('div');
+                div.className = 'hot-video-item';
+                // 视频 title 显示，点击跳转 url
+                div.innerHTML = `
+                    <span class="play-icon">▶</span>
+                    <a href="${video.url}" target="_blank" class="video-link">${video.title || '无标题视频'}</a>
+                `;
+                container.appendChild(div);
+            });
+            contentArea.appendChild(tpl);
+        }
+
+        // 3. 渲染今日投稿
+        if (data.today_videos && data.today_videos.length > 0) {
+            const tpl = document.getElementById('tpl-section-today').content.cloneNode(true);
+            const container = tpl.getElementById('today-videos-container');
+
+            data.today_videos.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'today-card';
+
+                // 处理原始链接列表
+                let linksHtml = '';
+                if (Array.isArray(item.origin_url_list)) {
+                    linksHtml = item.origin_url_list.map((url, idx) =>
+                        `<a href="${url}" target="_blank" class="origin-link-btn">素材 ${idx + 1}</a>`
+                    ).join('');
+                }
+
+                // 处理 upload_detail (识别 http 链接)
+                const detailHtml = formatTextWithLinks(item.upload_detail || '暂无详情');
+
+                card.innerHTML = `
+                    <div class="card-row">
+                        <span class="card-label">创建时间:</span> ${item.created_at || '--'}
+                    </div>
+                    <div class="card-row">
+                        <span class="card-label">创作指导:</span>
+                        <span class="guidance-text">${item.creative_guidance || '无'}</span>
+                    </div>
+                    <div class="card-row">
+                        <span class="card-label">原始素材:</span>
+                        <div class="origin-link-group">${linksHtml || '<span style="color:#999">无链接</span>'}</div>
+                    </div>
+                    <div class="card-row" style="margin-top:10px; border-top:1px dashed #eee; padding-top:8px;">
+                        <span class="card-label">投稿详情:</span>
+                        <div class="upload-detail-text" style="margin-top:4px; color:#444;">${detailHtml}</div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            contentArea.appendChild(tpl);
+        } else {
+            // 如果今日没有投稿，也可以显示一个提示
+            const tip = document.createElement('div');
+            tip.className = 'empty-tip';
+            tip.textContent = '今日暂无投稿记录';
+            contentArea.appendChild(tip);
+        }
+    }
+
+    // 辅助函数：将字符串中的 http 链接转换为 a 标签
+    function formatTextWithLinks(text) {
+        if (!text) return '';
+        // 简单的正则匹配 http/https 开头的链接
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        return text.replace(urlRegex, (url) => {
+            return `<a href="${url}" target="_blank">${url}</a>`;
+        });
+    }
+</script>
+</body>
+</html>
