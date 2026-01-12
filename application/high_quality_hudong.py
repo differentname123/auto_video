@@ -18,7 +18,7 @@ from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
 from utils.common_utils import get_config, read_json, init_config, save_json, get_simple_play_distribution, \
-    calculate_averages, gen_true_type_and_tags
+    calculate_averages, gen_true_type_and_tags, get_user_type
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -577,7 +577,7 @@ def statistic_good_video(tasks):
         play_comment_info_list = task_info.get('play_comment_info_list', [])
         create_time = task_info.get('created')
         if create_time:
-            play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, interval_minutes=30, max_elapsed_minutes=60*6)
+            play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, interval_minutes=60, max_elapsed_minutes=1500)
             if play_count_info:
                 user_name = task_info.get('userName', '未知用户')
                 if user_name not in user_task_info:
@@ -587,7 +587,12 @@ def statistic_good_video(tasks):
                 filter_tasks.append(task_info)
     final_good_task_list = []
 
+    user_type_info = {}
     for user_name, task_list in user_task_info.items():
+        user_type = get_user_type(user_name)
+        if user_type not in user_type_info:
+            user_type_info[user_type] = []
+        user_type_info[user_type].extend(task_list)
         play_count_info_list = [task_info.get('play_count_info', {}) for task_info in task_list]
         averages_info = calculate_averages(play_count_info_list)
         print(f"用户 {user_name} 的平均播放量信息: {averages_info}")
@@ -598,7 +603,7 @@ def statistic_good_video(tasks):
             valid_count = 0
             copy_play_count_info = play_count_info.copy()
             for key, play_count in play_count_info.items():
-                total_play_count += play_count
+                total_play_count = play_count
                 average_value = averages_info.get(key, 0)
                 if average_value > 0:
                     ratio_key = f"{key}历史比例"
@@ -610,17 +615,52 @@ def statistic_good_video(tasks):
             copy_play_count_info['平均历史比例'] = avg_total_ratio_value
             copy_play_count_info['平均播放量'] = total_play_count / len(play_count_info) if len(play_count_info) > 0 else 0
             task_info['play_count_info'] = copy_play_count_info
-        sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get("平均历史比例", 0),reverse=True)
-        # 将第一个加入final_good_task_list
-        if sorted_tasks:
-            final_good_task_list.append(sorted_tasks[0])
-            sorted_tasks[0]['choose_reason'] = ['用户最高平均历史比例']
 
-    target_key_list = [60, 90, 120, 180, "60历史比例", "90历史比例", "120历史比例", "180历史比例", "平均历史比例", "平均播放量"]
+        target_key_list = ["平均历史比例", "平均播放量"]
+        # 遍历选择出每个排行的前5个task
+        for key in target_key_list:
+            non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
+            if non_zero_count < 5:
+                continue
+            need_count = 2
+            if '比例' in str(key):
+                need_count = 1
+            sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
+            for i, task_info in enumerate(sorted_tasks[:need_count]):
+                if 'choose_reason' not in task_info:
+                    task_info['choose_reason'] = []
+                final_good_task_list.append(task_info)
+                task_info['choose_reason'].append(f'{user_name} {key}  排行第{i + 1}名的前5个视频')
+
+    for user_type, task_list in user_type_info.items():
+        target_key_list = [60, 120, 180, 360, 480, 720, 960, 1440, "60历史比例", "120历史比例", "180历史比例", "720历史比例", "平均历史比例", "平均播放量"]
+        # 遍历选择出每个排行的前5个task
+        for key in target_key_list:
+            non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
+            if non_zero_count < 5:
+                continue
+            need_count = 2
+            if '比例' in str(key):
+                need_count = 1
+            sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
+            for i, task_info in enumerate(sorted_tasks[:need_count]):
+                if 'choose_reason' not in task_info:
+                    task_info['choose_reason'] = []
+                final_good_task_list.append(task_info)
+                task_info['choose_reason'].append(f'{user_type} {key}  排行第{i + 1}名的前5个视频')
+
+
+    target_key_list = [60, 120, 180, 360, 480, 720, 960, 1440, "60历史比例", "120历史比例", "180历史比例", "720历史比例", "平均历史比例", "平均播放量"]
     # 遍历选择出每个排行的前5个task
     for key in target_key_list:
+        non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
+        if non_zero_count < 5:
+            continue
+        need_count = 2
+        if '比例' in str(key):
+            need_count = 1
         sorted_tasks = sorted(filter_tasks, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
-        for i, task_info in enumerate(sorted_tasks[:5]):
+        for i, task_info in enumerate(sorted_tasks[:need_count]):
             if 'choose_reason' not in task_info:
                 task_info['choose_reason'] = []
             final_good_task_list.append(task_info)
