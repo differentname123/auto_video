@@ -23,8 +23,8 @@ from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
 # --- 全局配置 ---
-total_cookie = get_config("nana_bilibili_total_cookie")
-csrf_token = get_config("nana_bilibili_csrf_token")
+total_cookie = get_config("dahao_bilibili_total_cookie")
+csrf_token = get_config("dahao_bilibili_csrf_token")
 
 
 def path_exists(path) -> bool:
@@ -643,6 +643,7 @@ def statistic_good_video(tasks):
     for task_info in unique_final_good_task_list:
         upload_info_list = task_info.get('upload_info', [])
         video_type, tags_info = gen_true_type_and_tags(upload_info_list)
+        task_info['video_type'] = video_type
         choose_reason = task_info.get('choose_reason', [])
         choose_reason_len = len(choose_reason)
         if video_type:
@@ -653,7 +654,7 @@ def statistic_good_video(tasks):
     statistic_play_info = {}
     temp_info = {}
     # 获取当前的时间，以字符串形式打出来
-    current_time_str = datetime.now().strftime("%Y-%m-%d%H:%M:%S")
+    current_time_str = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     temp_info['good_tags_info'] = good_tags_info
     temp_info['good_video_list'] = unique_final_good_task_list
     statistic_play_info[current_time_str] = temp_info
