@@ -58,19 +58,19 @@
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
-            line-height: 1.5; /* 稍微增加行高，让文字更易读 */
+            line-height: 1.5;
             word-break: break-all;
         }
         .video-link:hover { color: var(--primary-color); text-decoration: underline; }
 
-        /* --- 修改点: 图标样式调整 --- */
+        /* 图标样式调整 */
         .icon-link {
             display: flex;
             align-items: center;
             justify-content: center;
             text-decoration: none;
             margin-right: 10px;
-            margin-top: 3px;         /* 视学校正 */
+            margin-top: 3px;
             cursor: pointer;
         }
 
@@ -78,30 +78,89 @@
             width: 18px;
             height: 18px;
             min-width: 18px;
-            color: #1890ff;          /* 主色调 */
+            color: #1890ff;
             fill: none;
             stroke: currentColor;
             stroke-width: 2;
             opacity: 0.8;
             transition: transform 0.2s;
         }
-        /* 鼠标悬停在整行时，图标轻微放大，增加互动感 */
         .hot-video-item:hover .play-circle-icon {
             transform: scale(1.1);
             opacity: 1;
         }
 
-        /* 今日投稿 - 卡片列表 */
-        .today-card { background: #fff; border: 1px solid var(--border-color); border-radius: 10px; padding: 15px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
-        .today-card:hover { border-color: #b3d8ff; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-        .card-row { margin-bottom: 8px; font-size: 0.9rem; line-height: 1.5; }
-        .card-label { font-weight: 600; color: #555; margin-right: 5px; }
-        .guidance-text { color: #666; font-style: italic; background: #f9f9f9; padding: 5px 8px; border-radius: 4px; display: block; margin-top: 4px; }
-        .origin-link-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-        .origin-link-btn { font-size: 0.8rem; background: #f0f5ff; color: var(--primary-color); padding: 2px 8px; border-radius: 4px; text-decoration: none; border: 1px solid #d6e4ff; }
-        .origin-link-btn:hover { background: var(--primary-color); color: white; }
+        /* --- 今日投稿：极致紧凑+滑动适配样式 --- */
+        .table-wrapper {
+            max-height: 300px;
+            overflow-y: auto;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: #fff;
+            -webkit-overflow-scrolling: touch;
+        }
 
-        .upload-detail-text a { color: var(--primary-color); text-decoration: underline; word-break: break-all; }
+        .table-wrapper::-webkit-scrollbar { width: 6px; height: 6px; }
+        .table-wrapper::-webkit-scrollbar-thumb { background: #dcdcdc; border-radius: 3px; }
+
+        .custom-table {
+            width: 100%;
+            min-width: 460px; /* 极简的最小宽度，确保手机上一行不会换行 */
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.85rem;
+        }
+
+        .custom-table thead th {
+            background-color: #fafafa;
+            color: #666;
+            font-weight: 600;
+            padding: 8px 6px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .custom-table tbody td {
+            padding: 8px 6px;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: middle;
+            color: #333;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .custom-table tbody tr:last-child td { border-bottom: none; }
+        .custom-table tbody tr:hover { background-color: #f6faff; }
+
+        /* 精准列宽分配 */
+        .col-time { width: 85px; }
+        .col-guide { width: 20%; }
+        .col-detail { width: auto; }
+        .col-origin { width: 50px; }
+
+        .detail-link { color: var(--primary-color); text-decoration: none; }
+        .detail-link:hover { text-decoration: underline; }
+
+        /* --- 新增：可点击复制的单元格样式 --- */
+        .clickable-cell {
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+        }
+        .clickable-cell:hover {
+            color: var(--primary-color);
+            background-color: #e6f7ff;
+        }
+        /* 当复制成功时的文字颜色 */
+        .copy-success {
+            color: #389e0d !important;
+            font-weight: bold;
+        }
 
         .loading { text-align: center; color: #999; padding: 40px; }
         .empty-tip { text-align: center; color: #bbb; padding: 20px; font-size: 0.9rem; }
@@ -140,7 +199,21 @@
 <template id="tpl-section-today">
     <div class="section-box">
         <div class="section-title">今日投稿记录</div>
-        <div id="today-videos-container"></div>
+        <div class="table-wrapper">
+            <table class="custom-table" id="today-videos-table">
+                <thead>
+                    <tr>
+                        <th class="col-time">创建时间</th>
+                        <th class="col-guide">创作指导</th>
+                        <th class="col-detail">状态</th>
+                        <th class="col-origin">素材</th>
+                    </tr>
+                </thead>
+                <tbody id="today-videos-body">
+                    <!-- JS插入数据 -->
+                </tbody>
+            </table>
+        </div>
     </div>
 </template>
 
@@ -183,19 +256,7 @@
                 span.className = 'tag-pill';
                 span.textContent = tag;
                 span.onclick = function() {
-                    navigator.clipboard.writeText(tag).then(() => {
-                        const originalText = span.textContent;
-                        span.textContent = '已复制';
-                        span.style.backgroundColor = '#d9f7be';
-                        span.style.color = '#389e0d';
-                        span.style.borderColor = '#b7eb8f';
-                        setTimeout(() => {
-                            span.textContent = originalText;
-                            span.style.backgroundColor = '';
-                            span.style.color = '';
-                            span.style.borderColor = '';
-                        }, 1000);
-                    }).catch(err => console.error('复制失败', err));
+                    copyTextToClipboard(tag, span);
                 };
                 container.appendChild(span);
             });
@@ -210,8 +271,6 @@
                 const div = document.createElement('div');
                 div.className = 'hot-video-item';
 
-                // --- 修改点：使用“播放圆环”图标，并将其也包裹在链接中 ---
-                // 这样既起到了视觉引导作用，又防止用户因为点击图标而无反应
                 div.innerHTML = `
                     <a href="${video.url}" target="_blank" class="icon-link" aria-label="播放">
                         <svg class="play-circle-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
@@ -226,41 +285,76 @@
             contentArea.appendChild(tpl);
         }
 
-        // 3. 渲染今日投稿
+        // 3. 渲染今日投稿 (表格逻辑)
         if (data.today_videos && data.today_videos.length > 0) {
             const tpl = document.getElementById('tpl-section-today').content.cloneNode(true);
-            const container = tpl.getElementById('today-videos-container');
+            const tbody = tpl.getElementById('today-videos-body');
 
             data.today_videos.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'today-card';
+                const tr = document.createElement('tr');
 
-                let linksHtml = '';
-                if (Array.isArray(item.origin_url_list)) {
-                    linksHtml = item.origin_url_list.map((url, idx) =>
-                        `<a href="${url}" target="_blank" class="origin-link-btn">素材 ${idx + 1}</a>`
-                    ).join('');
+                // 1. 处理创建时间
+                let timeText = item.created_at || '--';
+                if (timeText.length > 14) {
+                    timeText = timeText.substring(0, 14);
                 }
-                const detailHtml = formatTextWithLinks(item.upload_detail || '暂无详情');
 
-                card.innerHTML = `
-                    <div class="card-row">
-                        <span class="card-label">创建时间:</span> ${item.created_at || '--'}
-                    </div>
-                    <div class="card-row">
-                        <span class="card-label">创作指导:</span>
-                        <span class="guidance-text">${item.creative_guidance || '无'}</span>
-                    </div>
-                    <div class="card-row">
-                        <span class="card-label">原始素材:</span>
-                        <div class="origin-link-group">${linksHtml || '<span style="color:#999">无链接</span>'}</div>
-                    </div>
-                    <div class="card-row" style="margin-top:10px; border-top:1px dashed #eee; padding-top:8px;">
-                        <span class="card-label">投稿详情:</span>
-                        <div class="upload-detail-text" style="margin-top:4px; color:#444;">${detailHtml}</div>
-                    </div>
+                // 2. 处理素材 origin_url_list (完整版用于复制，精简版用于显示)
+                let originFull = '';
+                if (Array.isArray(item.origin_url_list)) {
+                    originFull = item.origin_url_list.join('\n'); // 复制时用换行符更好看
+                } else if (typeof item.origin_url_list === 'string') {
+                    originFull = item.origin_url_list;
+                }
+
+                // 显示用文本
+                let originDisplay = originFull.replace(/\n/g, ',');
+                if (originDisplay && originDisplay.length > 5) {
+                    originDisplay = originDisplay.substring(0, 5) + '...';
+                }
+                if (!originDisplay) originDisplay = '-';
+
+                // 3. 处理创作指导 (完整版用于复制)
+                const guideFull = item.creative_guidance || '';
+                // 显示时会自动被CSS省略，所以直接放内容
+
+                // 4. 处理 Title 和 链接跳转逻辑
+                const detailStr = item.upload_detail || '';
+                const titleStr = item.title || detailStr || '无标题';
+                const isUrl = /^(http|https):\/\//.test(detailStr);
+
+                let mainContentHtml = '';
+                if (isUrl) {
+                    mainContentHtml = `<a href="${detailStr}" target="_blank" class="detail-link" title="${titleStr}">${titleStr}</a>`;
+                } else {
+                    mainContentHtml = `<span title="${detailStr}">${item.title ? item.title + ' ' : ''}${detailStr}</span>`;
+                }
+
+                // 关键：将完整内容 encodeURIComponent 后放入 data-full 属性中
+                // 这样避免了特殊字符(如双引号)破坏 HTML 结构
+                const guideEncoded = encodeURIComponent(guideFull);
+                const originEncoded = encodeURIComponent(originFull);
+
+                tr.innerHTML = `
+                    <td>${timeText}</td>
+
+                    <td class="clickable-cell"
+                        title="点击复制完整指导"
+                        data-full="${guideEncoded}"
+                        onclick="handleCopy(this)">
+                        ${guideFull}
+                    </td>
+
+                    <td>${mainContentHtml}</td>
+
+                    <td class="clickable-cell"
+                        title="点击复制完整素材链接"
+                        data-full="${originEncoded}"
+                        onclick="handleCopy(this)">
+                        ${originDisplay}
+                    </td>
                 `;
-                container.appendChild(card);
+                tbody.appendChild(tr);
             });
             contentArea.appendChild(tpl);
         } else {
@@ -271,11 +365,54 @@
         }
     }
 
-    function formatTextWithLinks(text) {
-        if (!text) return '';
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
-        return text.replace(urlRegex, (url) => {
-            return `<a href="${url}" target="_blank">${url}</a>`;
+    // --- 新增：通用复制处理函数 ---
+    function handleCopy(element) {
+        // 1. 获取完整文本
+        const rawData = element.getAttribute('data-full');
+        if (!rawData) return;
+
+        const fullText = decodeURIComponent(rawData);
+        if (fullText === '-' || !fullText.trim()) return;
+
+        // 2. 复制到剪贴板
+        navigator.clipboard.writeText(fullText).then(() => {
+            // 3. 视觉反馈
+            const originalHtml = element.innerHTML;
+
+            // 保持宽度不变，防止“已复制”这几个字改变表格排版
+            const width = element.offsetWidth;
+            element.style.width = width + 'px';
+            element.style.display = 'inline-block'; // 临时改为inline-block以便设置width，或者依赖td本身的宽
+
+            element.innerHTML = '<span class="copy-success">已复制</span>';
+
+            // 1秒后恢复
+            setTimeout(() => {
+                element.innerHTML = originalHtml;
+                element.style.width = '';
+                element.style.display = '';
+            }, 1000);
+
+        }).catch(err => {
+            console.error('复制失败', err);
+            alert('复制失败，请手动复制');
+        });
+    }
+
+    // 辅助函数：用于标签复制的简单封装（保留原逻辑）
+    function copyTextToClipboard(text, element) {
+        navigator.clipboard.writeText(text).then(() => {
+            const originalText = element.textContent;
+            element.textContent = '已复制';
+            element.style.backgroundColor = '#d9f7be';
+            element.style.color = '#389e0d';
+            element.style.borderColor = '#b7eb8f';
+            setTimeout(() => {
+                element.textContent = originalText;
+                element.style.backgroundColor = '';
+                element.style.color = '';
+                element.style.borderColor = '';
+            }, 1000);
         });
     }
 </script>

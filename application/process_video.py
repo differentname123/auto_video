@@ -765,7 +765,7 @@ def _task_producer_worker(task_queue, running_task_ids):
 
         # 3. 优化休眠：如果有任务入队，说明系统忙，休眠短一点；如果没任务，休眠长一点
         # 或者固定为较短时间，例如 60 秒
-        time.sleep(3600)
+        time.sleep(1800)
 
 
 def update_narration_key(data_list):

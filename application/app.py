@@ -2,7 +2,7 @@ import time
 import traceback
 import multiprocessing
 import threading  # [新增] 用于后台运行监控循环
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Tuple, Dict, Any, Set
 
 from flask import Flask, request, jsonify, render_template, Response
@@ -13,7 +13,7 @@ from utils.common_utils import read_json, save_json, check_timestamp, delete_fil
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
     ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths, \
-    USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE
+    USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, VIDEO_MAX_RETRY_TIMES
 
 _configure_third_party_paths()
 
@@ -32,6 +32,7 @@ running_task_ids = None # 共享去重字典 (Key: video_id)
 task_queue = None       # 任务队列
 consumers = []          # 消费者进程列表
 producer_p = None       # 生产者进程
+
 
 def _init_mongo_manager() -> MongoManager:
     """初始化MongoDB管理器"""
@@ -675,7 +676,7 @@ def get_user_upload_info() -> Response:
         return jsonify(error_response)
 
 
-def process_video_data(data: dict, video_type: str) -> dict:
+def process_video_data(data: dict, video_type: str, user_name) -> dict:
     """
     根据输入的 video_type 处理数据，返回包含 tags, hot_videos, today_videos 的字典。
     """
@@ -717,7 +718,7 @@ def process_video_data(data: dict, video_type: str) -> dict:
             })
 
     # --- 3. 处理 today_videos 字段 ---
-    today_videos = []
+    today_videos = build_today_videos(user_name)
 
     # --- 返回结果 ---
     return {
@@ -726,13 +727,62 @@ def process_video_data(data: dict, video_type: str) -> dict:
         "today_videos": today_videos
     }
 
+def build_today_videos(user_name):
+    """
+    构建今日视频数据
+    :param user_name:
+    :return:
+    """
+    current_time = datetime.now()
+    # 计算一天前的时间
+    one_day_ago = current_time - timedelta(days=1)
+
+    query_2 = {
+        "userName": user_name,
+        "create_time": {
+            "$gt": one_day_ago
+        }
+    }
+
+    all_task = mongo_manager.find_by_custom_query(mongo_manager.tasks_collection, query_2)
+
+    today_videos = []
+    for task_info in all_task:
+        temp_dict = {}
+        creation_guidance_info = task_info.get('creation_guidance_info', {})
+        creative_guidance = creation_guidance_info.get('creative_guidance', {})
+        temp_dict['creative_guidance'] = creative_guidance
+        create_time = task_info.get('create_time')
+        # 将create_time转换成为字符串，不需要年的信息
+        create_time_str = create_time.strftime("%m-%d %H:%M")
+        temp_dict['created_at'] = create_time_str
+        original_url_info_list = task_info.get('original_url_info_list', [])
+        original_url_list = [info.get('original_url') for info in original_url_info_list]
+        temp_dict['origin_url_list'] = original_url_list
+        upload_detail = '处理中'
+        failed_count = task_info.get('failed_count', 0)
+        if task_info.get('status') in [TaskStatus.TO_UPLOADED, TaskStatus.PLAN_GENERATED]:
+            upload_detail = '处理中'
+        elif task_info.get('status') == TaskStatus.FAILED and failed_count > VIDEO_MAX_RETRY_TIMES:
+            upload_detail = f'失败_{task_info.get('failure_details', '')}'
+        bvid = task_info.get('bvid', '')
+        if bvid:
+            upload_detail = f"https://www.bilibili.com/video/{bvid}"
+        temp_dict['upload_detail'] = upload_detail
+        upload_params = task_info.get('upload_params', {})
+        title = upload_params.get('title', '')
+        temp_dict['title'] = title
+        today_videos.append(temp_dict)
+    return today_videos
+
+
 @app.route('/get_good_video', methods=['GET'])
 def get_good_video_info():
     user_name = request.args.get('username')
     print(f"接收到的用户名: {user_name}")
     user_type = get_user_type(user_name)
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
-    data_info = process_video_data(statistic_play_info, user_type)
+    data_info = process_video_data(statistic_play_info, user_type, user_name)
     print(f"处理后的视频数据: {data_info}")
     return jsonify(data_info)
 
