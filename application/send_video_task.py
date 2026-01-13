@@ -222,7 +222,9 @@ def send_good_video():
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao']
+    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue']
+    simple_need_process_users = ['yang', 'xue']
+
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
     good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
@@ -237,6 +239,12 @@ def send_good_video():
     user_count_info = defaultdict(dict)
     total_need_count = 0
     for user_name in need_process_users:
+        if user_name in simple_need_process_users:
+            user_count_info[user_name]['need_count'] = 1
+            total_need_count += 1
+            user_count_info[user_name]['send_count'] = 0
+            print(f"用户 {user_name} 为简化用户，今日需要处理 1 个任务。")
+            continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         target_count = 30
         need_count = max(target_count - total_count, 0)
