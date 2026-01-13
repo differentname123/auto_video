@@ -101,6 +101,8 @@ class MongoManager:
         self.db.create_index(self.tasks_collection, [('video_id_list', 1)], unique=False)
         self.db.create_index(self.tasks_collection, [('status', 1)], unique=False)
         self.db.create_index(self.tasks_collection, [('status', 1), ('upload_time', 1)], unique=False)
+        self.db.create_index(self.tasks_collection, [('userName', 1), ('create_time', 1)], unique=False)
+
 
         # print("✅ 核心索引已确保存在。")
 

@@ -802,9 +802,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    # config_map = init_config()
-    # mid_list = config_map.keys()
-    # block_all_author(mid_list, action_type=6)
+    config_map = init_config()
+    mid_list = config_map.keys()
+    block_all_author(mid_list, action_type=6)
 
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
