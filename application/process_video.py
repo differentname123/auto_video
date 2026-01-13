@@ -733,13 +733,21 @@ def _task_producer_worker(task_queue, running_task_ids):
             tasks_to_process = query_need_process_tasks()
             # 过滤掉 方案已生成 状态的任务
             tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
+            user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+
+            last_user_set = user_config.get('self_user_list', [])
+            sorted_tasks = sorted(
+                tasks_to_process,
+                key=lambda task: task['userName'] in last_user_set
+            )
+
             print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
             count = 0
             skip_count = 0
             check_time = True
             if queue_size <= 1:
                 check_time = False
-            for task in tasks_to_process:
+            for task in sorted_tasks:
                 # 检查队列是否过满，防止生产者阻塞太久
                 if task_queue.qsize() > 1000:
                     print("队列过满，暂停生产")

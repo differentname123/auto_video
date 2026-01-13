@@ -239,9 +239,10 @@ def send_good_video():
     user_count_info = defaultdict(dict)
     total_need_count = 0
     for user_name in need_process_users:
+        total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         if user_name in simple_need_process_users:
-            user_count_info[user_name]['need_count'] = 1
-            total_need_count += 1
+            user_count_info[user_name]['need_count'] = max(1 - total_count, 0)
+            total_need_count += max(1 - total_count, 0)
             user_count_info[user_name]['send_count'] = 0
             print(f"用户 {user_name} 为简化用户，今日需要处理 1 个任务。")
             continue
@@ -292,7 +293,10 @@ def send_good_video():
         if '新任务已成功创建' in str(data_info):
             user_count_info[target_user_name]['send_count'] += 1
             success_count += 1
-    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要{total_need_count} 个视频 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # 梳理出 send_count 大于0的用户
+    user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] > 0}
+    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 {user_count_info} 总共需要{total_need_count} 个视频 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     print(user_count_info)
 
