@@ -813,8 +813,23 @@ if __name__ == '__main__':
     #     "userName": {"$in": ["jie", "qiqixiao"]},
     #     "status": "失败"
     # }
-    query_2 = {"video_id_list": "7593831590037737659"}
+
+    query_2 = {
+        "upload_params.title": {
+            "$regex": "林渝植蹭够了没？一边给痞幼发好人卡，一边给夏夏当舔狗？"
+        }
+    }
+    query_2 = {
+        "_id": {
+            "$regex": "林渝植蹭够了没？一边给痞幼发好人卡，一边给夏夏当舔狗？"
+        }
+    }
+
+    query_2 = {
+  "video_id_list": "7450428735016193318",
+  "userName": "qizhu"
+}
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        manager.upsert_tasks([task_info])
+        process_single_task(task_info, manager, gen_video=True)

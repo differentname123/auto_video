@@ -490,6 +490,8 @@ def build_all_need_data_map(video_info_dict):
             all_logical_scene_dict[scene_key] = scene
 
         owner_asr_info_list = video_info.get('owner_asr_info', [])
+        if owner_asr_info_list is None:
+            owner_asr_info_list = []
 
         for asr_info in owner_asr_info_list:
             speaker = asr_info.get('speaker')

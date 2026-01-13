@@ -258,10 +258,11 @@ def gen_video(task_info, config_map, user_config, manager):
     try:
         failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager, gen_video=True)
         user_name = task_info.get('userName')
+        id = task_info.get('_id', '__')
         all_task_video_path_info = build_task_video_paths(task_info)
         final_output_path = all_task_video_path_info['final_output_path']
         account_config = config_map.get(user_name)
-        upload_params = build_bilibili_params(final_output_path, chosen_script, user_config, user_name, video_info_dict, account_config)
+        upload_params = build_bilibili_params(final_output_path, chosen_script, user_config, user_name, video_info_dict, account_config, id)
 
         return failure_details, video_info_dict, chosen_script, upload_params
     except Exception as e:
@@ -285,7 +286,7 @@ def gen_video(task_info, config_map, user_config, manager):
         task_info['failure_details'] = str(failure_details)
         manager.upsert_tasks([task_info])
 
-def gen_cover_path(final_output_path, video_info_dict, cover_text):
+def gen_cover_path(final_output_path, video_info_dict, cover_text, id):
     """
     生成最终的封面路径
     :return:
@@ -315,7 +316,7 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text):
 
     # 随机选择一个封面
     base_cover_path = random.choice(available_cover_path_list)
-    output_image_path = base_cover_path.replace(".jpg", "_enhanced.jpg")
+    output_image_path = base_cover_path.replace(".jpg", f"_{id}_enhanced.jpg")
     if is_valid_target_file_simple(output_image_path):
         return output_image_path
     create_enhanced_cover(
@@ -326,7 +327,7 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text):
     return output_image_path
 
 
-def build_bilibili_params(video_path, best_script, user_config, userName, video_info_dict, config):
+def build_bilibili_params(video_path, best_script, user_config, userName, video_info_dict, config, id):
     """
     生成投稿需要的参数
     :return:
@@ -359,7 +360,7 @@ def build_bilibili_params(video_path, best_script, user_config, userName, video_
     dynamic = upload_info.get("introduction", {}).get("interaction_guide", "希望大家喜欢")
 
     cover_text = best_script.get("cover_text", "")
-    cover_path = gen_cover_path(video_path, video_info_dict, cover_text)
+    cover_path = gen_cover_path(video_path, video_info_dict, cover_text, id)
 
     human_type2 = upload_info.get("category_id", 1002)
 
