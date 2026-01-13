@@ -758,7 +758,7 @@ def _task_producer_worker(task_queue, running_task_ids):
                 task_queue.put(task)
                 count += 1
 
-            print(f"完成恢复完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
+            print(f" 完成恢复完成 完成入库完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
 
         except Exception as e:
             print(f"生产者异常: {e}")
@@ -817,10 +817,4 @@ if __name__ == '__main__':
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        # play_comment_info_list = task_info.get('play_comment_info_list', [])
-        # create_time = task_info.get('created')
-        # if create_time:
-        #     info = get_simple_play_distribution(play_comment_info_list, create_time)
-        #     print()
-
         manager.upsert_tasks([task_info])

@@ -257,9 +257,8 @@ def send_good_video():
             copy_video_info['target_user_name'] = user_name
             final_video_list.append(copy_video_info)
 
-    print(f"总共收集了 {len(final_video_list)} 个优质视频。")
 
-
+    success_count = 0
     print(user_count_info)
     for video_info in final_video_list:
         target_user_name = video_info.get('target_user_name', 'dahao')
@@ -283,6 +282,9 @@ def send_good_video():
         data_info = send_good_video_quest(play_load)
         if '新任务已成功创建' in str(data_info):
             user_count_info[target_user_name]['send_count'] += 1
+            success_count += 1
+    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
     print(user_count_info)
 
 
