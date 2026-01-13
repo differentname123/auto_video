@@ -708,73 +708,105 @@ def check_task_queue(running_task_ids, task_info, check_time=True):
     return True
 
 
-def _task_producer_worker(task_queue, running_task_ids):
+def maintain_task_queue_once(task_queue, running_task_ids):
+    """
+    执行一次任务队列维护逻辑：清理僵尸锁 -> 查询任务 -> 排序 -> 入队。
+    方便在循环外单独调用。
+    """
     # 定义超时时间，例如 2 小时 (7200秒)
     LOCK_TIMEOUT = 7200 * 4
 
+    now = time.time()
+    stale_keys = []
+
+    # --- 1. 清理僵尸锁 ---
+    try:
+        # 转换为普通字典做检查，避免长时间占用 Manager 锁
+        snapshot = dict(running_task_ids)
+        for v_id, timestamp in snapshot.items():
+            if now - timestamp > LOCK_TIMEOUT:
+                stale_keys.append(v_id)
+
+        for k in stale_keys:
+            # 注意：这里引用 snapshot[k] 必须保证 key 存在，逻辑与原代码一致
+            print(f"[生产者] 发现僵尸锁 {k} (超时 {(now - snapshot[k]) / 60:.1f} 分钟)，强制移除。")
+            running_task_ids.pop(k, None)
+    except Exception as e:
+        print(f"清理僵尸锁时出错: {e}")
+
+    queue_size = task_queue.qsize()
+
+    # --- 2. 查询任务 ---
+    tasks_to_process = query_need_process_tasks()
+    # 过滤掉 方案已生成 状态的任务
+    tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
+
+    # 读取配置用于排序
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    last_user_set = user_config.get('self_user_list', [])
+
+    sorted_tasks = sorted(
+        tasks_to_process,
+        key=lambda task: task['userName'] in last_user_set
+    )
+
+    print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    count = 0
+    skip_count = 0
+    check_time = True
+    if queue_size <= 1:
+        check_time = False
+
+    for task in sorted_tasks:
+        # 检查队列是否过满，防止生产者阻塞太久
+        if task_queue.qsize() > 1000:
+            print("队列过满，暂停生产")
+            break
+
+        # 检查逻辑
+        if not check_task_queue(running_task_ids, task, check_time=check_time):
+            skip_count += 1
+            continue
+
+        # 加锁
+        v_ids = task.get('video_id_list', [])
+        for v_id in v_ids:
+            running_task_ids[v_id] = time.time()  # 确保写入当前时间
+
+        task_queue.put(task)
+        count += 1
+
+    print(
+        f" 完成恢复完成 完成入库完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
+    return count
+
+
+def _task_producer_worker(task_queue, running_task_ids):
+    """
+    生产者工作进程，循环调用维护函数，并实现动态休眠。
+    """
+    IDLE_SLEEP_TIME = 1800  # 长时间休眠（30分钟）
+    BUSY_SLEEP_TIME = 300   # 短时间休眠（5分钟）
+
     while True:
         try:
-            now = time.time()
-            stale_keys = []
-            try:
-                # 转换为普通字典做检查，避免长时间占用 Manager 锁
-                snapshot = dict(running_task_ids)
-                for v_id, timestamp in snapshot.items():
-                    if now - timestamp > LOCK_TIMEOUT:
-                        stale_keys.append(v_id)
+            # 调用抽取出的单次维护函数，并获取入队数量
+            enqueued_count = maintain_task_queue_once(task_queue, running_task_ids)
 
-                for k in stale_keys:
-                    print(f"[生产者] 发现僵尸锁 {k} (超时 {(now - snapshot[k]) / 60:.1f} 分钟)，强制移除。")
-                    running_task_ids.pop(k, None)
-            except Exception as e:
-                print(f"清理僵尸锁时出错: {e}")
-            queue_size = task_queue.qsize()
-            # 2. 查询任务
-            tasks_to_process = query_need_process_tasks()
-            # 过滤掉 方案已生成 状态的任务
-            tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
-            user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
-
-            last_user_set = user_config.get('self_user_list', [])
-            sorted_tasks = sorted(
-                tasks_to_process,
-                key=lambda task: task['userName'] in last_user_set
-            )
-
-            print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
-            count = 0
-            skip_count = 0
-            check_time = True
-            if queue_size <= 1:
-                check_time = False
-            for task in sorted_tasks:
-                # 检查队列是否过满，防止生产者阻塞太久
-                if task_queue.qsize() > 1000:
-                    print("队列过满，暂停生产")
-                    break
-
-                # 检查逻辑
-                if not check_task_queue(running_task_ids, task, check_time=check_time):
-                    skip_count += 1
-                    continue
-
-                # 加锁
-                v_ids = task.get('video_id_list', [])
-                for v_id in v_ids:
-                    running_task_ids[v_id] = time.time()  # 确保写入当前时间
-
-                task_queue.put(task)
-                count += 1
-
-            print(f" 完成恢复完成 完成入库完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
+            # 如果没有找到新任务入队，并且队列也快空了，就长休眠
+            if enqueued_count == 0 and task_queue.qsize() < 5:
+                print(f"未发现新任务，生产者进入长休眠 {IDLE_SLEEP_TIME} 秒...")
+                time.sleep(IDLE_SLEEP_TIME)
+            else:
+                # 如果有任务入队，或者队列中还有存货，就短休眠，保持系统活跃
+                print(f"任务生产循环完成，生产者进入短休眠 {BUSY_SLEEP_TIME} 秒...")
+                time.sleep(BUSY_SLEEP_TIME)
 
         except Exception as e:
             print(f"生产者异常: {e}")
-
-        # 3. 优化休眠：如果有任务入队，说明系统忙，休眠短一点；如果没任务，休眠长一点
-        # 或者固定为较短时间，例如 60 秒
-        time.sleep(1800)
-
+            # 发生异常时，也进行长休眠，避免因持续异常而耗尽资源
+            time.sleep(IDLE_SLEEP_TIME)
 
 def update_narration_key(data_list):
     """

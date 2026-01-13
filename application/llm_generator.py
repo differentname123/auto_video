@@ -1295,6 +1295,8 @@ def gen_video_script_llm(task_info, video_info_dict):
         try:
 
             gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+            # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
+
 
             # gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
             # 解析和校验
