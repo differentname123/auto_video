@@ -735,15 +735,19 @@ def _task_producer_worker(task_queue, running_task_ids):
             tasks_to_process = [task for task in tasks_to_process if task.get('status') != TaskStatus.PLAN_GENERATED]
             print(f"找到 {len(tasks_to_process)} 个需要处理的任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
             count = 0
+            skip_count = 0
+            check_time = True
+            if queue_size <= 1:
+                check_time = False
             for task in tasks_to_process:
                 # 检查队列是否过满，防止生产者阻塞太久
                 if task_queue.qsize() > 1000:
                     print("队列过满，暂停生产")
                     break
-                if queue_size <= 1:
-                    check_time = False
+
                 # 检查逻辑
                 if not check_task_queue(running_task_ids, task, check_time=check_time):
+                    skip_count += 1
                     continue
 
                 # 加锁
@@ -754,7 +758,7 @@ def _task_producer_worker(task_queue, running_task_ids):
                 task_queue.put(task)
                 count += 1
 
-            print(f"入队 {count} 个任务。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
+            print(f"完成恢复完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
 
         except Exception as e:
             print(f"生产者异常: {e}")

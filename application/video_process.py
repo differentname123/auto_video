@@ -134,6 +134,8 @@ def _process_single_video(video_id, video_info):
 
     # 4. 计算作者说话时间段
     owner_asr_info_list = video_info.get('owner_asr_info', [])
+    if owner_asr_info_list is None :
+        owner_asr_info_list = []
     owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
     merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
 

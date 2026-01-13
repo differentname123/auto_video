@@ -1,3 +1,4 @@
+import random
 import time
 from collections import defaultdict
 
@@ -133,9 +134,7 @@ def auto_send():
     user_type_info = user_config.get('user_type_info', {})
     select_info = {}
     for user_name in need_process_users:
-        tobe_upload_count = user_statistic_info.get(user_name, {}).get('tobe_upload_count', 0)
-        today_processed_count = user_statistic_info.get(user_name, {}).get('today_processed_count', 0)
-        total_count = tobe_upload_count + today_processed_count
+        total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         target_count = 30
         need_count = max(target_count - total_count, 0)
         preferred_video_type= 'fun'
@@ -143,7 +142,7 @@ def auto_send():
             if user_name in user_list:
                 preferred_video_type = video_type
                 break
-        print(f"用户 {user_name} 今日已处理 {today_processed_count} 个，待处理 {tobe_upload_count} 个，还需处理 {need_count} 个。才能够达到目标 {target_count} 个。题材{preferred_video_type}")
+        print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个。题材{preferred_video_type}")
         count = 0
         for sorted_video in sorted_videos:
             video_key = sorted_video[0]
@@ -179,7 +178,7 @@ def auto_send():
         save_json(used_video_file, used_video_list)
 
 def send_good_video_quest(payload):
-    url = "http://127.0.0.1:5001/one-click-generate"
+    url = "http://127.0.0.1:5002/one-click-generate"
 
     # 构造请求头
     headers = {
@@ -223,7 +222,7 @@ def send_good_video():
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong']
+    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao']
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
     good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
@@ -234,29 +233,33 @@ def send_good_video():
         user_list[:] = [user for user in user_list if user in need_process_users]
 
     final_video_list = []
+    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
+    user_count_info = defaultdict(dict)
+
+    for user_name in need_process_users:
+        total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
+        target_count = 30
+        need_count = max(target_count - total_count, 0)
+        user_count_info[user_name]['need_count'] = need_count
+        user_count_info[user_name]['send_count'] = 0
+        print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
 
     for video_info in good_video_list:
         user_name = video_info.get('userName', 'dahao')
         user_type = get_user_type(user_name)
         user_list = user_type_info.get(user_type, [])
-        for user_name in user_list:
+        # 最多随机选择3个
+        final_user_list = random.sample(user_list, min(len(user_list), 5))
+
+        for user_name in final_user_list:
             # 深拷贝一份video_info
             copy_video_info = video_info.copy()
             copy_video_info['target_user_name'] = user_name
             final_video_list.append(copy_video_info)
 
     print(f"总共收集了 {len(final_video_list)} 个优质视频。")
-    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
-    user_count_info = defaultdict(dict)
 
-    for user_name in need_process_users:
-        tobe_upload_count = user_statistic_info.get(user_name, {}).get('tobe_upload_count', 0)
-        today_processed_count = user_statistic_info.get(user_name, {}).get('today_processed_count', 0)
-        total_count = tobe_upload_count + today_processed_count
-        target_count = 30
-        need_count = max(target_count - total_count, 0)
-        user_count_info[user_name]['need_count'] = need_count
-        user_count_info[user_name]['send_count'] = 0
+
     print(user_count_info)
     for video_info in final_video_list:
         target_user_name = video_info.get('target_user_name', 'dahao')
@@ -280,6 +283,7 @@ def send_good_video():
         data_info = send_good_video_quest(play_load)
         if '新任务已成功创建' in str(data_info):
             user_count_info[target_user_name]['send_count'] += 1
+    print(user_count_info)
 
 
 
@@ -287,9 +291,14 @@ def send_good_video():
 
 
 
-
-
-# --- 使用示例 ---
 if __name__ == "__main__":
-    send_good_video()
+    if __name__ == "__main__":
+        while True:
+            try:
+                send_good_video()
+            except Exception as e:
+                print(f"出错了: {e}")
 
+            # 暂停 30 分钟 (30 * 60 秒)
+            print("等待30分钟后再次运行...")
+            time.sleep(30 * 60)

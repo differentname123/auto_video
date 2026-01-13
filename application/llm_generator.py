@@ -1176,11 +1176,12 @@ def is_contain_owner_speaker(owner_asr_info):
     """
     检查是否包含owner的文本
     """
-    for asr_info in owner_asr_info:
-        speaker = asr_info.get('speaker', 'unknown')
-        final_text = asr_info.get('final_text', '').strip()
-        if speaker == 'owner' and final_text:
-            return True
+    if owner_asr_info:
+        for asr_info in owner_asr_info:
+            speaker = asr_info.get('speaker', 'unknown')
+            final_text = asr_info.get('final_text', '').strip()
+            if speaker == 'owner' and final_text:
+                return True
     return False
 
 
