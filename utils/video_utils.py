@@ -1525,7 +1525,6 @@ def add_text_overlays_to_video(
 
 def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fixed_rect=None, voice_info=None):
     """
-    生成结尾视频（测试用），结尾语为txt
     """
     voice_name = "zh-CN-XiaoxiaoNeural"
     rate = "+30%"
@@ -1536,6 +1535,9 @@ def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fi
         pitch = voice_info.get('pitch', '+30Hz')
     output_path = pathlib.Path(output_path)
     audio_path = output_path.with_suffix(".mp3")
+    adjust_audio_path = output_path.with_name(output_path.stem + "_adjusted.mp3")
+
+    video_duration = probe_duration(origin_video_path)
     duration = generate_audio_and_get_duration_sync(
         text=text,
         output_filename=str(audio_path),
@@ -1544,12 +1546,13 @@ def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fi
         rate=rate,
         pitch=pitch,
     )
-    video_duration = probe_duration(origin_video_path)
+    adjust_duration = adjust_audio_duration(str(audio_path), duration, target_duration=video_duration, output_mp3_path=str(adjust_audio_path))
+
     segments_info = [{
         'startTime': "00:00:00.000",
         'endTime': ms_to_time(video_duration * 1000),
-        'outputPath': str(audio_path),
-        'trimmedDuration': duration,
+        'outputPath': str(adjust_audio_path),
+        'trimmedDuration': adjust_duration,
     }]
     with_audio_path = output_path.with_name(output_path.stem + "_with_audio.mp4")
     redub_video_with_ffmpeg(video_path=origin_video_path, segments_info=segments_info, output_path=str(with_audio_path),keep_original_audio=keep_original_audio)
@@ -1557,7 +1560,7 @@ def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fi
     # 4. 添加字幕
     subtitle_data = [{
         'startTime': "00:00:00.000",
-        'endTime': ms_to_time(duration * 1000),
+        'endTime': ms_to_time(adjust_duration * 1000),
         'optimizedText': text
     }]
     add_subtitles_to_video(
@@ -1572,6 +1575,8 @@ def gen_video(text, output_path, origin_video_path,keep_original_audio=False, fi
 
     if os.path.exists(audio_path):
         os.remove(audio_path)
+    if os.path.exists(adjust_audio_path):
+        os.remove(adjust_audio_path)
     if os.path.exists(with_audio_path):
         os.remove(with_audio_path)
     return str(output_path.resolve())
@@ -3462,3 +3467,99 @@ def save_frames_around_timestamp_ffmpeg(
 
     # 返回完整的路径列表（包含本来就存在的和新覆盖的）
     return saved_paths
+
+
+def adjust_audio_duration(
+        input_mp3_path: str,
+        current_duration: float,
+        target_duration: float,
+        output_mp3_path: str,
+        tolerance: float = 0.1
+):
+    """
+    调整音频时长以接近目标时长，变速比例被限制在指定容差范围内。
+    此函数非常健壮：在任何处理失败或无需处理的情况下，它会复制原始音频到输出路径，
+    并返回原始时长，而不会抛出异常。
+
+    Args:
+        input_mp3_path (str): 输入的 MP3 文件路径。
+        current_duration (float): 当前音频的实际时长（秒）。
+        target_duration (float): 目标音频时长（秒）。
+        output_mp3_path (str): 处理后输出的 MP3 文件路径。
+        tolerance (float, optional): 速度调整的容忍差值。例如 0.1 表示速度倍率
+                                     必须在 [0.9, 1.1] 之间。默认为 0.1。
+
+    Returns:
+        Optional[float]: 如果成功调整，返回处理后音频的实际时长（秒）。
+                         如果执行了后备复制操作，返回原始音频时长。
+                         如果输入文件不存在，无法复制，则返回 None。
+    """
+
+    # --- 统一的后备（Fallback）函数 ---
+    def fallback_copy():
+        """复制原始文件到目标地址，并返回原始时长。"""
+        print("执行后备操作：复制原始文件。")
+        try:
+            # 确保输出目录存在
+            output_dir = os.path.dirname(output_mp3_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+            # 复制文件，copy2会同时复制元数据
+            shutil.copy2(input_mp3_path, output_mp3_path)
+            print(f"已将原始文件复制到: {output_mp3_path}")
+            return current_duration
+        except Exception as e:
+            print(f"致命错误：后备复制操作失败: {e}")
+            return None  # 连复制都失败了，返回None
+
+    # --- 主逻辑开始 ---
+    try:
+        # 1. 输入验证：检查文件是否存在和时长是否有效
+        if not os.path.exists(input_mp3_path):
+            print(f"错误：输入文件未找到: {input_mp3_path}")
+            return None  # 输入文件不存在，无法进行任何操作
+
+        if current_duration <= 0 or target_duration <= 0:
+            print("错误：当前时长和目标时长必须为正数。")
+            return fallback_copy()
+
+        # 2. 计算并钳制速度倍率
+        ideal_speed_factor = current_duration / target_duration
+        min_speed = 1.0 - tolerance
+        max_speed = 1.0 + tolerance
+
+        # 将理想速度倍率限制在 [min_speed, max_speed] 范围内
+        final_speed_factor = max(min_speed, min(ideal_speed_factor, max_speed))
+
+        # 3. 如果速度变化极小，直接复制，无需调用 FFmpeg
+        if abs(final_speed_factor - 1.0) < 0.001:
+            print("速度变化可忽略不计，无需处理。")
+            return fallback_copy()
+
+
+        print(f"目标时长: {target_duration:.2f}s, 当前时长: {current_duration:.2f}s  理想速度倍率: {ideal_speed_factor:.4f} -> 限制后最终倍率: {final_speed_factor:.4f}")
+
+        # 4. 构建并执行 FFmpeg 命令
+        command = [
+            'ffmpeg', '-y', '-i', input_mp3_path,
+            '-filter:a', f'atempo={final_speed_factor}',
+            '-b:a', '192k', output_mp3_path
+        ]
+
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False, encoding='utf-8'
+        )
+
+        # 5. 检查结果
+        if result.returncode == 0:
+            adjusted_duration = current_duration / final_speed_factor
+            print(f"音频处理成功！最终时长约为: {adjusted_duration:.2f}s")
+            return adjusted_duration
+        else:
+            print("错误：FFmpeg 执行失败。")
+            print(f"FFmpeg 错误输出: {result.stderr.strip()}")
+            return fallback_copy()
+
+    except Exception as e:
+        print(f"处理过程中发生未知错误: {e}")
+        return fallback_copy()

@@ -47,9 +47,9 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
         if not final_text:
             continue
         asr_start = asr_info.get('fix_start')
-        asr_start = max(0, asr_start - 500)
+        asr_start = max(0, asr_start - 50)
         asr_end = asr_info.get('fix_end')
-        asr_end = min(video_duration_ms, asr_end + 500)
+        asr_end = min(video_duration_ms, asr_end + 50)
         duration_list.append((asr_start, asr_end))
     merge_intervals_list = merge_intervals(duration_list)
     return merge_intervals_list
@@ -119,9 +119,9 @@ def _process_single_video(video_id, video_info):
     video_size = os.path.getsize(video_path)
 
     # 2. 检查目标文件是否已存在且有效（跳过机制）
-    if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
-        print(f"已存在遮挡字幕的视频，跳过: {cover_video_path} {log_pre}")
-        return None
+    # if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
+    #     print(f"已存在遮挡字幕的视频，跳过: {cover_video_path} {log_pre}")
+    #     return None
 
     # 3. 获取视频时长
     try:
@@ -1187,7 +1187,7 @@ if __name__ == "__main__":
     manager = MongoManager(mongo_base_instance)
     video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
     # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    video_info_list = manager.find_materials_by_ids(['7576848259886691321'])
+    video_info_list = manager.find_materials_by_ids(['7582856709979426075'])
     for video_info in video_info_list:
         video_id = video_info.get('video_id')
         _process_single_video(video_id, video_info)

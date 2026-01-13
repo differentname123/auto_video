@@ -779,7 +779,7 @@ def maintain_task_queue_once(task_queue, running_task_ids):
 
     print(
         f" 完成恢复完成 完成入库完成 入队 {count} 个任务。 跳过{skip_count} 个任务 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 队列大小: {task_queue.qsize()} 运行中任务数: {len(running_task_ids)}")
-    return count
+    return count + skip_count
 
 
 def _task_producer_worker(task_queue, running_task_ids):
@@ -866,10 +866,11 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  "video_id_list": "7450428735016193318",
-  "userName": "qizhu"
+  "video_id_list": "7576626385520040674",
+  "userName": "hong",
 }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
+        process_single_task(task_info, manager, gen_video=False)
+        break
