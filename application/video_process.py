@@ -119,9 +119,9 @@ def _process_single_video(video_id, video_info):
     video_size = os.path.getsize(video_path)
 
     # 2. 检查目标文件是否已存在且有效（跳过机制）
-    # if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
-    #     print(f"已存在遮挡字幕的视频，跳过: {cover_video_path} {log_pre}")
-    #     return None
+    if is_valid_target_file_simple(cover_video_path, video_size * 0.1):
+        print(f"已存在遮挡字幕的视频，跳过: {cover_video_path} {log_pre}")
+        return None
 
     # 3. 获取视频时长
     try:

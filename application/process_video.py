@@ -17,6 +17,8 @@ import shutil
 import time
 import traceback
 
+from bson import ObjectId
+
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
     gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp, gen_upload_info_llm
 from application.video_process import gen_video_by_script
@@ -866,11 +868,10 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  "video_id_list": "7576626385520040674",
-  "userName": "hong",
+  '_id': ObjectId("696668bae22dbe4a9bd47fe7")
 }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=False)
+        process_single_task(task_info, manager, gen_video=True)
         break
