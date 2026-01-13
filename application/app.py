@@ -751,6 +751,8 @@ def build_today_videos(user_name):
         temp_dict = {}
         creation_guidance_info = task_info.get('creation_guidance_info', {})
         creative_guidance = creation_guidance_info.get('creative_guidance', {})
+        if not creative_guidance:
+            continue
         temp_dict['creative_guidance'] = creative_guidance
         create_time = task_info.get('create_time')
         # 将create_time转换成为字符串，不需要年的信息
