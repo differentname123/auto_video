@@ -657,7 +657,7 @@ def statistic_good_video(tasks):
 
             average_info = {}
             for k, v in aggregated_info.items():
-                if len(v) == len(task_list) or len(v) > 5:
+                if len(v) == len(task_list) or (len(v) > 2 and (len(task_list) - len(v)) / len(task_list) < 0.3):
                     log_values = [math.log1p(x) for x in v]
                     avg_log = sum(log_values) / len(log_values)
                     geometric_mean = math.expm1(avg_log)
@@ -668,7 +668,7 @@ def statistic_good_video(tasks):
                 task_info['average_info'] = average_info
                 task_info['same_count'] = len(task_list)
                 task_info['aggregated_info'] = aggregated_info
-                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['average_info'].get('平均播放量')
+                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['same_count'] * task_info['average_info'].get('平均播放量')
                 if task_info['same_count'] < 2:
                     task_info['final_score'] *= 0.5
             if task_info['final_score'] < 1000:
@@ -698,11 +698,11 @@ def statistic_good_video(tasks):
     # 对final_good_task_list进行去重，按照task_info的bvid去重
     unique_bvids = set()
     unique_final_good_task_list = []
-    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
-    self_user_list = user_config.get('self_user_list', [])
-
-    # 过滤掉final_good_task_list中userName在self_user_list中的任务
-    final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('userName', '') not in self_user_list]
+    # user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    # self_user_list = user_config.get('self_user_list', [])
+    #
+    # # 过滤掉final_good_task_list中userName在self_user_list中的任务
+    # final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('userName', '') not in self_user_list]
 
 
 

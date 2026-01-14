@@ -852,7 +852,7 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                     narration_script_list = scene_info.get('narration_script_list', [])
                     new_narration_script_list = scene.get('new_narration_script_list', [])
                     if len(narration_script_list) != len(new_narration_script_list):
-                        return False, f"方案 {solution_num} 的场景 {scene_num} 旁白列表长度不一致。"
+                        return False, f"方案 {solution_num} 的场景 {scene_num} 旁白列表长度不一致 (原始: {len(narration_script_list)}，新: {len(new_narration_script_list)})。"
 
                 seen_scene_ids.add(scene_id)
                 source_video_ids_in_solution.add(all_scene_dict[scene_id].get('source_video_id'))

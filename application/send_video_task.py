@@ -1,5 +1,6 @@
 import random
 import time
+import traceback
 from collections import defaultdict
 
 import requests
@@ -248,18 +249,30 @@ def send_good_video():
             continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         target_count = 30
-        need_count = max(target_count - total_count, 0)
+        need_count = min(max(target_count - total_count, 0), 1)
         user_count_info[user_name]['need_count'] = 1
         total_need_count += need_count
         user_count_info[user_name]['send_count'] = 0
         print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
 
+    user_type_count_info = {}
     for video_info in good_video_list:
         user_name = video_info.get('userName', 'dahao')
         user_type = get_user_type(user_name)
+        if user_type not in user_type_count_info:
+            user_type_count_info[user_type] = 0
+        user_type_count_info[user_type] += 1
         user_list = user_type_info.get(user_type, [])
+        single_count = 1
+        same_count = video_info.get('same_count', 1)
+        if same_count > 1:
+            single_count += 1
+        final_score = video_info.get('final_score', 0)
+        if final_score > 5000:
+            single_count += 1
+
         # 最多随机选择3个
-        final_user_list = random.sample(user_list, min(len(user_list), 5))
+        final_user_list = random.sample(user_list, min(len(user_list), single_count))
 
         for user_name in final_user_list:
             # 深拷贝一份video_info
@@ -295,9 +308,9 @@ def send_good_video():
             success_count += 1
 
     # 梳理出 send_count 大于0的用户
-    user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] > 0}
-    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 {user_count_info} 总共需要{total_need_count} 个视频 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
+    fail_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] <= 0}
+    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要{total_need_count} 个视频 {user_type_count_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(fail_user_count_info)
     print(user_count_info)
 
 
@@ -312,8 +325,9 @@ if __name__ == "__main__":
             try:
                 send_good_video()
             except Exception as e:
+                traceback.print_exc()
                 print(f"出错了: {e}")
 
             # 暂停 30 分钟 (30 * 60 秒)
             print("等待30分钟后再次运行...")
-            time.sleep(60 * 60)
+            time.sleep(60 * 30)

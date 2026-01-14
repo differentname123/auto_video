@@ -919,4 +919,4 @@ if __name__ == "__main__":
     while True:
         auto_upload(manager)
         print(f"本轮投稿处理完成，等待下一轮...当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(60)  # 每分钟运行一次
+        # time.sleep(60)  # 每分钟运行一次
