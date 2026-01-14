@@ -649,6 +649,7 @@ def process_idle_tasks(
         status = task_info.get('status')
         if bvid or status == TaskStatus.UPLOADED:
             print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            continue
 
         count += 1
         user_name = task_info.get('userName')

@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import math
 import random
 import traceback
 import time
@@ -384,7 +385,7 @@ def update_play_count(recent_uploaded_tasks, user_bvid_file_data):
 
                 need_update_task_list.append(task_info)
     print(f"更新播放量信息，共 {len(need_update_task_list)} 个任务需要更新。 总共平台视频数: {count} 数据库最近记录数量: {len(recent_uploaded_tasks)}")
-    return need_update_task_list
+    return need_update_task_list, recent_uploaded_tasks
 
 
 def process_single_hudong_task(task_info, commenter_map, uid):
@@ -573,6 +574,7 @@ def statistic_good_video(tasks):
     filter_tasks = []
     user_task_info = {}
 
+    same_video_tasks_info = {}
     for task_info in new_tasks:
         play_comment_info_list = task_info.get('play_comment_info_list', [])
         create_time = task_info.get('created')
@@ -585,14 +587,13 @@ def statistic_good_video(tasks):
                 user_task_info[user_name].append(task_info)
                 task_info['play_count_info'] = play_count_info
                 filter_tasks.append(task_info)
-    final_good_task_list = []
+                video_id_list = task_info.get('video_id_list', [])
+                video_id_key = ','.join(sorted(video_id_list))
+                if video_id_key not in same_video_tasks_info:
+                    same_video_tasks_info[video_id_key] = []
+                same_video_tasks_info[video_id_key].append(task_info)
 
-    user_type_info = {}
     for user_name, task_list in user_task_info.items():
-        user_type = get_user_type(user_name)
-        if user_type not in user_type_info:
-            user_type_info[user_type] = []
-        user_type_info[user_type].extend(task_list)
         play_count_info_list = [task_info.get('play_count_info', {}) for task_info in task_list]
         averages_info = calculate_averages(play_count_info_list)
         print(f"用户 {user_name} 的平均播放量信息: {averages_info}")
@@ -608,76 +609,124 @@ def statistic_good_video(tasks):
                 if average_value > 0:
                     ratio_key = f"{key}历史比例"
                     ratio_value = play_count / average_value
-                    copy_play_count_info[ratio_key] = ratio_value
+                    copy_play_count_info[ratio_key] = round(ratio_value, 2)
                     total_ratio_value += ratio_value
                     valid_count += 1
             avg_total_ratio_value = total_ratio_value / valid_count if valid_count > 0 else 0
-            copy_play_count_info['平均历史比例'] = avg_total_ratio_value
-            copy_play_count_info['平均播放量'] = total_play_count / len(play_count_info) if len(play_count_info) > 0 else 0
+            copy_play_count_info['平均历史比例'] = round(avg_total_ratio_value, 2)
+            copy_play_count_info['平均播放量'] = round(total_play_count * 60 / int(key) if int(key) > 0 else 0, 2)
             task_info['play_count_info'] = copy_play_count_info
 
-        target_key_list = ["平均历史比例", "平均播放量"]
-        # 遍历选择出每个排行的前5个task
-        for key in target_key_list:
-            non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
-            if non_zero_count < 5:
+
+    time_diff_list = [6, 12, 24, 32, 48, 72, 144]
+    final_good_task_list = []
+    for time_diff in time_diff_list:
+        same_video_tasks_info = {}
+        video_type_tasks_info = {}
+        all_tasks_list = []
+        # 获取当前时间戳往前移动 time_diff 小时的时间戳
+        pre_timestamp = int(time.time()) - time_diff * 3600
+
+        for task_info in new_tasks:
+            create_time = task_info.get('created')
+            if create_time:
+                if pre_timestamp > create_time:
+                    continue
+                all_tasks_list.append(task_info)
+                video_id_list = task_info.get('video_id_list', [])
+                video_id_key = ','.join(sorted(video_id_list))
+                if video_id_key not in same_video_tasks_info:
+                    same_video_tasks_info[video_id_key] = []
+                same_video_tasks_info[video_id_key].append(task_info)
+
+                user_name = task_info.get('userName', '未知用户')
+                user_type = get_user_type(user_name)
+                if user_type not in video_type_tasks_info:
+                    video_type_tasks_info[user_type] = []
+                video_type_tasks_info[user_type].append(task_info)
+
+
+        real_good_video_list = []
+        for video_id_key, task_list in same_video_tasks_info.items():
+            aggregated_info = {}
+            for task_info in task_list:
+                play_count_info = task_info.get('play_count_info', {})
+                for key, value in play_count_info.items():
+                    if value is None: continue
+                    aggregated_info.setdefault(key, []).append(value)
+
+            average_info = {}
+            for k, v in aggregated_info.items():
+                if len(v) == len(task_list) or len(v) > 5:
+                    log_values = [math.log1p(x) for x in v]
+                    avg_log = sum(log_values) / len(log_values)
+                    geometric_mean = math.expm1(avg_log)
+                    average_info[k] = geometric_mean
+            if average_info.get('平均历史比例') < 1:
                 continue
-            need_count = 2
-            if '比例' in str(key):
-                need_count = 1
-            sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
-            for i, task_info in enumerate(sorted_tasks[:need_count]):
+            for task_info in task_list:
+                task_info['average_info'] = average_info
+                task_info['same_count'] = len(task_list)
+                task_info['aggregated_info'] = aggregated_info
+                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['average_info'].get('平均播放量')
+                if task_info['same_count'] < 2:
+                    task_info['final_score'] *= 0.5
+            if task_info['final_score'] < 1000:
+                continue
+
+            temp_task_list = sorted(task_list, key=lambda x: (x.get('play_count_info', {}).get('平均历史比例', 0)), reverse=True)
+            real_good_video_list.append(temp_task_list[0])
+
+        print(f"在过去 {time_diff} 小时内，共发现 {len(real_good_video_list)} 个素材的视频。满足时间要求的任务数量为{len(all_tasks_list)}")
+        need_count = 5
+        for user_type, task_list in video_type_tasks_info.items():
+            temp_task_list = sorted(task_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
+            for i, task_info in enumerate(temp_task_list[:need_count]):
                 if 'choose_reason' not in task_info:
                     task_info['choose_reason'] = []
                 final_good_task_list.append(task_info)
-                task_info['choose_reason'].append(f'{user_name} {key}  排行第{i + 1}名的前5个视频')
+                task_info['choose_reason'].append(f'{user_type} {time_diff}  排行第{i + 1}名的前5个视频')
 
-    for user_type, task_list in user_type_info.items():
-        target_key_list = [60, 120, 180, 360, 480, 720, 960, 1440, "60历史比例", "120历史比例", "180历史比例", "720历史比例", "平均历史比例", "平均播放量"]
-        # 遍历选择出每个排行的前5个task
-        for key in target_key_list:
-            non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
-            if non_zero_count < 5:
-                continue
-            need_count = 2
-            if '比例' in str(key):
-                need_count = 1
-            sorted_tasks = sorted(task_list, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
-            for i, task_info in enumerate(sorted_tasks[:need_count]):
-                if 'choose_reason' not in task_info:
-                    task_info['choose_reason'] = []
-                final_good_task_list.append(task_info)
-                task_info['choose_reason'].append(f'{user_type} {key}  排行第{i + 1}名的前5个视频')
-
-
-    target_key_list = [60, 120, 180, 360, 480, 720, 960, 1440, "60历史比例", "120历史比例", "180历史比例", "720历史比例", "平均历史比例", "平均播放量"]
-    # 遍历选择出每个排行的前5个task
-    for key in target_key_list:
-        non_zero_count = sum(1 for x in task_list if x.get('play_count_info', {}).get(key, 0) != 0)
-        if non_zero_count < 5:
-            continue
-        need_count = 2
-        if '比例' in str(key):
-            need_count = 1
-        sorted_tasks = sorted(filter_tasks, key=lambda x: x.get('play_count_info', {}).get(key, 0), reverse=True)
+        sorted_tasks = sorted(real_good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
         for i, task_info in enumerate(sorted_tasks[:need_count]):
             if 'choose_reason' not in task_info:
                 task_info['choose_reason'] = []
             final_good_task_list.append(task_info)
-            task_info['choose_reason'].append(f'{key}  排行第{i+1}名的前5个视频')
+            task_info['choose_reason'].append(f'全局 {time_diff} 排行第{i+1}名的前5个视频')
 
+    final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('final_score', 0) > 100]
     # 对final_good_task_list进行去重，按照task_info的bvid去重
     unique_bvids = set()
     unique_final_good_task_list = []
-    for task_info in final_good_task_list:
-        bvid = task_info.get('upload_result', {}).get('bvid', '')
-        if bvid and bvid not in unique_bvids:
-            unique_bvids.add(bvid)
-            unique_final_good_task_list.append(task_info)
-    print(f"最终筛选出 {len(unique_final_good_task_list)} 个优质视频。去重前数量: {len(final_good_task_list)} 总共视频数量: {len(filter_tasks)}")
-    # 最终按照choose_reason的长度降序排序
-    unique_final_good_task_list.sort(key=lambda x: len(x.get('choose_reason', [])), reverse=True)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    self_user_list = user_config.get('self_user_list', [])
 
+    # 过滤掉final_good_task_list中userName在self_user_list中的任务
+    final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('userName', '') not in self_user_list]
+
+
+
+    for task_info in final_good_task_list:
+        video_id_list = task_info.get('video_id_list', [])
+        video_id_key = '_'.join(sorted(video_id_list))
+        if video_id_key and video_id_key not in unique_bvids:
+            unique_bvids.add(video_id_key)
+            unique_final_good_task_list.append(task_info)
+    # 最终按照choose_reason的长度降序排序
+    unique_final_good_task_list.sort(
+        key=lambda x: (
+            len(x.get('choose_reason', [])),
+            x.get('final_score', 0)
+        ),
+        reverse=True
+    )
+    print(f"最终筛选出 {len(unique_final_good_task_list)} 个优质视频 其中有 {len([task_info for task_info in unique_final_good_task_list if task_info.get('same_count', 0) > 1])} 个是不止一个任务。去重前数量: {len(final_good_task_list)} 总共视频数量: {len(filter_tasks)}")
+
+    # 过滤出unique_final_good_task_list中same_count大于1的任务
+    # filter_task_list = [task_info for task_info in unique_final_good_task_list if task_info.get('same_count', 0) > 1]
+    # unique_final_good_task_list.sort(key=lambda x: x.get('final_score', []), reverse=True)
+    # 过滤出unique_final_good_task_list中final_score不存在的任务
+    # unique_final_good_task_list = [task_info for task_info in unique_final_good_task_list if task_info.get('final_score', 0) > 0]
     good_tags_info = {}
     # 统计热门的tags
     for task_info in unique_final_good_task_list:
@@ -713,6 +762,7 @@ def fun(manager):
         pre_midnight = today_midnight - timedelta(days=5)
 
         recent_uploaded_tasks = manager.find_tasks_after_time_with_status(pre_midnight, [TaskStatus.UPLOADED])
+
 
         processed_count = 0
         print("开始执行 fun 函数...当前时间:", datetime.now().isoformat())
@@ -759,8 +809,8 @@ def fun(manager):
             save_json(ALL_BVID_FILE, all_bvid_file_data)
             save_json(USER_BVID_FILE, bvid_file_data)
 
-        recent_uploaded_tasks = update_play_count(recent_uploaded_tasks, bvid_file_data)
-        manager.upsert_tasks(recent_uploaded_tasks)
+        need_update_task_list, recent_uploaded_tasks = update_play_count(recent_uploaded_tasks, bvid_file_data)
+        manager.upsert_tasks(need_update_task_list)
         statistic_good_video(recent_uploaded_tasks)
 
 
@@ -768,7 +818,7 @@ def fun(manager):
         filter_tasks = []
         three_hours_ago = datetime.now() - timedelta(hours=20)
 
-        for task_info in recent_uploaded_tasks:
+        for task_info in need_update_task_list:
             uploaded_time = task_info.get('uploaded_time')
             hudong_info = task_info.get('hudong_info', {})
             last_processed_date = hudong_info.get('last_processed_date', '')
@@ -802,9 +852,11 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    config_map = init_config()
-    mid_list = config_map.keys()
-    block_all_author(mid_list, action_type=6)
+    # config_map = init_config()
+    # mid_list = config_map.keys()
+    # block_all_author(mid_list, action_type=6)
+
+    # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
 
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
