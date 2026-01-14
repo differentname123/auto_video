@@ -740,6 +740,15 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
     使用 filter_complex 将一小批 video_paths 合并为 output_path。
     probe_fn 是你现有的 probe_video_new，接受路径返回 (w,h,fps,sar)
     """
+    import json
+    import subprocess
+
+    def has_audio(path):
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        streams = json.loads(result.stdout).get('streams', [])
+        return any(stream['codec_type'] == 'audio' for stream in streams)
+
     if not video_paths:
         raise ValueError("video_paths 不能为空")
     for p in video_paths:
@@ -782,13 +791,18 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
                 f"setpts=PTS-STARTPTS[v{idx}]"
             )
 
-        vf_filters.append(
-            f"[{idx}:a]"
-            f"volume=1,"
-            f"aresample=48000,"
-            f"aformat=sample_rates=48000:channel_layouts=stereo,"
-            f"asetpts=PTS-STARTPTS[a{idx}]"
-        )
+        if has_audio(path):
+            vf_filters.append(
+                f"[{idx}:a]"
+                f"volume=1,"
+                f"aresample=48000,"
+                f"aformat=sample_rates=48000:channel_layouts=stereo,"
+                f"asetpts=PTS-STARTPTS[a{idx}]"
+            )
+        else:
+            vf_filters.append(
+                f"anullsrc=channel_layout=stereo:sample_rate=48000[a{idx}]"
+            )
 
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(video_paths)))
     vf_filters.append(f"{concat_inputs}concat=n={len(video_paths)}:v=1:a=1[outv][outa]")

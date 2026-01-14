@@ -249,7 +249,7 @@ def send_good_video():
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         target_count = 30
         need_count = max(target_count - total_count, 0)
-        user_count_info[user_name]['need_count'] = need_count
+        user_count_info[user_name]['need_count'] = 1
         total_need_count += need_count
         user_count_info[user_name]['send_count'] = 0
         print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
@@ -316,4 +316,4 @@ if __name__ == "__main__":
 
             # 暂停 30 分钟 (30 * 60 秒)
             print("等待30分钟后再次运行...")
-            time.sleep(30 * 60)
+            time.sleep(60 * 60)

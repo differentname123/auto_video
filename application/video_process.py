@@ -101,7 +101,7 @@ def get_owner_asr_info_list(video_info):
 
     return valid_asr_list
 
-def _process_single_video(video_id, video_info):
+def _process_single_video(video_id, video_info, is_need_narration):
     """
     处理单个视频的字幕遮挡逻辑
     :return: 如果出错返回错误字典，成功返回 None
@@ -115,6 +115,11 @@ def _process_single_video(video_id, video_info):
 
     if not os.path.exists(video_path):
         return {"error_info": f"原视频文件不存在: {video_path}", "error_level": ERROR_STATUS.ERROR}
+
+    if not is_need_narration:
+        print(f"不需要替换解说字幕，直接复制文件: {video_path} {log_pre}")
+        shutil.copy2(video_path, cover_video_path)
+        return None
 
     video_size = os.path.getsize(video_path)
 
@@ -195,7 +200,7 @@ def _process_single_video(video_id, video_info):
     return None
 
 
-def gen_subtitle_box_and_cover_subtitle(video_info_dict):
+def gen_subtitle_box_and_cover_subtitle(video_info_dict, is_need_narration):
     """
     批量生成遮挡作者字幕的视频
     :param video_info_dict: 视频信息字典 {video_id: video_info}
@@ -207,7 +212,7 @@ def gen_subtitle_box_and_cover_subtitle(video_info_dict):
     for video_id, video_info in video_info_dict.items():
         try:
             # 处理单个视频，返回错误信息（如果有）
-            error_result = _process_single_video(video_id, video_info)
+            error_result = _process_single_video(video_id, video_info, is_need_narration)
 
             if error_result:
                 failure_details[video_id] = error_result
@@ -1164,8 +1169,12 @@ def gen_video_by_script(task_info, video_info_dict):
     cost_time_info = {}
     start_time = time.time()
     chosen_script = {}
+    creation_guidance_info = task_info.get('creation_guidance_info', {})
+    is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
+
+
     # 生成字幕遮挡视频
-    failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict)
+    failure_details = gen_subtitle_box_and_cover_subtitle(video_info_dict, is_need_narration)
     if check_failure_details(failure_details):
         return failure_details, chosen_script, cost_time_info
 
@@ -1187,7 +1196,7 @@ if __name__ == "__main__":
     manager = MongoManager(mongo_base_instance)
     video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
     # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    video_info_list = manager.find_materials_by_ids(['7582856709979426075'])
+    video_info_list = manager.find_materials_by_ids(['7319123834186075411'])
     for video_info in video_info_list:
         video_id = video_info.get('video_id')
-        _process_single_video(video_id, video_info)
+        _process_single_video(video_id, video_info, True)

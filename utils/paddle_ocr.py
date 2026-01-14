@@ -348,7 +348,16 @@ def find_overall_subtitle_box_target_number(
         [int(np.max(all_points[:, 0])), int(np.max(all_points[:, 1]))],  # max_x, max_y
         [int(np.min(all_points[:, 0])), int(np.max(all_points[:, 1]))]  # min_x, max_y
     ]
-    print(f"[阶段 3] 计算出的最终包围框: {final_box}")
+    # 统计一些字幕框高度占视频短边的比例是多少
+    video_width, video_height = get_video_dimensions(video_path)
+    short_side = min(video_width, video_height)
+    final_box_height = final_box[2][1] - final_box[0][1]
+    height_ratio = final_box_height / short_side
+
+    print(f"[阶段 3] 计算出的最终包围框: {final_box} (高度占视频短边比例: {height_ratio:.2%})")
+    if height_ratio > 0.20:
+        print(f"[结果] 最终字幕框高度超过视频短边的20%。")
+        return gen_proper_box(video_path, video_duration_ms, merged_timerange_list)
     return final_box
 
 # ================= 测试调用 =================

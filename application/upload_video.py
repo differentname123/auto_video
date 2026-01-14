@@ -97,9 +97,10 @@ def sort_tasks(existing_video_tasks, not_existing_video_tasks, user_info_map):
 
         schedule_date_str = guidance_info.get('schedule_date', '')
 
-        update_time = task.get('update_time', '')
+        # 默认是小的时间
+        create_time = task.get('create_time', datetime.min)
 
-        return (count, schedule_date_str, update_time)
+        return (count, schedule_date_str, create_time)
 
     # 分别对两个列表执行排序
     # Python的sort是原地排序(in-place)，无需重新赋值
@@ -191,6 +192,10 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
     creation_guidance_info = task_info.get('creation_guidance_info', {})
     log_pre = f"{task_info.get('video_id_list', [])} {creation_guidance_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     global error_user_map
+    bvid = task_info.get('bvid', '')
+    if bvid:
+        print(f"❌❌❌ 任务已有 bvid {bvid}，跳过 {log_pre}")
+        return False
 
     schedule_date = creation_guidance_info.get('schedule_date', '2026-01-05')
     is_future = datetime.strptime(schedule_date, '%Y-%m-%d').date() > datetime.now().date()
@@ -640,6 +645,11 @@ def process_idle_tasks(
         f"开始处理 {total_candidates} 个未生成视频的任务 利用空闲时间...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     count = 0
     for task_info in tasks:
+        bvid = task_info.get('bvid', '')
+        status = task_info.get('status')
+        if bvid or status == TaskStatus.UPLOADED:
+            print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+
         count += 1
         user_name = task_info.get('userName')
         # 注意：修正了原代码f-string中引号嵌套的潜在兼容性问题
