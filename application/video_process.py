@@ -807,9 +807,8 @@ def _calculate_bgm_ratio(new_script_scenes, video_info_dict):
         video_id = scene_id.split('_')[0]
         # 使用链式get避免KeyError，更加优雅
         has_bgm = video_info_dict.get(video_id, {}) \
-            .get('hudong_info', {}) \
-            .get('视频分析', {}) \
-            .get('has_bgm', False)
+            .get('extra_info', {}) \
+            .get('is_contains_bgm', False)
 
         if not has_bgm:
             need_bgm_count += 1

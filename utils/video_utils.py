@@ -823,7 +823,8 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
         "-color_primaries", "bt709",
         "-color_trc", "bt709",
         "-color_range", "tv",
-        "-c:a", "aac", "-b:a", "128k",
+        "-c:a", "aac", "-b:a", "320k", "-ar", "48000",
+
         output_path
     ]
 
@@ -1522,7 +1523,7 @@ def add_text_overlays_to_video(
     full_cmd = base_cmd + [
         '-filter_complex', ";".join(filter_complex),
         '-map', last_video_stream, '-map', '0:a?',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'aac',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-c:a', 'copy',
         output_video_path
     ]
 
@@ -1785,7 +1786,7 @@ def redub_video_with_ffmpeg(video_path: str,
 
             encoding_cmd = [
                 "-c:v", "libx264", "-preset", "veryfast",
-                "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", temp_output_path
+                "-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-ac", "2", temp_output_path
             ]
 
             cmd = base_cmd + map_args + encoding_cmd
@@ -2813,7 +2814,7 @@ def add_text_adaptive_padding(input_video_path, output_video_path, text_events, 
         '-filter_complex', f"[0:v]{full_filter_chain}[outv]",
         '-map', '[outv]', '-map', '0:a?',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
-        '-c:a', 'aac', '-y', output_video_path
+        '-c:a', 'copy', '-y', output_video_path # 改为 copy
     ]
     print("即将执行的 FFmpeg 命令:")
     print(shlex.join(command))
@@ -3173,6 +3174,7 @@ def add_transparent_watermark(
             '-filter_complex', filter_complex,
             '-c:v', 'libx264',  # 显式指定编码器
             '-crf', '23',  # 近无差别质量；需要更好则减小（比如16或0）
+            '-c:a', 'copy',
             # '-preset', 'ultrafast',  # 均衡速度/质量；开发时可用 veryslow
             '-y',
             output_path

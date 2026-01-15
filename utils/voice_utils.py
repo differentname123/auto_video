@@ -1,78 +1,110 @@
-# 修正版：使用 silero_vad 的当前接口，并包含能量微调与容错
-from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
+import subprocess
 import librosa
 import numpy as np
-import sys
+import os
 
-AUDIO_PATH = 'temp/vocals.wav'   # <-- 确保和下面 librosa.load 使用的是同一文件
 
-# 1) load model (不要解包)
-model = load_silero_vad()
-
-# 2) read audio for VAD using package helper (silero expects 16k mono)
-wav = read_audio(AUDIO_PATH)   # 返回 numpy array (float32)，采样率已变为 16k（silero 内部做了处理）
-# 若 read_audio 返回 torch.Tensor，则转为 numpy（下面做了兼容）
-if hasattr(wav, "numpy"):
+def analyze_audio_purity(video_path):
+    temp_audio = "temp_audio_sample.wav"
+    max_duration=120
     try:
-        wav = wav.numpy()
-    except Exception:
-        wav = np.asarray(wav)
+        # 1. 使用 FFmpeg 提取音频
+        # -t: 限制持续时间 (这里设置为 60秒)
+        # -vn: 禁用视频
+        # -ar: 采样率固定 44100
+        # -ac: 单声道 (混合声道更容易发现整体噪点)
+        command = [
+            'ffmpeg', '-y',
+            '-i', video_path,
+            '-vn',
+            '-t', str(max_duration),  # <--- 核心修改：只截取前60秒
+            '-ar', '44100',
+            '-ac', '1',
+            temp_audio
+        ]
 
-# 3) get speech timestamps (秒)
-speech_ts = get_speech_timestamps(wav, model, return_seconds=True)
+        # 执行命令，捕获错误以便调试
+        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
 
-if not speech_ts:
-    print("No speech segments detected.")
-    sys.exit(0)
+        # 2. 使用 librosa 加载音频
+        # 即使 ffmpeg 没切准，这里也可以加 duration 参数作为双重保险
+        if not os.path.exists(temp_audio):
+            return {"error": "音频提取失败，临时文件未生成"}
 
-# 4) 合并短停顿为“句”（示例阈值 0.35s）
-records = []
-pause_thresh = 0.35
-cur_start = speech_ts[0]['start']
-cur_end = speech_ts[0]['end']
-for s in speech_ts[1:]:
-    if s['start'] - cur_end >= pause_thresh:
-        records.append({'start': cur_start, 'end': cur_end})
-        cur_start = s['start']
-        cur_end = s['end']
-    else:
-        cur_end = s['end']
-records.append({'start': cur_start, 'end': cur_end})
+        y, sr = librosa.load(temp_audio, sr=44100)
 
-# 5) 用 librosa 重新加载音频用于短时能量微调（保证 sr=16000）
-y, sr = librosa.load(AUDIO_PATH, sr=16000, mono=True)
-hop = 0.01                        # 帧移 10ms
-frame_len = int(0.02 * sr)        # 帧长 20ms
+        # 防止空音频或极短音频导致的计算错误
+        if len(y) < sr * 0.5:  # 只有不到0.5秒
+            return {"error": "音频过短，无法有效分析"}
 
-for r in records:
-    center = int(r['end'] * sr)
-    w = int(0.2 * sr)             # ±0.2s 搜索窗口
-    start = max(0, center - w)
-    stop = min(len(y), center + w)
-    seg = y[start:stop]
+        # 3. 计算频谱平坦度 (Spectral Flatness)
+        # 越接近 1，表示越像白噪声（沙沙声）
+        flatness = librosa.feature.spectral_flatness(y=y)
+        avg_flatness = np.mean(flatness)
 
-    # 如果片段太短，直接用原 end
-    if len(seg) < frame_len + 1:
-        r['end_refined'] = r['end']
-        continue
+        # 4. 计算高频能量占比 (Roll-off Frequency)
+        # 刺耳声音通常会导致截止频率升高
+        rolloff = librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85)
+        avg_rolloff = np.mean(rolloff)
 
-    # 将段分帧并计算 short-time energy
-    hop_n = int(hop * sr)
-    try:
-        frames = librosa.util.frame(seg, frame_length=frame_len, hop_length=hop_n).T
-    except Exception:
-        # 防御：若 frame 失败（长度等问题），直接不调整
-        r['end_refined'] = r['end']
-        continue
+        # 5. 计算静音部分的底噪 (核心检测点)
+        # 计算均方根能量 (RMS)
+        rms = librosa.feature.rms(y=y)
+        # 找到能量最低的 20% 片段（认为是静音或说话间隙）
+        # 如果前1分钟全是说话，这个指标可能会略高，但在同类视频对比中依然公平
+        low_energy_threshold = np.percentile(rms, 20)
+        low_energy_idx = np.where(rms <= low_energy_threshold)
 
-    ste = (frames ** 2).sum(axis=1)
-    min_i = int(np.argmin(ste))
-    adj_sample = start + min_i * hop_n
-    adj_time = adj_sample / sr
-    # 保证微调后不超过原来 end + 0.3s 或小于 start
-    adj_time = max(r['start'], min(adj_time, r['end'] + 0.3))
-    r['end_refined'] = adj_time
+        if len(low_energy_idx[1]) > 0:
+            # 只取低能量片段的平坦度平均值
+            noise_floor_flatness = np.mean(flatness[:, low_energy_idx[1]])
+        else:
+            noise_floor_flatness = avg_flatness
 
-# 输出结果
-for i, r in enumerate(records):
-    print(f"segment {i}: start={r['start']:.3f}s  end_raw={r['end']:.3f}s  end_refined={r.get('end_refined', r['end']):.3f}s")
+        # 6. 综合评分 (逻辑：平坦度权重 + 高频权重)
+        # 这个系数是经验值，用来放大差异
+        purity_score = (avg_flatness * 1000) + (avg_rolloff / 500) + (noise_floor_flatness * 500)
+
+        return {
+            "file": os.path.basename(video_path),
+            "avg_flatness": float(avg_flatness),
+            "avg_rolloff_hz": float(avg_rolloff),
+            "noise_floor_flatness": float(noise_floor_flatness),
+            "impurity_index": float(purity_score)
+        }
+
+    except subprocess.CalledProcessError as e:
+        # 捕获 FFmpeg 报错
+        return {"error": f"FFmpeg error: {e.stderr.decode('utf-8', errors='ignore')}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+    finally:
+        if os.path.exists(temp_audio):
+            os.remove(temp_audio)
+
+
+if __name__ == "__main__":
+    video_file_list = [r"W:\project\python_project\auto_video\videos\material\7492752531630705939\7492752531630705939_origin.mp4",
+                       r"W:\project\python_project\auto_video\videos\material\7492752531630705939\7492752531630705939_static_cut.mp4",
+                       r"W:\project\python_project\auto_video\videos\material\7492752531630705939\7492752531630705939_image_text.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\all_scene.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\title.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\ending.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\watermark.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\final_remake.mp4",
+                       r"W:\project\python_project\auto_video\videos\task\7492752531630705939\6968c05fe22dbe4a9bd482ed\final_remake - 副本.mp4"
+
+                       ]
+    for video_file in video_file_list:
+        result = analyze_audio_purity(video_file)
+        video_name = os.path.basename(video_file)
+
+        if "error" not in result:
+            print(f"\n\n分析结果:{video_name}")
+            print(f"  频谱平坦度 (0-1): {result['avg_flatness']:.6f} (越大沙沙声越重)")
+            print(f"  高频截止点 (Hz): {result['avg_rolloff_hz']:.2f}")
+            print(f"  底噪平坦度: {result['noise_floor_flatness']:.6f}")
+            print(f"  综合杂质指数: {result['impurity_index']:.2f}")
+        else:
+            print(f"错误: {result['error']}")

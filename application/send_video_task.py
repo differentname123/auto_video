@@ -311,7 +311,9 @@ def send_good_video():
 
     # 梳理出 send_count 大于0的用户
     fail_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] <= 0}
+    success_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] > 0}
     print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要 {total_need_count} 个视频 {user_type_count_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(success_user_count_info)
     print(fail_user_count_info)
     print(user_count_info)
 
