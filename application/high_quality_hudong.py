@@ -672,7 +672,7 @@ def statistic_good_video(tasks):
                 task_info['average_info'] = average_info
                 task_info['same_count'] = len(task_list)
                 task_info['aggregated_info'] = aggregated_info
-                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['same_count'] * task_info['average_info'].get('平均播放量')
+                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['average_info'].get('平均播放量')
                 if task_info['same_count'] < 2:
                     task_info['final_score'] *= 0.5
             if task_info['final_score'] < 1000:
@@ -751,7 +751,7 @@ def statistic_good_video(tasks):
 
     # 过滤出unique_final_good_task_list中same_count大于1的任务
     # filter_task_list = [task_info for task_info in unique_final_good_task_list if task_info.get('same_count', 0) > 1]
-    # unique_final_good_task_list.sort(key=lambda x: x.get('final_score', []), reverse=True)
+    # sorted(unique_final_good_task_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
     # 过滤出unique_final_good_task_list中final_score不存在的任务
     # unique_final_good_task_list = [task_info for task_info in unique_final_good_task_list if task_info.get('final_score', 0) > 0]
     good_tags_info = {}
