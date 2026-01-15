@@ -582,7 +582,7 @@ def statistic_good_video(tasks):
         create_time = task_info.get('created')
         if create_time:
             if len(play_comment_info_list) < 5 and (time.time() - create_time) > 4 * 3600:
-                print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
+                # print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
                 continue
             play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, interval_minutes=60, max_elapsed_minutes=1500)
             if play_count_info:
@@ -639,7 +639,7 @@ def statistic_good_video(tasks):
                     continue
                 play_comment_info_list = task_info.get('play_comment_info_list', [])
                 if len(play_comment_info_list) < 5 and (time.time() - create_time) > 4 * 3600:
-                    print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
+                    # print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
                     continue
                 all_tasks_list.append(task_info)
                 video_id_list = task_info.get('video_id_list', [])

@@ -249,8 +249,8 @@ def send_good_video():
             print(f"用户 {user_name} 为简化用户，今日需要处理 {total_need_count} 个任务。")
             continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
-        target_count = 1
-        need_count = min(max(target_count - total_count, 0), 0)
+        target_count = 2
+        need_count = max(target_count - total_count, 0)
         user_count_info[user_name]['need_count'] = need_count
         total_need_count += need_count
         user_count_info[user_name]['send_count'] = 0
@@ -287,7 +287,7 @@ def send_good_video():
     for video_info in final_video_list:
         final_score = video_info.get('final_score', 0)
         target_user_name = video_info.get('target_user_name', 'dahao')
-        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count'] and final_score < 20000:
+        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count'] and final_score < 10000:
             print(f"用户 {target_user_name} 已达到今日发送目标，跳过后续视频。")
             continue
         creation_guidance_info = video_info.get('creation_guidance_info')
