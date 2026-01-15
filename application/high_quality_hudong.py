@@ -579,6 +579,9 @@ def statistic_good_video(tasks):
         play_comment_info_list = task_info.get('play_comment_info_list', [])
         create_time = task_info.get('created')
         if create_time:
+            if len(play_comment_info_list) < 5 and (time.time() - create_time) > 4 * 3600:
+                print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
+                continue
             play_count_info = get_simple_play_distribution(play_comment_info_list, create_time, interval_minutes=60, max_elapsed_minutes=1500)
             if play_count_info:
                 user_name = task_info.get('userName', '未知用户')
@@ -618,7 +621,7 @@ def statistic_good_video(tasks):
             task_info['play_count_info'] = copy_play_count_info
 
 
-    time_diff_list = [6, 12, 24, 32, 48, 72, 144]
+    time_diff_list = [6, 12, 24, 36, 48, 60, 72,84,96,108,120,132, 144]
     final_good_task_list = []
     for time_diff in time_diff_list:
         same_video_tasks_info = {}
@@ -631,6 +634,10 @@ def statistic_good_video(tasks):
             create_time = task_info.get('created')
             if create_time:
                 if pre_timestamp > create_time:
+                    continue
+                play_comment_info_list = task_info.get('play_comment_info_list', [])
+                if len(play_comment_info_list) < 5 and (time.time() - create_time) > 4 * 3600:
+                    print(f"任务 {task_info.get('video_id_list', [])} 播放量数据不足，跳过统计。")
                     continue
                 all_tasks_list.append(task_info)
                 video_id_list = task_info.get('video_id_list', [])
@@ -668,7 +675,7 @@ def statistic_good_video(tasks):
                 task_info['average_info'] = average_info
                 task_info['same_count'] = len(task_list)
                 task_info['aggregated_info'] = aggregated_info
-                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['same_count'] * task_info['average_info'].get('平均播放量')
+                task_info['final_score'] = task_info['average_info'].get('平均历史比例') * task_info['same_count'] * task_info['average_info'].get('平均播放量')
                 if task_info['same_count'] < 2:
                     task_info['final_score'] *= 0.5
             if task_info['final_score'] < 1000:
@@ -852,9 +859,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    # config_map = init_config()
-    # mid_list = config_map.keys()
-    # block_all_author(mid_list, action_type=6)
+    config_map = init_config()
+    mid_list = config_map.keys()
+    block_all_author(mid_list, action_type=6)
 
     # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
 

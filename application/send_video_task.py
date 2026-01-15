@@ -285,8 +285,9 @@ def send_good_video():
     success_count = 0
     print(user_count_info)
     for video_info in final_video_list:
+        final_score = video_info.get('final_score', 0)
         target_user_name = video_info.get('target_user_name', 'dahao')
-        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count']:
+        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count'] and final_score < 20000:
             print(f"用户 {target_user_name} 已达到今日发送目标，跳过后续视频。")
             continue
         creation_guidance_info = video_info.get('creation_guidance_info')
