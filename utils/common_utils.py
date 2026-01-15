@@ -1148,3 +1148,45 @@ def get_user_type(user_name):
             return user_type
     return user_type
 
+
+def has_continuous_common_substring(list1, list2, threshold):
+    """
+    判断两个列表中是否存在一对字符串，其连续公共子串长度 > threshold
+    即：是否存在长度为 threshold + 1 的连续公共子串
+    """
+    # 我们要寻找的连续长度至少是 threshold + 1
+    target_len = threshold + 1
+    found_any = False
+
+    # 为了方便查找，我们先记录 list1 中所有子串及其来源
+    # 格式：{子串: [来源字符串1, 来源字符串2...]}
+    sub_map1 = {}
+    for s1 in list1:
+        if len(s1) >= target_len:
+            for i in range(len(s1) - target_len + 1):
+                sub = s1[i: i + target_len]
+                if sub not in sub_map1:
+                    sub_map1[sub] = set()
+                sub_map1[sub].add(s1)
+
+    # 存储找到的结果，防止重复打印
+    results = []
+
+    # 遍历 list2 进行比对
+    for s2 in list2:
+        if len(s2) >= target_len:
+            for i in range(len(s2) - target_len + 1):
+                sub = s2[i: i + target_len]
+                if sub in sub_map1:
+                    found_any = True
+                    # 获取该子串在 list1 中的所有来源字符串
+                    for s1_origin in sub_map1[sub]:
+                        match_info = {
+                            "substring": sub,
+                            "from_list1": s1_origin,
+                            "from_list2": s2
+                        }
+                        if match_info not in results:
+                            results.append(match_info)
+
+    return found_any, results

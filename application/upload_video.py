@@ -136,7 +136,7 @@ def check_type(task_info, user_config):
             video_type = "game"
         elif "运动" in category_name_list_str or "体育" in category_name_list_str:
             video_type = "sport"
-        elif "搞笑" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
+        elif "搞笑" in category_name_list_str or "小剧场" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
             video_type = "fun"
         task_info['video_type'] = video_type
     user_type = "other"
