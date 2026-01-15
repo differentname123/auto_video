@@ -688,7 +688,7 @@ def statistic_good_video(tasks):
                     best_external_task = next((t for t in temp_task_list if t.get('userName') not in self_user_list),None)
                     if best_external_task:
                         real_good_video_list.append(best_external_task)
-                        print(f"在用户 {top_task.get('userName')} 的视频中，找到了自有账号，加入了外部账号用户 {best_external_task.get('userName')} {best_external_task.get('upload_params').get('title')} 的视频。")
+                        # print(f"在用户 {top_task.get('userName')} 的{top_task.get('upload_params').get('title')}视频中，找到了自有账号，加入了外部账号用户 {best_external_task.get('userName')} {best_external_task.get('upload_params').get('title')} 的视频。")
 
         for task_info in real_good_video_list:
             user_name = task_info.get('userName', '未知用户')
@@ -699,7 +699,7 @@ def statistic_good_video(tasks):
 
 
         print(f"在过去 {time_diff} 小时内，共发现 {len(real_good_video_list)} 个素材的视频。满足时间要求的任务数量为{len(all_tasks_list)}")
-        need_count = 5
+        need_count = 10
         for user_type, task_list in video_type_tasks_info.items():
             temp_task_list = sorted(task_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
             for i, task_info in enumerate(temp_task_list[:need_count]):
@@ -879,9 +879,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    config_map = init_config()
-    mid_list = config_map.keys()
-    block_all_author(mid_list, action_type=6)
+    # config_map = init_config()
+    # mid_list = config_map.keys()
+    # block_all_author(mid_list, action_type=6)
 
     # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
 
