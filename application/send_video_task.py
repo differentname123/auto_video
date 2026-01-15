@@ -241,16 +241,17 @@ def send_good_video():
     total_need_count = 0
     for user_name in need_process_users:
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
+        platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
         if user_name in simple_need_process_users:
-            user_count_info[user_name]['need_count'] = max(1 - total_count, 0)
-            total_need_count += max(1 - total_count, 0)
+            user_count_info[user_name]['need_count'] = max(1 - total_count - platform_upload_count, 0)
+            total_need_count += max(1 - total_count - platform_upload_count, 0)
             user_count_info[user_name]['send_count'] = 0
-            print(f"用户 {user_name} 为简化用户，今日需要处理 1 个任务。")
+            print(f"用户 {user_name} 为简化用户，今日需要处理 {total_need_count} 个任务。")
             continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
-        target_count = 30
-        need_count = min(max(target_count - total_count, 0), 1)
-        user_count_info[user_name]['need_count'] = 1
+        target_count = 1
+        need_count = min(max(target_count - total_count, 0), 0)
+        user_count_info[user_name]['need_count'] = need_count
         total_need_count += need_count
         user_count_info[user_name]['send_count'] = 0
         print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
@@ -309,7 +310,7 @@ def send_good_video():
 
     # 梳理出 send_count 大于0的用户
     fail_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] <= 0}
-    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要{total_need_count} 个视频 {user_type_count_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要 {total_need_count} 个视频 {user_type_count_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(fail_user_count_info)
     print(user_count_info)
 
