@@ -652,7 +652,8 @@ def process_idle_tasks(
         futures: List[concurrent.futures.Future],
         config_map: dict,
         user_config: dict,
-        manager
+        manager,
+        processed_task_ids
 ):
     """
     利用上传等待的空闲时间，处理未生成视频的任务
@@ -665,7 +666,7 @@ def process_idle_tasks(
     for task_info in tasks:
         bvid = task_info.get('bvid', '')
         status = task_info.get('status')
-        if bvid or status == TaskStatus.UPLOADED:
+        if bvid or status == TaskStatus.UPLOADED or task_info.get('_id') in processed_task_ids:
             print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
             continue
 
@@ -846,6 +847,7 @@ def auto_upload(manager):
     if stop_flag:
         print("检测到停止投稿开关已开启，暂停本轮投稿。")
         return
+    processed_task_ids = set()
 
     start_time = time.time()
     all_task = []
@@ -909,6 +911,7 @@ def auto_upload(manager):
             video_info_dict
         )
         futures.append(future)
+        processed_task_ids.add(str(task_info.get('_id')))
         already_upload_users.append(user_name)
 
     # 3. 【重构点】利用上传间隙，处理未生成视频的任务
@@ -918,7 +921,8 @@ def auto_upload(manager):
         futures=futures,
         config_map=config_map,
         user_config=user_config,
-        manager=manager
+        manager=manager,
+        processed_task_ids=processed_task_ids
     )
 
     # 4. 收尾与统计

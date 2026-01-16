@@ -27,10 +27,11 @@ from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box
+from utils.paddle_ocr_base import run_subtitle_ocr
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
     add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark, \
-    save_frames_around_timestamp
+    save_frames_around_timestamp, save_frames_around_timestamp_ffmpeg
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -1189,13 +1190,41 @@ def gen_video_by_script(task_info, video_info_dict):
     cost_time_info['生成视频耗时'] = time.time() - start_time
     return failure_details, chosen_script, cost_time_info
 
+def fix_owner_asr_by_subtitle(video_info):
+    """
+    通过字幕纠正说话人的准确声音
+    :param video_info:
+    :return:
+    """
+    owner_asr_info_list = video_info.get('owner_asr_info', [])
+    if not owner_asr_info_list:
+        owner_asr_info_list = []
+
+    # 判断是否有owner的asr信息
+    has_owner_asr = any(asr_info.get('speaker') == 'owner' for asr_info in owner_asr_info_list)
+    if not has_owner_asr:
+        return owner_asr_info_list
+    all_video_path_info = build_video_paths(video_id)
+    video_path = all_video_path_info.get('low_resolution_video_path')
+    video_filename = os.path.splitext(os.path.basename(video_path))[0]
+    output_dir = os.path.join(os.path.dirname(video_path), f'{video_filename}_scenes')
+    # 并且做好日志记录，特别是一些异常的信息，方便回溯复盘知道缺陷在哪
+    for asr_info in owner_asr_info_list:
+        timestamp = 33826
+        image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
+
+        result_json = run_subtitle_ocr(image_path_list)
+
+        print(f"\n\n{result_json}")
+        break
+
 
 if __name__ == "__main__":
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
     # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    video_info_list = manager.find_materials_by_ids(['7319123834186075411'])
+    video_info_list = manager.find_materials_by_ids(['7595139090560918117'])
     for video_info in video_info_list:
         video_id = video_info.get('video_id')
-        _process_single_video(video_id, video_info, True)
+        fix_owner_asr_by_subtitle(video_info)

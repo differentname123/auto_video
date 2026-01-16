@@ -224,8 +224,8 @@ def send_good_video(manager):
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu']
-    simple_need_process_users = ['yang', 'xue', 'danzhu']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
+    simple_need_process_users = ['yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
 
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
@@ -291,6 +291,8 @@ def send_good_video(manager):
         exist_tasks = manager.find_by_custom_query(manager.tasks_collection, query_2)
         upload_params = video_info.get('upload_params', {})
         title = upload_params.get('title', '变得有吸引力一点')
+        if "太太当腻了？章泽天新播" in title:
+            print()
         create_time_list = [task_info.get('created', 0) for task_info in exist_tasks]
         max_timestamp = max(create_time_list)
         can_use_count = max(single_count - len(exist_tasks), 0)
@@ -346,7 +348,7 @@ def send_good_video(manager):
         }
 
         play_comment_info_list = video_info.get('play_comment_info_list')
-        print(f"正在往 {target_user_name} 发送 {title}  数据为 {play_comment_info_list[-1]} final_score：{final_score} ")
+        print(f"正在往 {target_user_name} 发送 {title}  数据为 {play_comment_info_list[-1]} final_score：{final_score} same_count: {video_info.get("same_count")}   video_id_list: {video_info.get('video_id_list')} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
         data_info = send_good_video_quest(play_load)
         if '新任务已成功创建' in str(data_info):
             user_count_info[target_user_name]['send_count'] += 1
@@ -356,8 +358,11 @@ def send_good_video(manager):
     fail_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] <= 0}
     success_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] > 0}
     need_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] > 0}
+    other_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] != v['send_count']}
+
     print(f"总共收集了 {len(final_video_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要 {total_need_count} 个视频 {user_type_count_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"需要的用户详情{need_user_count_info}")
+    print(f"没完成目标用户详情{other_user_count_info}")
     print(f"有成功的用户详情{success_user_count_info}")
     print(f"没发送视频用户详情{fail_user_count_info}")
     print(f"完整的用户详情{user_count_info}")
