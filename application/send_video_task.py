@@ -224,7 +224,7 @@ def send_good_video(manager):
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', 'ping', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu']
     simple_need_process_users = ['yang', 'xue', 'danzhu']
 
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)

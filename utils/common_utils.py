@@ -530,7 +530,7 @@ def init_config():
         '3632314758203558': 'xiaocai',
         '1516147639': 'qizhu',
         # '3632318595991783': 'xiaomu',
-        "3546971140786786": 'ping',
+        # "3546971140786786": 'ping',
         # "3690972028340306": 'xiu',
         "3690971298531782": 'zhong'
 
@@ -849,7 +849,7 @@ def filter_danmu(danmu_list, total_seconds):
         if isinstance(item.get('推荐弹幕内容'), list):
             processed_danmu_count += len(item['推荐弹幕内容'])
 
-    target_num = 25
+    target_num = 20
     # === 第二步（新增逻辑）：检查弹幕数量并补足到25条 ===
     num_to_add = target_num - processed_danmu_count
     num_to_add = min(num_to_add, len(common_danmu_list))  # 避免超出通用池范围

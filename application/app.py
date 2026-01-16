@@ -712,6 +712,7 @@ def process_video_data(data: dict, video_type: str, user_name) -> dict:
 
         # 过滤掉final_good_task_list中userName在self_user_list中的任务
         filtered_videos = [task_info for task_info in filtered_videos if task_info.get('userName', '') not in self_user_list]
+        filtered_videos = [task_info for task_info in filtered_videos if task_info.get('final_score', 0) > 100]
 
         # 第三步：取前 5 个，并提取 title 和 bvid
         for video in filtered_videos[:5]:

@@ -136,7 +136,7 @@ def check_type(task_info, user_config):
             video_type = "game"
         elif "运动" in category_name_list_str or "体育" in category_name_list_str:
             video_type = "sport"
-        elif "搞笑" in category_name_list_str or "小剧场" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
+        elif "音乐" in category_name_list_str or "动物" in category_name_list_str or "搞笑" in category_name_list_str or "小剧场" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
             video_type = "fun"
         task_info['video_type'] = video_type
     user_type = "other"
@@ -539,16 +539,18 @@ def print_simple_stats(statistic_data):
         print("暂无统计数据")
         return
     header = (
-        "用户名            "  # 6个空格
-        "  今日已投 "  # 2个空格
-        "  平台存量 "  # 2个空格
-        "  准备就绪 "  # 2个空格
-        "  今日待传   "  # 2个空格
-        "  明日待传 "  # 2个空格
-        "         最近上传时间"  # 9个空格
+        "用户名            "  # 12
+        "  今日已投 "  # 10
+        "  平台存量 "  # 10
+        "  准备就绪 "  # 10
+        "  今日待传   "  # 10
+        "  明日待传 "  # 10
+        "  上次距今分钟"  # 14 (新增列)
+        "         最近上传时间"  # 21
     )
 
-    separator = "-" * 83
+    # 原长度83 + 新增列宽14 = 97
+    separator = "-" * 97
 
     print(separator)
     print(header)
@@ -562,7 +564,22 @@ def print_simple_stats(statistic_data):
 
     for user in sorted_users:
         info = statistic_data[user]
-        time_str = str(info.get('latest_upload_time') or '-')
+        raw_time = info.get('latest_upload_time')
+        time_str = str(raw_time or '-')
+
+        # --- 新增计算逻辑 ---
+        minutes_str = '-'
+        if raw_time and isinstance(raw_time, str) and raw_time != '-':
+            try:
+                # 解析时间字符串 '2026-01-16 18:18:14'
+                dt_obj = datetime.strptime(raw_time, "%Y-%m-%d %H:%M:%S")
+                # 计算时间差
+                delta = datetime.now() - dt_obj
+                # 转换为分钟 (总秒数 // 60)
+                minutes_str = str(int(delta.total_seconds() // 60))
+            except ValueError:
+                pass  # 解析失败则保持为 '-'
+        # ------------------
 
         # 这里保持全是 ASCII 字符（英文/数字），所以 Python 的宽度计算是准确的
         row = (
@@ -572,6 +589,7 @@ def print_simple_stats(statistic_data):
             f"{info.get('tobe_upload_count', 0):>10}"  # 对应 "  准备就绪"
             f"{info.get('today_process', 0):>10}"  # 对应 "  今日待传"
             f"{info.get('tomorrow_process', 0):>10}"  # 对应 "  明日待传"
+            f"{minutes_str:>14}"  # 对应 "  上次距今分钟" (新增)
             f"{time_str:>21}"  # 对应 "         最近上传时间"
         )
         print(row)
