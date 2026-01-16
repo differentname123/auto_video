@@ -180,7 +180,7 @@ def auto_send():
         save_json(used_video_file, used_video_list)
 
 def send_good_video_quest(payload):
-    url = "http://127.0.0.1:5002/one-click-generate"
+    url = "http://127.0.0.1:5001/one-click-generate"
 
     # 构造请求头
     headers = {
@@ -230,6 +230,8 @@ def send_good_video(manager):
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
     good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
+    good_video_list = sorted(good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
+
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     user_type_info = user_config.get('user_type_info', {})
     user_tags_info = user_config.get('user_tags', {})
@@ -296,7 +298,7 @@ def send_good_video(manager):
         if (int(time.time()) - max_timestamp) > 24 * 3600:
             can_use_count = max(single_count - len(exist_tasks), 1)
             print(f"{title} 超过24小时，允许再创建一个任务 最近的时间为 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(max_timestamp))} ")
-
+        can_use_count = min(2, can_use_count)
 
         print(f"{title} final_score:{final_score} {user_type} 总共能够发送 {single_count} 个任务，当前已有 {len(exist_tasks)}，最终还能够创建 {can_use_count} 个任务")
         set_user_list = set(user_list)

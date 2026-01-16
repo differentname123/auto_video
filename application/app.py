@@ -123,33 +123,37 @@ def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
         'extra_info': video_item
     }
 
-def build_publish_task_data(user_name: str, global_settings: Dict, materials: List[Dict],
-                            original_video_list: List[Dict]) -> Dict:
-    """构建发布任务的存库数据结构"""
-    video_id_list = [m['video_id'] for m in materials]
 
-    # 构建 original_url_info_list (将原始URL映射到解析后的video_id)
-    successful_urls = {}
-    for m in materials:
-        original_url = m.get('base_info', {}).get('original_url')
-        if original_url:
-            successful_urls[original_url] = m['video_id']
+def build_publish_task_data(user_name: str, global_settings: Dict, materials: List[Dict],
+                            original_video_list: List[Dict], url_to_id_map: Dict[str, str]) -> Dict:
+    """
+    构建发布任务的存库数据结构
+    [修复] 增加 url_to_id_map 参数，解决输入URL与库中URL不一致导致列表为空的问题
+    """
+    # 1. 获取本次任务所有有效的 video_id 集合
+    valid_video_ids = set(m['video_id'] for m in materials)
 
     url_info_list = []
 
+    # 2. 遍历用户输入的原始列表
     for item in original_video_list:
-        url = item.get('original_url')
-        if url in successful_urls:
+        input_url = item.get('original_url', '').strip()  # 记得 strip，保持一致
+
+        # 从本次解析的 map 中获取 ID (这是最准确的对应关系)
+        vid = url_to_id_map.get(input_url)
+
+        # 3. 只有当这个 ID 存在于本次有效的 materials 中时，才加入列表
+        if vid and vid in valid_video_ids:
             info_item = item.copy()
-            info_item['video_id'] = successful_urls[url]
+            info_item['video_id'] = vid
             url_info_list.append(info_item)
 
     return {
-        'video_id_list': video_id_list,
+        'video_id_list': list(valid_video_ids),
         'userName': user_name,
         'status': TaskStatus.PROCESSING,
         'failed_count': 0,
-        'original_url_info_list': url_info_list,
+        'original_url_info_list': url_info_list,  # 此时这里就不会为空了
         'creation_guidance_info': global_settings,
         'new_video_script_info': None,
         'upload_info': None,
@@ -491,7 +495,7 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
     # 5. 保存数据并入队
     try:
         mongo_manager.upsert_materials(valid_materials)
-        task_data = build_publish_task_data(user_name, global_settings, valid_materials, input_video_list)
+        task_data = build_publish_task_data(user_name, global_settings, valid_materials, input_video_list, url_to_id_map)
         mongo_manager.upsert_tasks([task_data])
 
         # =========================================================

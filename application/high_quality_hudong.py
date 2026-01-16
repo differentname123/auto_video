@@ -732,7 +732,7 @@ def statistic_good_video(tasks):
             final_good_task_list.append(task_info)
             task_info['choose_reason'].append(f'全局 {time_diff} 排行第{i+1}名的前5个视频')
 
-    # final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('final_score', 0) > 100]
+    final_good_task_list = [task_info for task_info in final_good_task_list if task_info.get('final_score', 0) > 50]
     # 对final_good_task_list进行去重，按照task_info的bvid去重
     unique_bvids = set()
     unique_final_good_task_list = []
