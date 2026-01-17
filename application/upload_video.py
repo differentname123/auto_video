@@ -666,7 +666,7 @@ def process_idle_tasks(
     for task_info in tasks:
         bvid = task_info.get('bvid', '')
         status = task_info.get('status')
-        if bvid or status == TaskStatus.UPLOADED or task_info.get('_id') in processed_task_ids:
+        if bvid or status == TaskStatus.UPLOADED or str(task_info.get('_id')) in processed_task_ids:
             print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
             continue
 
