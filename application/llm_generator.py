@@ -281,9 +281,6 @@ def calculate_closest_cut_point(timestamp_text_map, anchor_timestamp):
     # --- 步骤 3: 找到距离锚点最近的跳变点 (逻辑 1 & 2) ---
     # 使用 min 函数，key 为与 anchor_timestamp 的绝对距离
     closest_point = min(jump_candidates, key=lambda t: abs(t - anchor_timestamp))
-
-    # print(f"锚点: {anchor_timestamp}, 检测到的跳变候选: {jump_candidates}, 最终选择: {closest_point}")
-
     return closest_point
 
 
