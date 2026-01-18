@@ -724,7 +724,7 @@ def clip_video_ms(
 
     except subprocess.CalledProcessError as e:
         # 如果 ffmpeg 返回非零退出码，说明出错了
-        error_message = f"ffmpeg 执行出错：\n{e.stderr}"
+        error_message = f"ffmpeg 执行出错：\n{e.stderr} 完整命令\n{command}"
         print(error_message)
         return False, error_message
 

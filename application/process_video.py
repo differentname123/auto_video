@@ -887,11 +887,11 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  '_id': ObjectId("696668bae22dbe4a9bd47fe7")
+  '_id': ObjectId("69689b57e22dbe4a9bd4829e")
 }
-    recover_task()
+    # recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
+        process_single_task(task_info, manager, gen_video=False)
         break

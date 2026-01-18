@@ -278,7 +278,12 @@ def query_google_ai_studio(prompt: str, file_path: Optional[str] = None, user_da
                         # '--start-maximized',
 
                         '--no-sandbox',
-                        '--disable-dev-shm-usage'
+                        '--disable-dev-shm-usage',
+                        '--disable-renderer-backgrounding',  # 禁止渲染器后台运行
+                        '--disable-background-timer-throttling',  # 禁止后台计时器节流
+                        '--disable-backgrounding-occluded-windows',  # 禁止被遮挡窗口后台化
+                        '--disable-features=CalculateNativeWinOcclusion',  # 关键：禁止计算窗口遮挡（即使移出屏幕也视为可见）
+                        '--disable-breakpad',  # 禁用崩溃报告，减少干扰
                     ],
                     ignore_default_args=["--enable-automation"]
                 )

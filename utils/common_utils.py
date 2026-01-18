@@ -390,7 +390,7 @@ def check_timestamp(all_timestamps, duration):
     return ""
 
 
-def get_remaining_segments(duration_ms, remove_segments):
+def get_remaining_segments(duration_ms, remove_segments, min_duration=1):
     """
     计算删除指定时间段后的视频保留区间（左闭右开区间 [start, end)）。
 
@@ -400,13 +400,16 @@ def get_remaining_segments(duration_ms, remove_segments):
       - 返回值为按时间升序的非重叠保留区间列表 [(start, end), ...]
 
     参数：
-      duration_ms    - 视频总时长（毫秒），应为非负整数
-      remove_segments - 要删除的时间段列表，例如 [(1000, 30000), (60000, 90000)]
+      duration_ms    - 视频总时长（毫秒或秒），应为非负数
+      remove_segments - 要删除的时间段列表，例如 [(10, 30), (60, 90)]
+      min_duration    - [新增] 最小保留片段时长，默认为 0.1。
+                        用于过滤因浮点数精度导致的极微小片段（防止 FFmpeg 报错 -ss >= -to）
     """
     # 边界与空输入处理
     if duration_ms <= 0:
         return []
     if not remove_segments:
+        # 如果总时长也小于最小阈值，理论上不应保留，但在空删除列表情况下通常保留原视频
         return [(0, duration_ms)]
 
     # 1) 规范化并裁剪删除区间到视频范围内，丢弃无效区间
@@ -444,12 +447,14 @@ def get_remaining_segments(duration_ms, remove_segments):
     remaining = []
     prev_end = 0
     for s, e in merged:
-        if prev_end < s:
+        # 【修改点】只有当片段长度大于阈值时才保留，避免浮点数精度产生 0 秒片段
+        if s - prev_end >= min_duration:
             remaining.append((prev_end, s))
         prev_end = e
 
     # 视频末尾还有剩余
-    if prev_end < duration_ms:
+    # 【修改点】同上，检查尾部片段长度
+    if duration_ms - prev_end >= min_duration:
         remaining.append((prev_end, duration_ms))
 
     return remaining
