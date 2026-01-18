@@ -2,6 +2,7 @@ import random
 import time
 import traceback
 from collections import defaultdict
+from datetime import datetime
 
 import requests
 import json
@@ -224,7 +225,7 @@ def send_good_video(manager):
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'hong', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
     simple_need_process_users = ['yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
 
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
@@ -253,7 +254,9 @@ def send_good_video(manager):
             print(f"用户 {user_name} 为简化用户，今日需要处理 {total_need_count} 个任务。")
             continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
-        target_count = 3
+        target_count = 5
+        if (5 <= datetime.now().hour < 24):
+            target_count = 2
         need_count = max(target_count - total_count, 0)
         user_count_info[user_name]['need_count'] = need_count
         total_need_count += need_count
