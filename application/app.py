@@ -132,6 +132,7 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
     """
     # 1. 获取本次任务所有有效的 video_id 集合
     valid_video_ids = set(m['video_id'] for m in materials)
+    ordered_video_id_list = [m['video_id'] for m in materials]
 
     url_info_list = []
 
@@ -149,7 +150,7 @@ def build_publish_task_data(user_name: str, global_settings: Dict, materials: Li
             url_info_list.append(info_item)
 
     return {
-        'video_id_list': list(valid_video_ids),
+        'video_id_list': ordered_video_id_list,
         'userName': user_name,
         'status': TaskStatus.PROCESSING,
         'failed_count': 0,
