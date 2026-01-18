@@ -333,3 +333,6 @@ ALL_BVID_FILE = r'W:\project\python_project\auto_video\config\all_bvid_file.json
 COMMENTER_USAFE_FILE = r'W:\project\python_project\auto_video\config\commenter_usage.json'
 
 STATISTIC_PLAY_COUNT_FILE = r'W:\project\python_project\auto_video\config\statistic_play_count.json'
+
+
+BLOCK_VIDEO_BVID_FILE = r'W:\project\python_project\auto_video\config\block_video_bvid_file.json'  # 用于存放被屏蔽的视频bvid列表

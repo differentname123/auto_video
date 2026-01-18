@@ -1031,6 +1031,57 @@ def get_video_comment_user():
             user_list.append(user_name)
     print(f"总共有 {len(user_list)} 个用户有好片推荐任务：\n {user_list}")
 
+
+def get_bilibili_archives(cookie_str, pn=1, ps=10):
+    """
+    获取B站未发布(not_pubed)的稿件列表
+
+    :param cookie_str: 浏览器获取的完整 Cookie 字符串
+    :param pn: 页码 (Page Number)，默认为 1
+    :param ps: 每页数量 (Page Size)，默认为 10
+    :return: 响应的 JSON 数据
+    """
+    url = "https://member.bilibili.com/x/web/archives"
+
+    # 提取查询参数
+    params = {
+        "status": "not_pubed",
+        "pn": str(pn),
+        "ps": str(ps),
+        "coop": "1",
+        "interactive": "1"
+    }
+
+    # 构造请求头
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "accept": "application/json, text/javascript, */*; q=0.01",
+        "accept-language": "zh-CN",
+        "priority": "u=1, i",
+        "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "x-requested-with": "XMLHttpRequest",
+        "referrer": "https://member.bilibili.com/platform/upload-manager/article?page=1",
+        # 核心：将 Cookie 放入 Header 中
+        "Cookie": cookie_str
+    }
+
+    try:
+        response = requests.get(url, params=params, headers=headers)
+        response.raise_for_status()  # 检查 HTTP 错误
+
+        # 返回 JSON 数据
+        return response.json()
+
+    except Exception as e:
+        print(f"请求出错: {e}")
+        return None
+
+
 # --- 主逻辑 ---
 if __name__ == "__main__":
     # config_map = init_config()

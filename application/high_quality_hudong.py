@@ -13,9 +13,9 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from application.video_common_config import TaskStatus, USER_BVID_FILE, ALL_BVID_FILE, COMMENTER_USAFE_FILE, \
-    STATISTIC_PLAY_COUNT_FILE
+    STATISTIC_PLAY_COUNT_FILE, BLOCK_VIDEO_BVID_FILE
 from utils.bilibili.bili_utils import update_bili_user_sign, block_all_author
-from utils.bilibili.comment import BilibiliCommenter
+from utils.bilibili.comment import BilibiliCommenter, get_bilibili_archives
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
 from utils.common_utils import get_config, read_json, init_config, save_json, get_simple_play_distribution, \
@@ -569,8 +569,35 @@ def process_single_hudong_task(task_info, commenter_map, uid):
 
 
 def statistic_good_video(tasks):
-    # 深拷贝一份任务列表，避免修改原始数据
-    new_tasks = [task.copy() for task in tasks]
+
+
+    exist_block_video_info = read_json(BLOCK_VIDEO_BVID_FILE)
+    all_bvid_list = list(exist_block_video_info.keys())
+    query_4 = {
+        "bvid": {
+            "$in": all_bvid_list
+        }
+    }
+    blocked_task_list = manager.find_by_custom_query(manager.tasks_collection, query_4)
+
+    block_video_id_str_list = []
+    for blocked_task_info in blocked_task_list:
+        video_id_list = blocked_task_info.get('video_id_list', [])
+        video_id_key = ','.join(sorted(video_id_list))
+        block_video_id_str_list.append(video_id_key)
+    new_tasks = []
+
+    skip_count = 0
+    for task_info in tasks:
+        video_id_list = task_info.get('video_id_list', [])
+        video_id_key = ','.join(sorted(video_id_list))
+        if video_id_key in block_video_id_str_list:
+            skip_count += 1
+            # print(f"任务 {video_id_list} 在黑名单中，跳过统计。")
+            continue
+        new_tasks.append(task_info.copy())
+    print(f"统计播放量信息，共 {len(new_tasks)} 个任务需要统计。总共任务数: {len(tasks)} 黑名单任务数:{len(block_video_id_str_list)} 跳过任务数: {skip_count}")
+
     filter_tasks = []
     user_task_info = {}
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
@@ -802,6 +829,28 @@ def statistic_good_video(tasks):
     save_json(STATISTIC_PLAY_COUNT_FILE, temp_info)
 
 
+def update_block_video(config_map):
+    """
+    更新被删除的数据信息
+    :param config_map:
+    :return:
+    """
+
+    exist_block_video_info = read_json(BLOCK_VIDEO_BVID_FILE)
+    for uid, target_value in config_map.items():
+        try:
+            arc_video_info = get_bilibili_archives(target_value['total_cookie'])
+            arc_video_list = arc_video_info.get('data', {}).get('arc_audits', [])
+            for arc_video_info in arc_video_list:
+                archive_info = arc_video_info.get('Archive', {})
+                bvid = archive_info.get('bvid', '')
+                exist_block_video_info[bvid] = arc_video_info
+            print(f"获取用户 {uid} 的视频列表完成，共 {len(arc_video_list)} 个视频。")
+            save_json(BLOCK_VIDEO_BVID_FILE, exist_block_video_info)
+        except Exception as e:
+            print(f"获取用户 {uid} 的视频列表失败: {e}")
+            continue
+
 
 
 
@@ -837,6 +886,7 @@ def fun(manager):
         bvid_file_data = read_json(USER_BVID_FILE)
         all_bvid_file_data = read_json(ALL_BVID_FILE)
 
+        update_block_video(config_map)
         bvid_uid_map = {}
         all_found_videos = []
         for uid in config_map.keys():
