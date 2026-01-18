@@ -673,8 +673,8 @@ def gen_overlays_text_llm(video_path, video_info):
     raw = ""
     for attempt in range(1, max_retries + 1):
         try:
-            # model_name = "gemini-flash-latest"
-            model_name = "gemini-3-flash-preview"
+            model_name = "gemini-flash-latest"
+            # model_name = "gemini-3-flash-preview"
             print(f"正在视频覆盖文字生成 (尝试 {attempt}/{max_retries}) {log_pre}")
             raw = get_llm_content_gemini_flash_video(prompt=full_prompt, video_path=video_path, model_name=model_name)
             video_overlays_text_info = string_to_object(raw)

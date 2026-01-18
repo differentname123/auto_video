@@ -253,7 +253,7 @@ def send_good_video(manager):
             print(f"用户 {user_name} 为简化用户，今日需要处理 {total_need_count} 个任务。")
             continue
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
-        target_count = 2
+        target_count = 3
         need_count = max(target_count - total_count, 0)
         user_count_info[user_name]['need_count'] = need_count
         total_need_count += need_count
