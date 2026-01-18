@@ -1262,7 +1262,7 @@ def gen_video_script_llm(task_info, video_info_dict):
         if 'scene_number_list' in scene:
             del scene['scene_number_list']
 
-    print("生成场景的最终数据成功")
+    # print("生成场景的最终数据成功")
 
     prompt_path = './prompt/多素材视频生成不加过度.txt'
     allow_commentary = creation_guidance_info.get('is_need_commentary', False)
@@ -1280,7 +1280,7 @@ def gen_video_script_llm(task_info, video_info_dict):
     if allow_commentary == False and is_need_narration == True:
         prompt_path = './prompt/多素材视频生成不加过度.txt'
 
-    task_info['final_scene_info'] = final_info_list
+    task_info['final_scene_info'] = origin_final_scene_info
     task_info['script_prompt_path'] = prompt_path
     full_prompt = read_file_to_str(prompt_path)
 
@@ -1308,7 +1308,7 @@ def gen_video_script_llm(task_info, video_info_dict):
             return error_info, video_script_info, origin_final_scene_info
         except Exception as e:
             error_str = f"{str(e)} {gen_error_info}  {log_pre}"
-            print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e}")
+            print(f"新视频脚本 生成 未通过 (尝试 {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
                 time.sleep(retry_delay)  # 等待一段时间后再重试
