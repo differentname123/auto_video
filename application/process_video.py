@@ -16,6 +16,7 @@ import os
 import shutil
 import time
 import traceback
+from datetime import datetime, timezone
 
 from bson import ObjectId
 
@@ -839,6 +840,29 @@ def update_narration_key(data_list):
         # 发生异常，直接返回传入的原始列表
         return data_list
 
+def recover_task():
+    query_2 = {
+        "create_time": {
+            "$gt": datetime(2023, 1, 18, 20, 44, 3, 15000, tzinfo=timezone.utc)
+        },
+        "failed_count": {
+            "$gt": 5
+        },
+        "failure_details": {
+            "$not": {
+                "$regex": "禁止"
+            }
+        }
+    }
+
+    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    print()
+    for task_info in all_task:
+        task_info['failed_count'] = 0
+        # process_single_task(task_info, manager, gen_video=True)
+        # break
+    manager.upsert_tasks(all_task)
+
 if __name__ == '__main__':
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
@@ -865,6 +889,7 @@ if __name__ == '__main__':
     query_2 = {
   '_id': ObjectId("696668bae22dbe4a9bd47fe7")
 }
+    recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
