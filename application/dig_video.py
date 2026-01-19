@@ -14,8 +14,9 @@ import time
 import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
-    DIG_HOT_VIDEO_PLAN_FILE
-from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object
+    DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE
+from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
+    gen_true_type_and_tags
 from utils.gemini_cli import ask_gemini
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
@@ -296,15 +297,43 @@ def find_good_plan():
     通过已有素材找到合适的更加好的视频方案来制作视频
     :return:
     """
-    hot_video_list = ["旭旭宝宝运气太好了", "太倒霉了", "旭旭宝宝太有节目效果了"]
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    good_video_list = statistic_play_info.get('good_video_list', [])
+    good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
+    good_video_list = sorted(good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
+    target_video_type = random.choice(['game', 'fun'])
+
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type_info = user_config.get('user_type_info', {})
+    target_user_list = user_type_info.get(target_video_type, [])
+
+    filter_good_video_list = [task_info for task_info in good_video_list if task_info.get('userName') in target_user_list]
+
+    filter_good_video_list = filter_good_video_list[:5]
+
+    selected_video_info = random.choice(filter_good_video_list)
+
+    upload_params = selected_video_info.get('upload_params', {})
+    hot_video = upload_params.get('title', '变得有吸引力一点')
+
+    upload_info_list = selected_video_info.get('upload_info', [])
+    video_type, target_tags = gen_true_type_and_tags(upload_info_list)
+
+
     start_time = time.time()
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
     all_video_info = query_all_material_videos()
-    target_tags = gen_target_tags()
+    # target_tags = gen_target_tags()
 
     sorted_video_info = process_and_sort_video_info(all_video_info, target_tags)
-    # 过滤出得分大于0的素材视频
-    good_video_info = {vid: info for vid, info in sorted_video_info.items() if info['match_score'] > 1}
+    # 选择匹配得分前100的视频素材
+    top_n = 100
+    top_video_info = dict(list(sorted_video_info.items())[:top_n])
+    good_video_info = {}
+    for vid, info in top_video_info.items():
+        if info.get('match_score', 0) >= 1:
+            good_video_info[vid] = info
+
 
     # 如果good_video_info超过50就随机选择50
     if len(good_video_info) > 50:
@@ -312,8 +341,6 @@ def find_good_plan():
         good_video_info = {key: good_video_info[key] for key in selected_keys}
 
     video_data = build_prompt_data(good_video_info)
-
-    hot_video = random.choice(hot_video_list)
 
     print(f"开始进行视频方案挖掘，当前热门视频主题: {hot_video}，素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     video_content_plans = gen_hot_video_llm(video_data, hot_video)
