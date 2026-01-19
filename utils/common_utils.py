@@ -1197,3 +1197,38 @@ def has_continuous_common_substring(list1, list2, threshold):
                             results.append(match_info)
 
     return found_any, results
+
+
+def has_long_common_substring(str1, str2, threshold=2):
+    """
+    判断两个字符串是否有长度 *大于* 阈值的连续公共子串。
+
+    :param str1: 第一个字符串
+    :param str2: 第二个字符串
+    :param threshold: 阈值 (整数)
+    :return: Boolean
+    """
+    # 目标长度必须大于阈值，所以至少是 threshold + 1
+    target_len = threshold + 1
+
+    # 优化：为了减少循环次数，我们遍历较短的那个字符串
+    if len(str1) < len(str2):
+        short_str, long_str = str1, str2
+    else:
+        short_str, long_str = str2, str1
+
+    # 如果短字符串本身的长度都不够目标长度，直接返回 False
+    if len(short_str) < target_len:
+        return False
+
+    # 滑动窗口遍历
+    # range 的结束位置需要 +1 才能取到最后一个可能的切片
+    for i in range(len(short_str) - target_len + 1):
+        # 截取长度为 target_len 的子串
+        sub = short_str[i: i + target_len]
+
+        # 检查该子串是否存在于长字符串中
+        if sub in long_str:
+            return True
+
+    return False
