@@ -10,6 +10,7 @@
 """
 import os
 import sys
+from collections import Counter
 
 from utils.common_utils import time_to_ms, ms_to_time, read_json
 
@@ -377,6 +378,60 @@ def fix_split_time_points(remove_time_segments_ms, split_time_points):
     return fixed_split_time_points
 
 
+def get_tags_info(data: dict) -> dict:
+    """
+     从一个结构可能不规范的字典中，极其健壮地总结所有标签（tags）的出现次数。
+
+     该函数经过特殊设计，可以处理各种形式的错误输入而不会抛出异常：
+     - 输入的 data 不是字典。
+     - 'tags', 'new_scene_info', 'deleted_scene' 键不存在。
+     - 'tags', 'new_scene_info', 'deleted_scene' 键对应的值不是列表。
+     - 'new_scene_info' 或 'deleted_scene' 列表中的元素不是字典。
+     - 场景字典中的 'tags' 键不存在或其值不是列表。
+     - 标签列表中包含非字符串等不可哈希的元素。
+
+     在任何错误情况下，它都会安全地跳过问题数据并继续执行，最终返回一个有效的字典。
+
+     Args:
+         data (dict): 包含视频信息的源数据，可能不符合预期结构。
+
+     Returns:
+         dict: 一个字典，其中 key 是标签名，value 是该标签出现的总次数。
+               如果无法提取任何标签，则返回一个空字典 {}。
+     """
+    # 最终存放所有标签的列表
+    all_tags = []
+
+    # 1. 首先，确保输入的数据本身就是一个字典。如果不是，直接返回空字典。
+    if not isinstance(data, dict):
+        return {}
+
+    # 2. 安全地处理顶层的 'tags'
+    # .get() 避免了 KeyError，isinstance() 确保了它是一个列表
+    top_level_tags = data.get('tags')
+    if isinstance(top_level_tags, list):
+        all_tags.extend(top_level_tags)
+
+    # 3. 安全地处理 'new_scene_info' 和 'deleted_scene' 中的 tags
+    scene_keys = ['new_scene_info', 'deleted_scene']
+    for key in scene_keys:
+        scene_list = data.get(key)
+        if isinstance(scene_list, list):
+            for scene in scene_list:
+                if isinstance(scene, dict):
+                    scene_tags = scene.get('tags')
+                    if isinstance(scene_tags, list):
+                        all_tags.extend(scene_tags)
+    hashable_tags = [tag for tag in all_tags if isinstance(tag, str)]
+    if not hashable_tags:
+        return {}
+
+    # 5. 使用 Counter 进行统计，现在绝对安全
+    tags_info = Counter(hashable_tags)
+
+    return dict(tags_info)
+
+
 BVID_FILE_PATH = r'W:\project\python_project\auto_video\config\bvid_file.json' # 用于存放拉取到的平台视频数据，方便进行播放量统计以及计算时间投稿成功的数量
 
 USER_STATISTIC_INFO_PATH = r'W:\project\python_project\auto_video\config\user_upload_info.json' # 用于存放用户的统计信息
@@ -392,3 +447,5 @@ STATISTIC_PLAY_COUNT_FILE = r'W:\project\python_project\auto_video\config\statis
 
 
 BLOCK_VIDEO_BVID_FILE = r'W:\project\python_project\auto_video\config\block_video_bvid_file.json'  # 用于存放被屏蔽的视频bvid列表
+
+ALL_MATERIAL_VIDEO_INFO_PATH = r'W:\project\python_project\auto_video\config\all_material_video_info.json'  # 用于存放所有素材视频的信息，方便进行快速查询
