@@ -188,6 +188,62 @@ def check_failure_details(failure_details):
     return False
 
 
+def correct_consecutive_owner_timestamps(asr_result):
+    """
+    仅对ASR结果列表中连续为'owner'的片段之间的时间进行纠正。
+
+    此函数只调整相邻的两个'owner'片段之间的间隙，
+    不会调整'owner'与非'owner'片段之间的时间，也不会调整'owner'在视频首尾的时间。
+
+    Args:
+        asr_result: ASR结果列表，每个元素是一个包含'start', 'end', 'speaker'的字典。
+
+    Returns:
+        带有 'fix_start' 和 'fix_end' 字段的ASR结果列表。
+    """
+    """
+    基于已有的 'fixed_start' 和 'fixed_end' 字段，仅对连续为 'owner' 的片段之间的时间进行再次纠正。
+
+    此函数直接读取和修改 'fixed_start' 和 'fixed_end' 字段，
+    用于对相邻的两个'owner'片段之间的间隙进行微调。
+
+    Args:
+        asr_result: ASR结果列表。每个元素必须已包含 'fixed_start' 和 'fixed_end' 字段。
+
+    Returns:
+        在原有对象上修改了 'fixed_start' 和 'fixed_end' 字段后的ASR结果列表。
+    """
+    # 遍历列表，应用 owner 和 owner 之间的修正逻辑
+    # 我们只需要遍历到倒数第二个元素，因为总是要看下一个
+    for i in range(len(asr_result) - 1):
+        current_segment = asr_result[i]
+        next_segment = asr_result[i + 1]
+
+        # 核心条件：当前和下一个片段的 speaker 都必须是 'owner'
+        if current_segment['speaker'] == 'owner' and next_segment['speaker'] == 'owner':
+
+            # 使用 fixed_start 和 fixed_end 来计算间隙
+            gap = next_segment['fixed_start'] - current_segment['fixed_end']
+
+            # 确保它们之间确实存在时间间隙
+            if gap > 0:
+                # 调整规则与原始代码保持一致
+                if gap < 1000:
+                    # 间隔小于1000ms，取中点将两者连接起来
+                    midpoint = round(current_segment['fixed_end'] + gap / 2)
+                    current_segment['fixed_end'] = midpoint
+                    next_segment['fixed_start'] = midpoint
+                else:
+                    # 间隔大于等于1000ms，各自向中间移动，但最多500ms
+                    # 同时要保证移动后两者间隔至少500ms
+                    movement = min(500, (gap - 500) / 2)
+                    if movement > 0:
+                        # 所有计算都基于 fixed_end 和 fixed_start
+                        current_segment['fixed_end'] = round(current_segment['fixed_end'] + movement)
+                        next_segment['fixed_start'] = round(next_segment['fixed_start'] - movement)
+
+    return asr_result
+
 def correct_owner_timestamps(asr_result, duration):
     """
     对ASR结果列表中speaker为owner的文本时间进行纠正。

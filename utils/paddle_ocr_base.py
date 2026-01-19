@@ -230,7 +230,7 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
                     bottom_ratio_in_crop=0.0,
                     rect_ang_thresh=10.0,
                     rect_ratio_thresh=0.8,
-                    aspect_ratio_thresh=2.0,
+                    aspect_ratio_thresh=1,
                     width_ratio_thresh=0.1
                 )
 

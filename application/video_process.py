@@ -21,9 +21,9 @@ import traceback
 import cv2
 import numpy as np
 
-from application.llm_generator import get_best_valid_text
+from application.llm_generator import get_best_valid_text, fix_owner_asr_by_subtitle
 from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths, ERROR_STATUS, \
-    check_failure_details, correct_owner_timestamps, build_task_video_paths
+    check_failure_details, correct_owner_timestamps, build_task_video_paths, correct_consecutive_owner_timestamps
 from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json, \
     time_to_ms, first_greater, remove_last_punctuation, safe_process_limit
 from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
@@ -50,9 +50,9 @@ def gen_owner_time_range(owner_asr_info, video_duration_ms):
             continue
         if not final_text:
             continue
-        asr_start = asr_info.get('fix_start')
+        asr_start = asr_info.get('fixed_start')
         asr_start = max(0, asr_start - 50)
-        asr_end = asr_info.get('fix_end')
+        asr_end = asr_info.get('fixed_end')
         asr_end = min(video_duration_ms, asr_end + 50)
         duration_list.append((asr_start, asr_end))
     merge_intervals_list = merge_intervals(duration_list)
@@ -145,7 +145,11 @@ def _process_single_video(video_id, video_info, is_need_narration):
     owner_asr_info_list = video_info.get('owner_asr_info', [])
     if owner_asr_info_list is None :
         owner_asr_info_list = []
-    owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
+    # owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
+
+    if 'fixed' not in str(owner_asr_info_list):
+        owner_asr_info_list = fix_owner_asr_by_subtitle(video_info)
+    owner_asr_info_list = correct_consecutive_owner_timestamps(owner_asr_info_list)
     merge_intervals_list = gen_owner_time_range(owner_asr_info_list, video_duration_ms)
 
     # 5. Case: 如果没有作者说话，直接复制原视频
@@ -634,8 +638,8 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
         asr_info = narration_detail_info.get(new_narration_script_list)
         new_narration_script_list_info_list.append({
             'new_narration_script_list': new_narration_script_list,
-            'narration_script_start': asr_info.get('fix_start', asr_info.get('start')),
-            'narration_script_end': asr_info.get('fix_end', asr_info.get('end'))
+            'narration_script_start': asr_info.get('fixed_start', asr_info.get('start')),
+            'narration_script_end': asr_info.get('fixed_end', asr_info.get('end'))
         })
     split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, min_duration=500)
     count = 0
@@ -1194,324 +1198,7 @@ def gen_video_by_script(task_info, video_info_dict):
     return failure_details, chosen_script, cost_time_info
 
 
-def find_boundary_pairs(owner_info_list: list) -> list:
-    """
-    遍历一个包含字典的列表，找到'speaker'为'owner'和非'owner'的交界处。
-    将交界处的相邻两个元素组成一个元组，并添加到结果列表中。
 
-    Args:
-        data_list: 输入的列表，每个元素是一个包含'speaker'键的字典。
-
-    Returns:
-        一个包含元组的列表，每个元组都是一个'owner'和非'owner'的交界对。
-    """
-    data_list = owner_info_list
-    boundary_pairs = []
-    # 遍历到倒数第二个元素，以便安全地访问 i+1
-    for i in range(len(data_list) - 1):
-        current_item = data_list[i]
-        next_item = data_list[i+1]
-
-        # 判断当前元素的speaker是否为'owner'
-        is_current_owner = (current_item.get('speaker') == 'owner')
-        # 判断下一个元素的speaker是否为'owner'
-        is_next_owner = (next_item.get('speaker') == 'owner')
-
-        # 如果一个是owner而另一个不是，则它们是交界对
-        if is_current_owner != is_next_owner:
-            boundary_pairs.append((current_item, next_item))
-
-    return boundary_pairs
-
-
-def find_longest_common_substring(s1: str, s2: str) -> int:
-    """
-    计算两个字符串的最长公共子串的长度。
-    这是一个经典的动态规划问题。
-    """
-    m = [[0] * (1 + len(s2)) for _ in range(1 + len(s1))]
-    longest = 0
-    for x in range(1, 1 + len(s1)):
-        for y in range(1, 1 + len(s2)):
-            if s1[x - 1] == s2[y - 1]:
-                m[x][y] = m[x - 1][y - 1] + 1
-                if m[x][y] > longest:
-                    longest = m[x][y]
-            else:
-                m[x][y] = 0
-    return longest
-
-
-def find_text_timestamp_range(timestamp_text_map, target_text):
-    """
-    在带时间戳的字幕中，根据模糊匹配找到目标文本的起始和结束时间戳。
-
-    Args:
-        timestamp_text_map (dict): 时间戳到字幕文本的映射。
-        target_text (str): 希望在字幕中查找的目标文本。
-
-    Returns:
-        tuple: 一个包含 (start_time, end_time) 的元组，如果未找到则返回 None。
-    """
-    if not timestamp_text_map or not target_text:
-        return None
-
-    sorted_timestamps = sorted(timestamp_text_map.keys())
-
-    # --- 状态变量 ---
-    start_time = None  # 记录当前匹配序列的开始时间
-    end_time = None  # 记录当前匹配序列中，最后一个成功匹配的时间
-    miss_count = 0  # 连续不匹配的帧数计数器
-    is_in_match_seq = False  # 标记是否已经进入一个匹配序列
-
-    # --- 遍历所有时间戳 ---
-    for i, current_t in enumerate(sorted_timestamps):
-        current_text = timestamp_text_map[current_t]
-
-        # --- 核心匹配逻辑 ---
-        # 1. 计算匹配阈值
-        min_len = min(len(current_text), len(target_text))
-        # 匹配数量至少是2，或者达到最短长度的60%
-        threshold = max(2, min_len * 0.6)
-
-        # 2. 计算最长公共子串长度
-        common_len = find_longest_common_substring(current_text, target_text)
-
-        # 3. 判断是否匹配成功
-        is_match = common_len >= threshold
-
-        # --- 状态机处理 ---
-        if is_match:
-            miss_count = 0  # 重置不匹配计数
-            if not is_in_match_seq:
-                is_in_match_seq = True
-                start_time = current_t
-            end_time = current_t
-        else:
-            if is_in_match_seq:
-                miss_count += 1
-                if miss_count >= 2:
-                    return (start_time, end_time)
-
-    if is_in_match_seq:
-        return (start_time, end_time)
-
-    return None
-
-
-def gen_precise_owner_timestamp_by_subtitle(video_path, timestamp, target_text):
-    """
-    通过字幕生成更精确的场景时间戳
-    :param video_path: 视频路径
-    :param timestamp: 初始时间戳 (单位: ms)
-    :return: 精确后的时间戳 (单位: ms)
-    """
-    # 【修改点 1】在函数最外层加入 try 块，包裹所有逻辑
-    try:
-        video_filename = os.path.splitext(os.path.basename(video_path))[0]
-        output_dir = os.path.join(os.path.dirname(video_path), f'{video_filename}_scenes')
-        # 1. 保存关键帧 (涉及IO，易报错)
-        image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
-
-        result_json = run_subtitle_ocr(image_path_list)
-
-        # 提取所有原始框用于计算范围
-        detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in
-                          item.get("subtitles", [])]
-
-        if not detected_boxes:
-            print("未找到任何字幕框。")
-            return (timestamp, timestamp)
-
-        # --- 阶段 3: 分析并计算最终包围框 ---
-        # print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
-        good_boxes = analyze_and_filter_boxes(detected_boxes)
-        if not good_boxes:
-            print("\n[结果] 所有检测到的框都被过滤为异常值。")
-            return  (timestamp, timestamp)
-
-        all_points = np.array([point for box in good_boxes for point in box])
-        min_x, min_y = np.min(all_points[:, 0]), np.min(all_points[:, 1])
-        max_x, max_y = np.max(all_points[:, 0]), np.max(all_points[:, 1])
-        final_box_coords = (min_x, max_x, min_y, max_y)
-
-        # print(f"[阶段 3] 最终有效字幕区域 (x: {min_x}~{max_x}, y: {min_y}~{max_y})")
-
-        # --- 阶段 4: 生成 {时间戳: 文本} 映射 ---
-        # print("\n[阶段 4] 生成 {时间戳: 文本} 映射...")
-        timestamp_text_map = {}
-
-        for item in result_json.get('data', []):
-            file_path = item.get('file_path', '')
-            match = re.search(r'frame_(\d+)\.png', file_path)
-            if not match:
-                continue
-            current_ms = int(match.group(1))
-
-            best_text = get_best_valid_text(item.get('subtitles', []), final_box_coords)
-            # 构造 valid_texts 列表：如果有结果就是 [text]，没有就是 []
-            valid_texts = [best_text] if best_text else []
-
-            # 去除首尾空格，避免 OCR 带来的微小差异影响比对
-            text_content = "".join(valid_texts).strip()
-            timestamp_text_map[current_ms] = text_content
-
-        if not timestamp_text_map:
-            print("警告：在指定区域内未提取到有效文本。")
-            return  (timestamp, timestamp)
-
-        # 计算逻辑也可能出错，放在 try 块中很安全
-        final_timestamp = find_text_timestamp_range(timestamp_text_map, target_text)
-        if not final_timestamp:
-            print("未找到匹配的字幕时间范围。")
-            return (timestamp, timestamp)
-        return final_timestamp
-
-    # 【修改点 2】捕获所有异常，打印日志并强制返回原始 timestamp
-    except Exception as e:
-        print(f"[Error] gen_precise_scene_timestamp_by_subtitle 发生错误: {e}")
-        traceback.print_exc()
-        return (timestamp, timestamp)
-
-def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path, max_delta_ms=1000):
-    """
-    输入一个目标时间戳和原始的时间戳列表，计算出修正后的时间戳。
-    该函数内部会自动清洗 merged_timestamps。
-    target_ts: ms
-    """
-    # 1. 数据清洗：在函数内部处理，对调用方透明
-    # 只保留有效的时间戳 (timestamp exists, count > 0)
-    valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
-
-    # 2. 筛选候选者
-    candidates = [
-        shot for shot in valid_camera_shots
-        if abs(shot[0] - target_ts) <= max_delta_ms
-    ]
-
-    # 3. 寻找最佳匹配 (Visual)
-    best_shot = None
-    if candidates:
-        def calculate_key(shot):
-            diff = abs(shot[0] - target_ts)
-            count = shot[1]
-            # 评分逻辑：Diff 越小越好，Count 越大越好
-            score = diff / count if count > 0 else float('inf')
-            return (score, diff)
-
-        best_shot = min(candidates, key=calculate_key)
-
-    # 4. 决策与执行
-    # 策略 A: 视觉对齐 (找到且 count >= 2)
-    if best_shot and best_shot[1] >= 2:
-        new_ts = int(best_shot[0])
-        count = best_shot[1]
-        diff = abs(new_ts - target_ts)
-        score = diff / count if count > 0 else 0
-        ts_range = (new_ts, new_ts)
-
-        return ts_range, 'visual', {
-            'count': count,
-            'diff': diff,
-            'score': score
-        }
-
-    # 策略 B: 字幕对齐 (无候选 或 count < 2)
-    else:
-        reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot[1]}<2)"
-
-        # 调用字幕对齐函数
-        ts_range = gen_precise_owner_timestamp_by_subtitle(video_path, target_ts, target_text)
-
-        if ts_range is not None:
-            return ts_range, 'subtitle', {'reason': reason}
-        else:
-            # 字幕对齐也失败，返回原始时间
-            return (target_ts, target_ts) , 'failed', {'reason': reason}
-
-
-@safe_process_limit(limit=3, name="fix_owner_asr_by_subtitle")
-def fix_owner_asr_by_subtitle(video_info):
-    """
-    通过字幕纠正说话人的准确声音
-    :param video_info:
-    :return:
-    """
-    owner_asr_info_list = video_info.get('owner_asr_info', [])
-    if not owner_asr_info_list:
-        owner_asr_info_list = []
-
-    # 判断是否有owner的asr信息
-    has_owner_asr = any(asr_info.get('speaker') == 'owner' for asr_info in owner_asr_info_list)
-    if not has_owner_asr:
-        return owner_asr_info_list
-    all_video_path_info = build_video_paths(video_id)
-    video_path = all_video_path_info.get('low_resolution_video_path')
-    boundary_pairs = find_boundary_pairs(owner_asr_info_list)
-    merged_timestamps = get_scene(video_path)
-
-    for boundary_pair in boundary_pairs:
-        pair_start_info, pair_end_info = boundary_pair
-        start_speaker = pair_start_info.get('speaker')
-        if start_speaker == 'owner':
-            timestamp = pair_start_info.get('end', 0)
-            key = 'end'
-            source_clip_id = pair_start_info.get('source_clip_id', '')
-            final_text = pair_start_info.get('final_text', '').strip()
-            # 用 + 把连续标点合并成一个分隔（避免产生空串），并过滤掉空白片段
-            parts = [p.strip() for p in re.split(r'[，。！？；,.!?;]+', final_text) if p.strip()]
-            target_text = parts[-1] if parts else final_text
-            ts_range, strategy, info = align_owner_timestamp(timestamp, target_text, merged_timestamps, video_path, max_delta_ms=1000)
-            new_ts = ts_range[1]
-            if strategy == 'visual':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} -> {new_ts} " f"(🖼️ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
-
-            elif strategy == 'subtitle':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} -> {new_ts}  {final_text} " f"(🛠️ 字幕修正: {info['reason']})")
-
-            elif strategy == 'failed':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} (保持不变, 字幕对齐失败, 原因: {info['reason']})")
-
-            # 更新数据
-            pair_start_info['fixed_start'] = pair_start_info['start']
-            pair_start_info['fixed_end'] = new_ts
-            # 还要尝试更新pair_end_info，因为如果new_ts已经大于pair_end_info的start了
-
-            pair_end_info['fixed_start'] = pair_end_info['start']
-            pair_end_info['fixed_end'] = pair_end_info['end']
-            if new_ts > pair_end_info.get('start', 0):
-                pair_end_info['fixed_start'] = new_ts
-        else:
-            timestamp = pair_end_info.get('start', 0)
-            key = 'start'
-            final_text = pair_end_info.get('final_text', '')
-            source_clip_id = pair_end_info.get('source_clip_id', '')
-            split_texts = re.split(r'[，。！？；,.!?;]', final_text)
-            target_text = split_texts[0] if split_texts else final_text
-            ts_range, strategy, info = align_owner_timestamp(timestamp, target_text, merged_timestamps, video_path, max_delta_ms=1000)
-            new_ts = ts_range[0]
-            if strategy == 'visual':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} -> {new_ts} " f"(🖼️ 视觉修正: count={info['count']}, diff={info['diff']}ms, score={info['score']:.2f})")
-
-            elif strategy == 'subtitle':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} -> {new_ts} {final_text} " f"(🛠️ 字幕修正: {info['reason']})")
-
-            elif strategy == 'failed':
-                print(f"[source_clip_id {source_clip_id}] {key}: {timestamp} (保持不变, 字幕对齐失败, 原因: {info['reason']})")
-
-            # 更新数据
-            pair_end_info['fixed_start'] = new_ts
-            pair_end_info['fixed_end'] = pair_end_info['end']
-            # 还要尝试更新pair_start_info，因为如果new_ts已经小于pair_start_info的end了
-            pair_start_info['fixed_start'] = pair_start_info['start']
-            pair_start_info['fixed_end'] = pair_start_info['end']
-            if new_ts < pair_start_info.get('end', 0):
-                pair_start_info['fixed_end'] = new_ts
-
-    # 更新video_info中的owner_asr_info
-    print()
-    video_info['owner_asr_info'] = owner_asr_info_list
-    return owner_asr_info_list
 
 
 if __name__ == "__main__":
@@ -1519,7 +1206,8 @@ if __name__ == "__main__":
     manager = MongoManager(mongo_base_instance)
     video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
     # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    video_info_list = manager.find_materials_by_ids(['7595139090560918117'])
+    video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
     for video_info in video_info_list:
         video_id = video_info.get('video_id')
-        fix_owner_asr_by_subtitle(video_info)
+        # fix_owner_asr_by_subtitle(video_info)
+        _process_single_video(video_id, video_info, is_need_narration=True)
