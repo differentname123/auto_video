@@ -855,7 +855,7 @@ if __name__ == "__main__":
     task_queue = multiprocessing.Queue()
 
     # 3. 启动消费者集群
-    max_workers = 5
+    max_workers = 10
     print(f"主线程: 启动 {max_workers} 个消费者进程...")
 
     for _ in range(max_workers):

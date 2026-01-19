@@ -143,7 +143,7 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
 
 
 
-
+@safe_process_limit(limit=2, name="process_origin_video")
 def process_origin_video(video_id, video_info):
     """
     处理原始视频生成后续需要处理的视频
@@ -882,13 +882,13 @@ if __name__ == '__main__':
 
     query_2 = {
         "upload_params.title": {
-            "$regex": "林渝植蹭够了没？一边给痞幼发好人卡，一边给夏夏当舔狗？"
+            "$regex": "旭旭宝宝"
         }
     }
 
-    query_2 = {
-  '_id': ObjectId("69689b57e22dbe4a9bd4829e")
-}
+#     query_2 = {
+#   '_id': ObjectId("69689b57e22dbe4a9bd4829e")
+# }
     # recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
