@@ -2,12 +2,13 @@ import random
 import time
 import traceback
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 import json
 
-from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, DIG_HOT_VIDEO_PLAN_FILE
+from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, \
+    DIG_HOT_VIDEO_PLAN_FILE, VIDEO_MAX_RETRY_TIMES, TaskStatus
 from utils.common_utils import read_json, save_json, get_user_type, gen_true_type_and_tags, \
     has_continuous_common_substring
 from utils.mongo_base import gen_db_object
@@ -511,6 +512,424 @@ def send_dig_video(manager):
     print(f"完整的用户详情{user_count_info}")
 
 
+def gen_standard_video_info_by_statistic_data(good_video_list):
+    """
+    将统计数据变成标准的待投稿数据
+    :return:
+    """
+    standard_video_list = []
+
+    for video_info in good_video_list:
+        upload_params = video_info.get('upload_params', {})
+        hot_video = upload_params.get('title', '变得有吸引力一点')
+        video_id_list = video_info.get('video_id_list', [])
+        video_theme = hot_video
+        user_name = video_info.get('userName', '')
+        video_type = get_user_type(user_name)
+        final_score = video_info.get('final_score', 0)
+        dig_type = 'exist_video'
+        creative_guidance = f"标题尽量体现: {hot_video}"
+
+        temp_dict = {
+            'video_id_list': video_id_list,
+            'video_theme': video_theme,
+            'hot_topic': video_theme,
+            'video_type': video_type,
+            'final_score': final_score,
+            'dig_type': dig_type,
+            "creative_guidance": creative_guidance,
+        }
+        standard_video_list.append(temp_dict)
+    return standard_video_list
+
+def gen_standard_video_info_by_dig_data(plan_info):
+    """
+    将挖掘的数据变成标准化的待投稿数据
+    :param plan_info_list:
+    :return:
+    """
+    standard_video_list = []
+    for hot_topic, plan_info_list in plan_info.items():
+        for plan_info in plan_info_list:
+            score = plan_info.get('score', 0)
+            if score < 95:
+                continue
+            video_id_list = plan_info.get('video_id_list', [])
+            video_theme = plan_info.get('video_theme', '')
+            video_type = plan_info.get('video_type', '')
+            final_score = plan_info.get('final_score', 0)
+            dig_type = plan_info.get('dig_type', 0)
+            creative_guidance = plan_info.get('creative_guidance', '')
+            timestamp = plan_info.get('timestamp', 0)
+            temp_dict = {
+                'video_id_list': video_id_list,
+                'video_theme': video_theme,
+                'hot_topic': hot_topic,
+                'video_type': video_type,
+                'final_score': final_score,
+                'dig_type': dig_type,
+                'timestamp': timestamp,
+                "creative_guidance": creative_guidance,
+            }
+            standard_video_list.append(temp_dict)
+    return standard_video_list
+
+
+def build_need_upload_video():
+    """
+    生成统一的规范的待投稿数据
+    :return:
+    """
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    good_video_list = statistic_play_info.get('good_video_list', [])
+    standard_good_video_list = gen_standard_video_info_by_statistic_data(good_video_list)
+
+    exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+    standard_dig_video_list = gen_standard_video_info_by_dig_data(exist_video_plan_info)
+    combined_video_list = standard_good_video_list + standard_dig_video_list
+    print(f"总共收集了 {len(standard_good_video_list)} 个来源于统计视频和 {len(standard_dig_video_list)} 个来源于挖掘视频，合计 {len(combined_video_list)} 个待投稿视频。")
+
+    # 将 combined_video_list 按照 final_score 降序排序
+    combined_video_list = sorted(combined_video_list, key=lambda x: x.get('final_score', 0), reverse=True)
+    return combined_video_list
+
+
+def gen_user_detail_upload_info(manager, user_list):
+    """
+    获取用户今日详细的投稿数据，确保每个用户都有完整的四个字段
+    """
+
+    # 1. 初始化结果字典，确保 user_list 中每个用户都有基础结构
+    user_detail_upload_info = {
+        user_name: {
+            "dig_type": {},
+            "hot_topic": {},
+            "success_count": 0,
+            "total_count": 0,
+        } for user_name in user_list
+    }
+
+    now = datetime.now()
+    today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    query_2 = {
+        "userName": {"$in": user_list},
+        "failed_count": {"$lt": VIDEO_MAX_RETRY_TIMES + 1},
+        "create_time": {"$gt": today_midnight}
+    }
+    task_list = manager.find_by_custom_query(manager.tasks_collection, query_2)
+
+    # 2. 填充数据
+    for task_info in task_list:
+        user_name = task_info.get('userName')
+
+        # 容错：如果数据库查出了不在 user_list 里的用户（虽然 query 限制了，但为了健壮性可保留）
+        if user_name not in user_detail_upload_info:
+            continue
+
+        user_data = user_detail_upload_info[user_name]
+        creation_guidance_info = task_info.get('creation_guidance_info', {})
+
+        # 统计 dig_type
+        dig_type = creation_guidance_info.get('dig_type', 'unknown')
+        user_data["dig_type"][dig_type] = user_data["dig_type"].get(dig_type, 0) + 1
+
+        # 统计 hot_topic
+        hot_topic = creation_guidance_info.get('hot_topic', '未知主题')
+        user_data["hot_topic"][hot_topic] = user_data["hot_topic"].get(hot_topic, 0) + 1
+
+        # 统计状态
+        status = task_info.get('status')
+        if status == TaskStatus.UPLOADED:
+            user_data["success_count"] += 1
+
+        user_data["total_count"] += 1
+
+
+    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+
+    simple_need_process_users = user_config.get('simple_need_process_users', [])
+    for user_name, detail_info in user_detail_upload_info.items():
+        total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
+        platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
+        total_today = total_count + platform_upload_count
+        target_count = 30
+        if user_name in simple_need_process_users:
+            target_count = 5
+        need_count = max(target_count - total_today, 0)
+        need_count = min(need_count, 1)
+        detail_info['need_count'] = need_count
+        detail_info['send_count'] = 0
+
+
+
+
+    return user_detail_upload_info
+
+def get_available_count(manager, video_info):
+    """
+    获取此组合还可以发的数量
+    :param manager:
+    :param video_info:
+    :return:
+    """
+    single_count = 1
+    final_score = video_info.get('final_score', 0)
+    if final_score > 1000:
+        single_count += 1
+
+    video_id_list = video_info.get('video_id_list', [])
+    query_2 = {
+        'video_id_list': video_id_list,
+        "failed_count": {"$lt": VIDEO_MAX_RETRY_TIMES + 1},
+    }
+    exist_tasks = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # 1. 获取当前时间
+    now = datetime.now()
+    create_time_list = [task_info.get('create_time') for task_info in exist_tasks if task_info.get('create_time')]
+    if create_time_list:
+        latest_create_time = max(create_time_list)
+    else:
+        latest_create_time = now
+    is_within_3_hours = latest_create_time >= (now - timedelta(hours=3))
+    if is_within_3_hours:
+        single_count += 1
+    if len(exist_tasks) > 1:
+        single_count += 1
+
+    can_use_count = max(single_count - len(exist_tasks), 0)
+    is_high_score = final_score > 5000
+    is_within_12_hours = latest_create_time >= (now - timedelta(hours=12))
+
+    if is_high_score and not is_within_12_hours:
+        can_use_count = max(can_use_count, 1)
+        print(f"高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
+
+    video_info['exist_count'] = len(exist_tasks)
+    video_info['single_count'] = single_count
+    video_info['can_use_count'] = can_use_count
+
+    video_info['latest_create_time'] = latest_create_time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+
+
+    return can_use_count
+
+def match_user(user_detail_upload_info, video_info):
+    """
+    获取匹配的用户列表,主要是进行主题太多的检查以及相似稿件的数量
+    :param user_detail_upload_info:
+    :param video_info:
+    :return:
+    """
+    matched_user = []
+    video_type = video_info.get('video_type', '')
+    final_score = video_info.get('final_score', 0)
+    hot_topic = video_info.get('hot_topic', '')
+    dig_type = video_info.get('dig_type', 'exist_video')
+    high_similar_dig_type_list = ['exist_video', 'exist_video_dig']
+    hot_topic_count = 1
+    exist_video_count = 10
+
+    is_high_score = final_score > 5000
+    if is_high_score:
+        hot_topic_count += 1
+
+    for user_name, detail_info in user_detail_upload_info.items():
+        user_type = get_user_type(user_name)
+        if user_type != video_type:
+            continue
+
+        # 检查是否重复题材超过限制
+        hot_topic_info = detail_info.get('hot_topic', {})
+        exist_hot_topic_count = hot_topic_info.get(hot_topic, 0)
+        if exist_hot_topic_count >= hot_topic_count:
+            continue
+
+        # 检查来源是否超过限制
+        if dig_type in high_similar_dig_type_list:
+            exist_similar_count = 0
+            for similar_dig_type in high_similar_dig_type_list:
+                exist_similar_count += detail_info.get('dig_type', {}).get(similar_dig_type, 0)
+            if exist_similar_count >= exist_video_count:
+                continue
+        matched_user.append(user_name)
+
+    return matched_user
+
+
+
+def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list):
+    """
+    直接获取时候投稿video_info的用户列表
+    :param user_detail_upload_info:
+    :param video_info:
+    :return:
+    """
+    video_id_list = video_info.get('video_id_list', [])
+    is_all_used = True
+    for video_id in video_id_list:
+        if video_id not in used_video_list:
+            is_all_used = False
+        used_video_list.append(video_id)
+    used_video_list = list(set(used_video_list))
+    if is_all_used:
+        return []
+
+    can_use_count = get_available_count(manager, video_info)
+    match_user_list = match_user(user_detail_upload_info, video_info)
+    sample_size = min(len(match_user_list), can_use_count)
+    sample_size = min(sample_size, 1)
+
+    # 3. 随机选择不重复的元素
+    final_list = random.sample(match_user_list, sample_size) if sample_size > 0 else []
+    return final_list
+
+
+def upload_video(manager, video_info, user_detail_upload_info):
+    """
+    进行投稿
+    :param manager:
+    :param video_info:
+    :return:
+    """
+    final_score = video_info.get('final_score', 0)
+    is_high_score = final_score > 5000
+    dig_type = video_info.get('dig_type', 'exist_video')
+    user_name = video_info.get('user_name', 'dahao')
+    hot_topic = video_info.get('hot_topic', '')
+    high_similar_dig_type_list = ['exist_video', 'exist_video_dig']
+    video_id_list = video_info.get('video_id_list', [])
+    schedule_date = "2026-01-05"
+    if dig_type in high_similar_dig_type_list:
+        schedule_date = "2026-01-01"
+    detail_upload_info = user_detail_upload_info.get(user_name, {})
+
+    send_count = detail_upload_info.get('send_count')
+    need_count = detail_upload_info.get('need_count')
+    if send_count < need_count or is_high_score:
+        if send_count >= need_count + 1:
+            return False
+
+        creative_guidance = video_info.get('creative_guidance', '')
+        creation_guidance_info = {
+            "video_type": "通用",
+            "retention_ratio": "free",
+            "is_need_audio_replace": True,
+            "is_need_scene_title": True,
+            "is_need_commentary": True,
+            "schedule_date": schedule_date,
+            "creative_guidance": creative_guidance,
+            "dig_type": dig_type,
+            "hot_topic": hot_topic,
+        }
+        video_list = []
+        video_info_map = {}
+        video_info_list = manager.find_materials_by_ids(video_id_list)
+        for video_info in video_info_list:
+            video_id = video_info.get('video_id')
+            video_info_map[video_id] = video_info
+        for video_id in video_id_list:
+            video_info = video_info_map.get(video_id, {})
+            extra_info = video_info.get('extra_info', {})
+            video_list.append(extra_info)
+
+        play_load = {
+        'userName': user_name,
+            'global_settings': creation_guidance_info,
+            'video_list': video_list
+
+        }
+        print(f"正在往 {user_name} 发送 {dig_type}类型视频 final_score：{final_score}   video_id_list: {video_id_list} hot_topic：{hot_topic} creative_guidance{creative_guidance}当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        data_info = send_good_video_quest(play_load)
+        if '新任务已成功创建' in str(data_info):
+            detail_upload_info['send_count'] += 1
+            return True
+    return False
+
+
+def print_statistics(data):
+    """
+    统计并打印字典中的 need_count 和 send_count 信息
+    """
+    total_need_sum = 0
+    total_send_sum = 0
+
+    # 用于存储未达标的 key 信息
+    insufficient_items = []
+
+    for key, info in data.items():
+        # 获取当前项的数量，如果不存在则默认为0
+        need = info.get('need_count', 0)
+        send = info.get('send_count', 0)
+
+        # 累加总数
+        total_need_sum += need
+        total_send_sum += send
+
+        # 判断实际数量是否小于需要数量
+        if send < need:
+            insufficient_items.append({
+                'key': key,
+                'need': need,
+                'send': send
+            })
+
+    # --- 打印结果 ---
+
+    # 1. 总共需要的数量，实际发送的数量
+    print("=== 统计概览 ===")
+    print(f"总共需要的数量 (Total Need): {total_need_sum}")
+    print(f"实际发送的数量 (Total Send): {total_send_sum}")
+    print("-" * 40)
+
+    # 2. 实际数量小于需要数量的 key 及具体详情
+    print("=== 未达标项目详情 (Send < Need) ===")
+    if not insufficient_items:
+        print("所有项目均已达标！")
+    else:
+        # 为了美观，使用格式化对齐打印
+        header = f"{'Key':<15} | {'Need Count':<12} | {'Send Count':<12}"
+        print(header)
+        print("-" * len(header))
+
+        for item in insufficient_items:
+            print(f"{item['key']:<15} | {item['need']:<12} | {item['send']:<12}")
+
+def send_good_plan(manager):
+    """
+    进行投稿
+    :param manager:
+    :return:
+    """
+    need_process_users = ['xiaosu']
+    user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
+
+    # 获取需要投稿的数据
+    to_upload_video_list = build_need_upload_video()
+    used_video_list = []
+    final_video_list = []
+
+    for video_info in to_upload_video_list:
+        chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list)
+        for user_name in chosen_user_list:
+            copy_video_info = video_info.copy()
+            copy_video_info['user_name'] = user_name
+            final_video_list.append(copy_video_info)
+
+    print(f"总共选择了 {len(final_video_list)} 个视频用于投稿。")
+    success_count = 0
+    # 进行最终的投稿
+    # 先按照 final_score 降序排序
+    final_video_list = sorted(final_video_list, key=lambda x: x.get('final_score', 0), reverse=True)
+    for video_info in final_video_list:
+        send_flag = upload_video(manager, video_info, user_detail_upload_info)
+        if send_flag:
+            success_count += 1
+    print_statistics(user_detail_upload_info)
+
 
 
 
@@ -522,7 +941,7 @@ if __name__ == "__main__":
     manager = MongoManager(mongo_base_instance)
     while True:
         try:
-            send_good_video(manager)
+            send_good_plan(manager)
         except Exception as e:
             traceback.print_exc()
             print(f"出错了: {e}")

@@ -8,6 +8,7 @@
 :description:
     进行素材库的视频挖掘，挖掘可能不错的视频方案
 """
+import json
 import os
 import random
 import time
@@ -24,7 +25,7 @@ from utils.mongo_manager import MongoManager
 NEED_REFRESH = False
 
 
-def query_all_material_videos(manager):
+def query_all_material_videos(manager, is_need_refresh):
     """
     查询所有的素材视频，已剔除黑名单素材
     :return:
@@ -39,7 +40,7 @@ def query_all_material_videos(manager):
     if os.path.exists(ALL_MATERIAL_VIDEO_INFO_PATH):
         modify_time = os.path.getmtime(ALL_MATERIAL_VIDEO_INFO_PATH)
         # 86400秒 = 1天
-        if time.time() - modify_time < 86400 and not NEED_REFRESH:
+        if time.time() - modify_time < 86400 and not NEED_REFRESH and not is_need_refresh:
             print(
                 f"all_need_plan_video_info.json 缓存文件存在且在一天之内，直接读取。当前数据量: {len(local_material_video_info)}, 耗时: {time.time() - start_time:.4f}s")  # [修改] 增加耗时和数据量打印
             return local_material_video_info
@@ -329,91 +330,137 @@ def get_target_tags(manager, task_info):
     return target_tags
 
 
+def get_need_dig_video_list():
+    """
+    获取所有待挖掘的视频，每个题材至少会有一个视频
+    :return:
+    """
+    all_dig_video_list = []
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    good_video_list = statistic_play_info.get('good_video_list', [])
+    good_video_list = sorted(good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    video_type_count_map = {}
+    for target_video_type in ['sport', 'game', 'fun']:
+        user_type_info = user_config.get('user_type_info', {})
+        target_user_list = user_type_info.get(target_video_type, [])
+        filter_good_video_list = [task_info for task_info in good_video_list if task_info.get('userName') in target_user_list]
+        if len(filter_good_video_list) == 0:
+            print(f"未找到符合条件的热门视频，跳过本次挖掘。{target_video_type}")
+            continue
+
+        final_good_video_list = [filter_good_video_list[0]]
+        min_score = 1000
+        for task_info in filter_good_video_list:
+            final_score = task_info.get('final_score', 0)
+            if final_score >= min_score:
+                final_good_video_list.append(task_info)
+        video_type_count_map[target_video_type] = len(final_good_video_list)
+        all_dig_video_list.extend(final_good_video_list)
+    formatted_map = json.dumps(video_type_count_map, ensure_ascii=False, indent=4)
+    print(f"本次挖掘总共涉及热门视频数量: {len(all_dig_video_list)} ，各题材视频数量分布:\n {formatted_map} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    return all_dig_video_list
+
+
+def get_target_video(all_video_info, selected_video_info, target_video_type):
+    """
+    获取本次挖掘最终的素材列表
+    :return:
+    """
+    filter_all_video_info = {vid: info for vid, info in all_video_info.items() if info.get('video_type') == target_video_type}
+    target_tags = get_target_tags(manager, selected_video_info)
+    sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags)
+    top_n = 100
+    top_video_info = dict(list(sorted_video_info.items())[:top_n])
+    good_video_info = {}
+    min_match_score = 1
+    for vid, info in top_video_info.items():
+        if info.get('match_score', 0) > 1:
+            good_video_info[vid] = info
+            min_match_score = info.get('match_score', 0)
+
+    final_good_video_list = good_video_info.copy()
+
+    # 如果good_video_info超过50就随机选择50
+    if len(final_good_video_list) > 50:
+        selected_keys = random.sample(list(final_good_video_list.keys()), 50)
+        final_good_video_list = {key: final_good_video_list[key] for key in selected_keys}
+
+    print(f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+    return final_good_video_list
+
+def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=10):
+    """
+    检查是否需要进行视频方案挖掘
+    :return:
+    """
+    if hot_video not in exist_video_plan_info:
+        exist_video_plan_info[hot_video] = []
+    # 判断exist_video_plan_info[hot_video]中 score 大于95的方案数量是否大于等于10
+    high_score_plan_count = sum(1 for plan in exist_video_plan_info[hot_video] if plan.get('score', 0) >= 95)
+    print(f"当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，高分方案数量: {high_score_plan_count}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    if high_score_plan_count >= max_dig_count:
+        return False
+    return True
+
+
 def find_good_plan(manager):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
     :return:
     """
-    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
-    good_video_list = statistic_play_info.get('good_video_list', [])
-    good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
-    good_video_list = sorted(good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
-    target_video_type = random.choice([ 'game', 'fun'])
+    # 获取本轮待挖掘的视频
+    all_dig_video_list = get_need_dig_video_list()
 
-    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
-    user_type_info = user_config.get('user_type_info', {})
-    target_user_list = user_type_info.get(target_video_type, [])
-
-    filter_good_video_list = [task_info for task_info in good_video_list if task_info.get('userName') in target_user_list]
-    if not filter_good_video_list:
-        print(f"未找到符合条件的热门视频，跳过本次挖掘。{target_video_type}")
-        return
-    final_good_video_list = [filter_good_video_list[0]]
-    min_score = 500
-    max_count = 10
-    for task_info in filter_good_video_list:
-        final_score = task_info.get('final_score', 0)
-        if final_score >= min_score:
-            final_good_video_list.append(task_info)
-        if len(final_good_video_list) >= max_count:
+    # 判断是否有新的话题，有的化就需要重新拉取数据
+    is_need_refresh = False
+    exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+    for selected_video_info in all_dig_video_list:
+        upload_params = selected_video_info.get('upload_params', {})
+        hot_video = upload_params.get('title', '变得有吸引力一点')
+        if hot_video not in exist_video_plan_info:
+            is_need_refresh = True
             break
 
-    selected_video_info = random.choice(final_good_video_list)
-    play_comment_info_list = selected_video_info.get('play_comment_info_list')
-
-    upload_params = selected_video_info.get('upload_params', {})
-    hot_video = upload_params.get('title', '变得有吸引力一点')
-    final_score = selected_video_info.get('final_score', 0)
-
-    start_time = time.time()
-    exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
-    all_video_info = query_all_material_videos(manager)
-
-    # 只保留与目标类型相同的视频素材
-    all_video_info = {vid: info for vid, info in all_video_info.items() if info.get('video_type') == target_video_type}
-
-    # target_tags = gen_target_tags()
-    target_tags = get_target_tags(manager, selected_video_info)
-
-    sorted_video_info = process_and_sort_video_info(all_video_info, target_tags)
-    # 选择匹配得分前100的视频素材
-    top_n = 100
-    top_video_info = dict(list(sorted_video_info.items())[:top_n])
-    good_video_info = {}
-    for vid, info in top_video_info.items():
-        if info.get('match_score', 0) > 1:
-            good_video_info[vid] = info
+    # 获得素材库数据
+    all_video_info = query_all_material_videos(manager, is_need_refresh)
 
 
-    # 如果good_video_info超过50就随机选择50
-    if len(good_video_info) > 50:
-        selected_keys = random.sample(list(good_video_info.keys()), 50)
-        good_video_info = {key: good_video_info[key] for key in selected_keys}
+    # 依次的进行挖掘
+    for selected_video_info in all_dig_video_list:
+        user_name = selected_video_info.get('userName', '')
+        target_video_type = get_user_type(user_name)
+        play_comment_info_list = selected_video_info.get('play_comment_info_list')
+        upload_params = selected_video_info.get('upload_params', {})
+        hot_video = upload_params.get('title', '变得有吸引力一点')
+        final_score = selected_video_info.get('final_score', 0)
+        start_time = time.time()
 
-    video_data = build_prompt_data(good_video_info)
-    if hot_video not in exist_video_plan_info:
-        exist_video_plan_info[hot_video] = []
-    print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    dig_type = 'hot_video'
-    if len(exist_video_plan_info[hot_video]) >= 20:
-        print(f"当前热门视频主题: {hot_video} 已经挖掘过足够多的视频方案，进行自由挖掘，当前方案数量: {len(exist_video_plan_info[hot_video])}")
-        video_content_plans = gen_hot_video_llm(video_data, None)
-        dig_type = 'free'
-    else:
-        video_content_plans = gen_hot_video_llm(video_data, hot_video)
+        check_need_dig_result = check_need_dig(exist_video_plan_info, hot_video)
+        exist_count = len(exist_video_plan_info[hot_video])
+        if check_need_dig_result:
+            # 选择出素材组
+            final_good_video_list = get_target_video(all_video_info, selected_video_info, target_video_type)
+            video_data = build_prompt_data(final_good_video_list)
+            print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+            video_content_plans = gen_hot_video_llm(video_data, hot_video)
+            exist_video_plan_info[hot_video].extend(video_content_plans)
 
-    exist_video_plan_info[hot_video].extend(video_content_plans)
+        for plan in exist_video_plan_info[hot_video]:
+            creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
+            plan['video_type'] = target_video_type
+            plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
+            plan['dig_type'] = "exist_video_dig"
+            plan['timestamp'] = int(time.time())
+            plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+            plan['creative_guidance'] = creative_guidance
 
-    for plan in exist_video_plan_info[hot_video]:
-        plan['user_type_info'] = target_video_type
-        plan['final_score'] = final_score
-        plan['dig_type'] = dig_type
-        plan['timestamp'] = int(time.time())
-        plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
-    save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
-    print(f"完成视频方案挖掘，当前热门视频主题: {hot_video}，共挖掘出 {len(video_content_plans)} 个新方案，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+        save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+        print(f"完成视频方案挖掘，当前热门视频主题: {hot_video}，新挖掘数量: {len(exist_video_plan_info[hot_video]) - exist_count}，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
 
+    #
 
 
 if __name__ == '__main__':
@@ -422,6 +469,7 @@ if __name__ == '__main__':
     while True:
         try:
             find_good_plan(manager)
+            time.sleep(5)
         except Exception as e:
             traceback.print_exc()
             print(f"挖掘视频方案时出错: {e}")
