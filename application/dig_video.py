@@ -308,13 +308,25 @@ def find_good_plan():
     target_user_list = user_type_info.get(target_video_type, [])
 
     filter_good_video_list = [task_info for task_info in good_video_list if task_info.get('userName') in target_user_list]
+    if not filter_good_video_list:
+        print(f"未找到符合条件的热门视频，跳过本次挖掘。{target_video_type}")
+        return
+    final_good_video_list = [filter_good_video_list[0]]
+    min_score = 1000
+    max_count = 10
+    for task_info in filter_good_video_list:
+        final_score = task_info.get('final_score', 0)
+        if final_score >= min_score:
+            final_good_video_list.append(task_info)
+        if len(final_good_video_list) >= max_count:
+            break
 
-    filter_good_video_list = filter_good_video_list[:5]
-
-    selected_video_info = random.choice(filter_good_video_list)
+    selected_video_info = random.choice(final_good_video_list)
+    play_comment_info_list = selected_video_info.get('play_comment_info_list')
 
     upload_params = selected_video_info.get('upload_params', {})
     hot_video = upload_params.get('title', '变得有吸引力一点')
+    final_score = selected_video_info.get('final_score', 0)
 
     upload_info_list = selected_video_info.get('upload_info', [])
     video_type, target_tags = gen_true_type_and_tags(upload_info_list)
@@ -342,11 +354,16 @@ def find_good_plan():
 
     video_data = build_prompt_data(good_video_info)
 
-    print(f"开始进行视频方案挖掘，当前热门视频主题: {hot_video}，素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video}  ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     video_content_plans = gen_hot_video_llm(video_data, hot_video)
     if hot_video not in exist_video_plan_info:
         exist_video_plan_info[hot_video] = []
     exist_video_plan_info[hot_video].extend(video_content_plans)
+
+    for plan in video_content_plans:
+        plan['user_type_info'] = target_video_type
+        plan['final_score'] = final_score
+        plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
     print(f"完成视频方案挖掘，当前热门视频主题: {hot_video}，共挖掘出 {len(video_content_plans)} 个新方案，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")

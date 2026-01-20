@@ -7,7 +7,7 @@ from datetime import datetime
 import requests
 import json
 
-from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE
+from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, DIG_HOT_VIDEO_PLAN_FILE
 from utils.common_utils import read_json, save_json, get_user_type, gen_true_type_and_tags, \
     has_continuous_common_substring
 from utils.mongo_base import gen_db_object
@@ -262,6 +262,7 @@ def send_good_video(manager):
         total_need_count += need_count
         user_count_info[user_name]['send_count'] = 0
         print(f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
+
     need_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] > 0}
     need_user_list = need_user_count_info.keys()
     user_type_count_info = {}
@@ -369,6 +370,136 @@ def send_good_video(manager):
     print(f"有成功的用户详情{success_user_count_info}")
     print(f"没发送视频用户详情{fail_user_count_info}")
     print(f"完整的用户详情{user_count_info}")
+
+
+def get_need_count(need_process_users):
+    user_count_info = defaultdict(dict)
+    target_count = 5
+    user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
+
+    for user_name in need_process_users:
+        platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
+        total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
+        need_count = max(target_count - total_count - platform_upload_count, 0)
+        user_count_info[user_name]['need_count'] = need_count
+        user_count_info[user_name]['send_count'] = 0
+        print(
+            f"用户 {user_name} 今日已收到 {total_count} 个任务，还需处理 {need_count} 个。才能够达到目标 {target_count} 个")
+
+    return user_count_info
+def send_dig_video(manager):
+    """
+    进行挖掘的视频投递
+    :return:
+    """
+    need_process_users = ['xiaosu']
+
+    user_count_info = get_need_count(need_process_users)
+    need_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] > 0}
+    need_user_list = need_user_count_info.keys()
+
+    exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+    all_plan_info_list = []
+    for hot_key, plan_info_list in exist_video_plan_info.items():
+        # 只保留score 90分以上的plan_info_list
+        filtered_plan_info_list = [plan_info for plan_info in plan_info_list if plan_info.get('score', 0) >= 90]
+        all_plan_info_list.extend(filtered_plan_info_list)
+    # 再按照final_score降序排序
+    all_plan_info_list = sorted(all_plan_info_list, key=lambda x: x.get('final_score', 0), reverse=True)
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type_info = user_config.get('user_type_info', {})
+
+    select_plan_infp_list = []
+    for plan_info in all_plan_info_list:
+        user_type = plan_info.get('user_type_info', 'fun')
+        video_id_list = plan_info.get('video_id_list', [])
+        query_2 = {
+            'video_id_list': video_id_list
+        }
+        exist_tasks = manager.find_by_custom_query(manager.tasks_collection, query_2)
+        can_use_count = max(2 - len(exist_tasks), 0)
+        final_score = plan_info.get('final_score', 0)
+
+        video_theme = plan_info.get('video_theme')
+
+        print(f"{video_theme} video_id_list: {video_id_list} final_score {final_score} 已存在 {len(exist_tasks)}个任务 当前还能够创建{can_use_count} 个任务")
+        user_list = user_type_info.get(user_type, [])
+        set_user_list = set(user_list)
+        set_need_user_list = set(need_user_list)
+        common_user_list = list(set_user_list & set_need_user_list)
+        final_user_list = random.sample(common_user_list, min(len(common_user_list), can_use_count))
+        for user_name in final_user_list:
+            copy_plan_info = plan_info.copy()
+            copy_plan_info['target_user_name'] = user_name
+            select_plan_infp_list.append(copy_plan_info)
+
+    success_count = 0
+    for plan_info in select_plan_infp_list:
+        video_id_list = plan_info.get('video_id_list', [])
+        final_score = plan_info.get('final_score', 0)
+        target_user_name = plan_info.get('target_user_name', 'dahao')
+        if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count'] and final_score < 5000:
+            # print(f"用户 {target_user_name} 已达到今日发送目标，跳过后续视频。")
+            continue
+
+        video_theme = plan_info.get('video_theme')
+        story_outline = plan_info.get('story_outline')
+        creative_guidance = f"视频主题: {video_theme}，剧情大纲: {story_outline}"
+        creation_guidance_info = {
+            "video_type": "通用",
+            "retention_ratio": "free",
+            "is_need_audio_replace": True,
+            "is_need_scene_title": True,
+            "is_need_commentary": True,
+            "schedule_date": "2026-01-05",
+            "creative_guidance": creative_guidance,
+            "is_origin": True
+        }
+        video_list = []
+        video_info_map = {}
+        video_info_list = manager.find_materials_by_ids(video_id_list)
+        for video_info in video_info_list:
+            video_id = video_info.get('video_id')
+            video_info_map[video_id] = video_info
+        for video_id in video_id_list:
+            video_info = video_info_map.get(video_id, {})
+            extra_info = video_info.get('extra_info', {})
+            video_list.append(extra_info)
+
+        play_load = {
+        'userName': target_user_name,
+            'global_settings': creation_guidance_info,
+            'video_list': video_list
+
+        }
+        print(f"正在往 {target_user_name} 发送 挖掘视频 final_score：{final_score} creative_guidance{creative_guidance}   video_id_list: {video_id_list} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        data_info = send_good_video_quest(play_load)
+        if '新任务已成功创建' in str(data_info):
+            user_count_info[target_user_name]['send_count'] += 1
+            success_count += 1
+
+    # 计算total_send_count
+    total_need_count = sum(
+        user_info.get('need_count', 0)
+        for user_info in user_count_info.values()
+    )
+
+    print(f"总共收集了 {len(select_plan_infp_list)} 个优质视频。成功发送了 {success_count} 个视频。 总共需要 {total_need_count} 个视频  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"需要的用户详情{need_user_count_info}")
+    other_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] != v['send_count']}
+
+    print(f"没完成目标用户详情{other_user_count_info}")
+    success_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] > 0}
+
+    print(f"有成功的用户详情{success_user_count_info}")
+    fail_user_count_info = {k: v for k, v in user_count_info.items() if v['send_count'] <= 0}
+
+    print(f"没发送视频用户详情{fail_user_count_info}")
+    print(f"完整的用户详情{user_count_info}")
+
+
+
+
 
 
 
