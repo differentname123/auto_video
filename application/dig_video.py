@@ -312,7 +312,7 @@ def find_good_plan():
         print(f"未找到符合条件的热门视频，跳过本次挖掘。{target_video_type}")
         return
     final_good_video_list = [filter_good_video_list[0]]
-    min_score = 1000
+    min_score = 500
     max_count = 10
     for task_info in filter_good_video_list:
         final_score = task_info.get('final_score', 0)

@@ -212,7 +212,7 @@ def process_origin_video(video_id, video_info):
     print(f"视频 {video_id} 的原始视频处理完成。")
 
 
-def gen_extra_info(video_info_dict, manager):
+def gen_extra_info(video_info_dict, manager, gen_video):
     """
     为每个视频生成额外信息 逻辑场景划分 覆盖文字识别 作者语音识别
     :param video_info_dict:
@@ -252,7 +252,7 @@ def gen_extra_info(video_info_dict, manager):
 
         # 生气情绪性花字
         video_overlays_text_info = video_info.get('video_overlays_text_info', {})
-        if not video_overlays_text_info:
+        if not video_overlays_text_info and not gen_video:
             error_info, video_overlays_text_info = gen_overlays_text_llm(video_path, video_info)
             if not error_info:
                 video_info['video_overlays_text_info'] = video_overlays_text_info
@@ -575,7 +575,7 @@ def process_single_task(task_info, manager, gen_video=False):
 
 
     # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
-    failure_details, cost_time_info = gen_extra_info(video_info_dict, manager)
+    failure_details, cost_time_info = gen_extra_info(video_info_dict, manager, gen_video)
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script

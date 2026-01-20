@@ -300,9 +300,9 @@ def add_image_to_video(video_info_dict):
         if is_requires_text:
             video_overlays_text_info_list = video_info.get('video_overlays_text_info', [])
             image_text_video_path = all_path_info.get('image_text_video_path')
-            # if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
-            add_image_text_to_video(video_path, video_info, video_overlays_text_info_list, image_text_video_path,
-                                    output_dir)
+            if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
+                add_image_text_to_video(video_path, video_info, video_overlays_text_info_list, image_text_video_path,
+                                        output_dir)
 
             if not is_valid_target_file_simple(image_text_video_path, video_size * 0.1):
                 error_info = f"添加图片文字后的视频文件大小异常，生成失败。"
@@ -1012,14 +1012,14 @@ def add_watermark_and_ending(video_path, watermark_path, ending_video_path, voic
         print(f"成功添加片尾视频，输出路径: {ending_video_path}")
         current_video_path = ending_video_path
 
-    wm_path = get_watermark_path(user_name)
-    start_time = time.time()
-    add_transparent_watermark(current_video_path, wm_path, watermark_path)
-    print(f"添加水印完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {watermark_path}")
-
-    if is_valid_target_file_simple(watermark_path):
-        print(f"成功添加水印，输出路径: {watermark_path}")
-        current_video_path = watermark_path
+    # wm_path = get_watermark_path(user_name)
+    # start_time = time.time()
+    # add_transparent_watermark(current_video_path, wm_path, watermark_path)
+    # print(f"添加水印完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {watermark_path}")
+    #
+    # if is_valid_target_file_simple(watermark_path):
+    #     print(f"成功添加水印，输出路径: {watermark_path}")
+    #     current_video_path = watermark_path
 
     return failure_details, current_video_path
 

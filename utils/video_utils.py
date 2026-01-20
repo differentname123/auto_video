@@ -646,6 +646,7 @@ def _format_time(time_value: Union[str, int, float]) -> str:
         f"不支持的时间格式: {type(time_value)}。请输入字符串或代表毫秒的数字。"
     )
 
+
 def clip_video_ms(
         input_path: str,
         start_time: Union[str, int, float],
@@ -661,9 +662,10 @@ def clip_video_ms(
     优点:
     - 时间点精确到毫秒。
     - 保证输出的视频文件能正常播放。
+    - 【新增】如果截取全长，会自动切换为无损流复制，极大提升速度。
 
     缺点:
-    - 处理速度比流复制慢，因为它需要CPU进行视频编码计算。
+    - 处理速度比流复制慢，因为它需要CPU进行视频编码计算（仅在非全长截取时）。
 
     Args:
         input_path (str): 输入视频文件的完整路径。
@@ -685,18 +687,58 @@ def clip_video_ms(
         print(e)
         return False, str(e)
 
-    # 【修改部分】构建 ffmpeg 命令列表，以避免 shell 解析特殊字符（如'#'）
-    command = [
-        'ffmpeg',
-        '-i', input_path,
-        '-ss', start_formatted,
-        '-to', end_formatted,
-        '-c:v', 'libx264',  # 或者使用 'libx265' 如果需要 HEVC 编码
-        '-crf', '23',  # 推荐值，可以调整
-        '-c:a', 'copy',  # 复制音频，避免处理和质量损失
-        '-preset', 'ultrafast',  # 编码速度和压缩率的平衡，'veryfast', 'fast', 'medium', 'slow'
-        '-y', output_path
-    ]
+    # 【新增部分】判断是否为全视频截取，如果是则使用流复制以节省时间
+    is_full_video = False
+    try:
+        # 使用 ffprobe 获取视频总时长
+        probe_command = [
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', input_path
+        ]
+        # capture_output=True 捕获输出用于计算
+        probe_result = subprocess.run(
+            probe_command,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        total_duration = float(probe_result.stdout.strip())
+
+        # 转换为浮点数进行比较
+        start_sec = float(start_formatted)
+        end_sec = float(end_formatted)
+
+        # 判断逻辑：起点接近0，且终点大于等于视频总时长（给予 0.1s 的浮点误差容忍度）
+        if start_sec <= 0.2 and end_sec >= (total_duration - 0.2):
+            is_full_video = True
+
+    except Exception as e:
+        # 如果获取时长失败（例如没有 ffprobe），则静默失败，回退到默认的重编码模式
+        # print(f"时长检测跳过: {e}")
+        pass
+
+    # 【修改部分】根据是否全长截取，构建不同的 ffmpeg 命令
+    if is_full_video:
+        print("检测到截取范围覆盖整个视频，已切换至【流复制模式】(速度极快，无画质损失)...")
+        command = [
+            'ffmpeg',
+            '-i', input_path,
+            '-c', 'copy',  # 视频和音频直接复制，不进行编码
+            '-y', output_path
+        ]
+    else:
+        # 原有的精确重编码逻辑
+        command = [
+            'ffmpeg',
+            '-i', input_path,
+            '-ss', start_formatted,
+            '-to', end_formatted,
+            '-c:v', 'libx264',  # 或者使用 'libx265' 如果需要 HEVC 编码
+            '-crf', '23',  # 推荐值，可以调整
+            '-c:a', 'copy',  # 复制音频，避免处理和质量损失
+            '-preset', 'ultrafast',  # 编码速度和压缩率的平衡，'veryfast', 'fast', 'medium', 'slow'
+            '-y', output_path
+        ]
 
     # print("模式: 精确重编码 (速度较慢)")
     # print(f"正在执行命令: {' '.join(command)}") # 如果需要调试，可以用这种方式打印
@@ -718,7 +760,7 @@ def clip_video_ms(
         return True, result.stderr or success_message
 
     except FileNotFoundError:
-        error_message = "错误：找不到 ffmpeg 命令。请确保 ffmpeg 已正确安装并已添加到系统环境变量 PATH 中。"
+        error_message = "错误：找不到 ffmpeg 或 ffprobe 命令。请确保它们已正确安装并已添加到系统环境变量 PATH 中。"
         print(error_message)
         return False, error_message
 

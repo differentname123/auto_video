@@ -374,7 +374,7 @@ def send_good_video(manager):
 
 def get_need_count(need_process_users):
     user_count_info = defaultdict(dict)
-    target_count = 5
+    target_count = 18
     user_statistic_info = read_json(USER_STATISTIC_INFO_PATH)
 
     for user_name in need_process_users:
@@ -392,7 +392,7 @@ def send_dig_video(manager):
     进行挖掘的视频投递
     :return:
     """
-    need_process_users = ['xiaosu']
+    need_process_users = ['junda', 'lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'jie', 'qiqixiao']
 
     user_count_info = get_need_count(need_process_users)
     need_user_count_info = {k: v for k, v in user_count_info.items() if v['need_count'] > 0}
@@ -403,6 +403,8 @@ def send_dig_video(manager):
     for hot_key, plan_info_list in exist_video_plan_info.items():
         # 只保留score 90分以上的plan_info_list
         filtered_plan_info_list = [plan_info for plan_info in plan_info_list if plan_info.get('score', 0) >= 90]
+        for filtered_plan_info in filtered_plan_info_list:
+            filtered_plan_info['hot_key'] = hot_key
         all_plan_info_list.extend(filtered_plan_info_list)
     # 再按照final_score降序排序
     all_plan_info_list = sorted(all_plan_info_list, key=lambda x: x.get('final_score', 0), reverse=True)
@@ -411,7 +413,7 @@ def send_dig_video(manager):
 
     select_plan_infp_list = []
     for plan_info in all_plan_info_list:
-        user_type = plan_info.get('user_type_info', 'fun')
+        user_type = plan_info.get('user_type_info', '99')
         video_id_list = plan_info.get('video_id_list', [])
         query_2 = {
             'video_id_list': video_id_list
@@ -435,9 +437,20 @@ def send_dig_video(manager):
 
     success_count = 0
     for plan_info in select_plan_infp_list:
+        hot_key = plan_info.get('hot_key', '')
         video_id_list = plan_info.get('video_id_list', [])
         final_score = plan_info.get('final_score', 0)
         target_user_name = plan_info.get('target_user_name', 'dahao')
+
+        if 'hot_key_list' not in user_count_info[target_user_name]:
+            user_count_info[target_user_name]['hot_key_list'] = []
+
+        if hot_key in user_count_info[target_user_name]['hot_key_list']:
+            # print(f"用户 {target_user_name} 已经发送过 热门关键词 {hot_key} ，跳过。")
+            continue
+        user_count_info[target_user_name]['hot_key_list'].append(hot_key)
+
+
         if user_count_info[target_user_name]['send_count'] >= user_count_info[target_user_name]['need_count'] and final_score < 5000:
             # print(f"用户 {target_user_name} 已达到今日发送目标，跳过后续视频。")
             continue
