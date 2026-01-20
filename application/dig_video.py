@@ -404,10 +404,11 @@ def find_good_plan(manager):
 
     exist_video_plan_info[hot_video].extend(video_content_plans)
 
-    for plan in video_content_plans:
+    for plan in exist_video_plan_info[hot_video]:
         plan['user_type_info'] = target_video_type
         plan['final_score'] = final_score
         plan['dig_type'] = dig_type
+        plan['timestamp'] = int(time.time())
         plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
