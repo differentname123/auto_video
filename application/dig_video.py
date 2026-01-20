@@ -16,7 +16,7 @@ import traceback
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
     DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
-    gen_true_type_and_tags
+    gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
@@ -24,7 +24,7 @@ from utils.mongo_manager import MongoManager
 NEED_REFRESH = False
 
 
-def query_all_material_videos():
+def query_all_material_videos(manager):
     """
     查询所有的素材视频，已剔除黑名单素材
     :return:
@@ -44,12 +44,22 @@ def query_all_material_videos():
                 f"all_need_plan_video_info.json 缓存文件存在且在一天之内，直接读取。当前数据量: {len(local_material_video_info)}, 耗时: {time.time() - start_time:.4f}s")  # [修改] 增加耗时和数据量打印
             return local_material_video_info
 
-    mongo_base_instance = gen_db_object()
-    manager = MongoManager(mongo_base_instance)
+
     query = {}
 
     all_material_list = manager.find_by_custom_query(manager.materials_collection, query)
     raw_db_count = len(all_material_list)  # [新增] 记录数据库原始查询数量
+
+    all_task_list = manager.find_by_custom_query(manager.tasks_collection, {})
+
+    all_video_type_map = {}
+    for task_info in all_task_list:
+        task_user_name = task_info.get('userName', '')
+        user_type = get_user_type(task_user_name)
+        video_id_list = task_info.get('video_id_list', [])
+        for video_id in video_id_list:
+            all_video_type_map[video_id] = user_type
+
 
     for video_info in all_material_list:
         video_id = video_info['video_id']
@@ -59,6 +69,7 @@ def query_all_material_videos():
             temp_dict = {}
             temp_dict['tags_info'] = tags_info
             temp_dict['logical_scene_info'] = logical_scene_info
+            temp_dict['video_type'] = all_video_type_map.get(video_id, 'game')
             local_material_video_info[video_id] = temp_dict
 
     count_before_filter = len(local_material_video_info)  # [新增] 记录过滤前的数据总量
@@ -116,9 +127,9 @@ def process_and_sort_video_info(video_info, target_tags_info):
 
     外部依赖: has_long_common_substring(str1, str2) -> bool
     """
-
     for vid, info in video_info.items():
         total_score = 0
+        common_str_list = []
 
         # --- 第一部分：基于 tags_info 的加权匹配 ---
         video_tags_info = info.get('tags_info', {})
@@ -128,23 +139,24 @@ def process_and_sort_video_info(video_info, target_tags_info):
             for v_tag, v_weight in video_tags_info.items():
                 for t_tag, t_weight in target_tags_info.items():
                     # 调用外部匹配函数
-                    if has_long_common_substring(v_tag, t_tag):
+
+                    has_comm, common_str = has_long_common_substring(v_tag, t_tag)
+                    if has_comm:
                         # 双方都有权重，乘积累加
                         total_score += v_weight * t_weight
-
-        # --- 第二部分：基于 info 全文字符串的匹配 ---
-        # 将整个字典转为字符串 (包含了 tags_info, logical_scene_info 等所有字段)
+                        common_str_list.append((v_tag, t_tag))
         info_str = str(info)
 
         for t_tag, t_weight in target_tags_info.items():
-            # 将“整个视频信息字符串”作为一个大字符串，去和目标标签对比
-            # 如果匹配成功，说明该视频的某个角落（摘要、场景、或者标签里）提到了这个词
-            if has_long_common_substring(info_str, t_tag):
-                # 因为全文匹配没有对应的视频侧权重，这里加上目标标签原本的权重
+            has_comm, common_str = has_long_common_substring(info_str, t_tag)
+
+            if has_comm:
                 total_score += t_weight * t_weight
+                common_str_list.append(common_str)
 
         # 将最终计算的总分写入字典
         info['match_score'] = total_score
+        info['common_str_list'] = common_str_list
 
     # 按照 match_score 降序排序
     # Python 3.7+ 字典保持插入顺序，这里重构一个有序字典返回
@@ -261,7 +273,10 @@ def check_video_content_plan(video_content_plans, valid_video_list):
 
 def gen_hot_video_llm(video_info, hot_video=None):
 
-    PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
+    if hot_video:
+        PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
+    else:
+        PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
     last_prompt = """# Action:
 请根据上述所有指令和数据，进行深度分析并输出最终结果：
 """
@@ -292,7 +307,29 @@ def gen_hot_video_llm(video_info, hot_video=None):
     return video_content_plans
 
 
-def find_good_plan():
+def get_target_tags(manager, task_info):
+    """
+    生成最终的目标标签
+    :param manager:
+    :param task_info:
+    :return:
+    """
+    upload_info_list = task_info.get('upload_info', [])
+    video_type, target_tags = gen_true_type_and_tags(upload_info_list)
+    video_id_list = task_info.get('video_id_list', [])
+    video_info_list = manager.find_materials_by_ids(video_id_list)
+    for video_info in video_info_list:
+        logical_scene_info = video_info.get('logical_scene_info', {})
+        tags_info = get_tags_info(logical_scene_info)
+        for tag, weight in tags_info.items():
+            if tag in target_tags:
+                target_tags[tag] += weight
+            else:
+                target_tags[tag] = weight
+    return target_tags
+
+
+def find_good_plan(manager):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
     :return:
@@ -301,7 +338,7 @@ def find_good_plan():
     good_video_list = statistic_play_info.get('good_video_list', [])
     good_video_list.sort(key=lambda x: len(x.get("choose_reason", [])), reverse=True)
     good_video_list = sorted(good_video_list, key=lambda x: (x.get('final_score', 0)), reverse=True)
-    target_video_type = random.choice(['game', 'fun'])
+    target_video_type = random.choice([ 'game', 'fun'])
 
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     user_type_info = user_config.get('user_type_info', {})
@@ -328,14 +365,15 @@ def find_good_plan():
     hot_video = upload_params.get('title', '变得有吸引力一点')
     final_score = selected_video_info.get('final_score', 0)
 
-    upload_info_list = selected_video_info.get('upload_info', [])
-    video_type, target_tags = gen_true_type_and_tags(upload_info_list)
-
-
     start_time = time.time()
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
-    all_video_info = query_all_material_videos()
+    all_video_info = query_all_material_videos(manager)
+
+    # 只保留与目标类型相同的视频素材
+    all_video_info = {vid: info for vid, info in all_video_info.items() if info.get('video_type') == target_video_type}
+
     # target_tags = gen_target_tags()
+    target_tags = get_target_tags(manager, selected_video_info)
 
     sorted_video_info = process_and_sort_video_info(all_video_info, target_tags)
     # 选择匹配得分前100的视频素材
@@ -343,7 +381,7 @@ def find_good_plan():
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
     good_video_info = {}
     for vid, info in top_video_info.items():
-        if info.get('match_score', 0) >= 1:
+        if info.get('match_score', 0) > 1:
             good_video_info[vid] = info
 
 
@@ -353,16 +391,23 @@ def find_good_plan():
         good_video_info = {key: good_video_info[key] for key in selected_keys}
 
     video_data = build_prompt_data(good_video_info)
-
-    print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video}  ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    video_content_plans = gen_hot_video_llm(video_data, hot_video)
     if hot_video not in exist_video_plan_info:
         exist_video_plan_info[hot_video] = []
+    print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    dig_type = 'hot_video'
+    if len(exist_video_plan_info[hot_video]) >= 20:
+        print(f"当前热门视频主题: {hot_video} 已经挖掘过足够多的视频方案，进行自由挖掘，当前方案数量: {len(exist_video_plan_info[hot_video])}")
+        video_content_plans = gen_hot_video_llm(video_data, None)
+        dig_type = 'free'
+    else:
+        video_content_plans = gen_hot_video_llm(video_data, hot_video)
+
     exist_video_plan_info[hot_video].extend(video_content_plans)
 
     for plan in video_content_plans:
         plan['user_type_info'] = target_video_type
         plan['final_score'] = final_score
+        plan['dig_type'] = dig_type
         plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
 
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
@@ -371,10 +416,11 @@ def find_good_plan():
 
 
 if __name__ == '__main__':
-
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
     while True:
         try:
-            find_good_plan()
+            find_good_plan(manager)
         except Exception as e:
             traceback.print_exc()
             print(f"挖掘视频方案时出错: {e}")
