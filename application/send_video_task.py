@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 import requests
 import json
 
+from application.dig_video import query_all_material_videos
 from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, \
     DIG_HOT_VIDEO_PLAN_FILE, VIDEO_MAX_RETRY_TIMES, TaskStatus
 from utils.common_utils import read_json, save_json, get_user_type, gen_true_type_and_tags, \
-    has_continuous_common_substring
+    has_continuous_common_substring, has_long_common_substring
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -667,7 +668,7 @@ def gen_user_detail_upload_info(manager, user_list):
         total_today = total_count + platform_upload_count
         target_count = 30
         if user_name in simple_need_process_users:
-            target_count = 5
+            target_count = 2
         need_count = max(target_count - total_today, 0)
         need_count = min(need_count, 1)
         detail_info['need_count'] = need_count
@@ -734,7 +735,51 @@ def get_available_count(manager, video_info):
 
     return can_use_count
 
-def match_user(user_detail_upload_info, video_info):
+def check_user_tags(user_name, video_info, all_video_info):
+    """
+    检查用户的指定tag列表是否符合要求
+    :param user_name:
+    :param video_info:
+    :return:
+    """
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_tags_info = user_config.get('user_tags', {})
+    user_tags = user_tags_info.get(user_name, [])
+    if not user_tags:
+        return True
+
+    user_tags_info = {}
+
+    for tag in user_tags:
+        user_tags_info[tag] = 1
+
+    all_video_tags = {}
+
+    video_id_list = video_info.get('video_id_list', [])
+    for video_id in video_id_list:
+        video_detail_info = all_video_info.get(video_id, {})
+        video_tags = video_detail_info.get('tags_info', {})
+        for tag, count in video_tags.items():
+            if tag not in all_video_tags:
+                all_video_tags[tag] = 0
+            all_video_tags[tag] += count
+
+    total_score = 0
+    common_str_list = []
+    for v_tag, v_weight in all_video_tags.items():
+        for t_tag, t_weight in user_tags_info.items():
+            # 调用外部匹配函数
+            has_comm, common_str = has_long_common_substring(v_tag, t_tag)
+            if has_comm:
+                # 双方都有权重，乘积累加
+                total_score += v_weight * t_weight
+                common_str_list.append((v_tag, t_tag))
+    if total_score > 2:
+        return True
+    return False
+
+
+def match_user(user_detail_upload_info, video_info, all_video_info):
     """
     获取匹配的用户列表,主要是进行主题太多的检查以及相似稿件的数量
     :param user_detail_upload_info:
@@ -762,6 +807,9 @@ def match_user(user_detail_upload_info, video_info):
         if user_type != video_type:
             continue
 
+        if check_user_tags(user_name, video_info, all_video_info) is False:
+            continue
+
         # 检查是否重复题材超过限制
         hot_topic_info = detail_info.get('hot_topic', {})
         exist_hot_topic_count = hot_topic_info.get(hot_topic, 0)
@@ -781,7 +829,7 @@ def match_user(user_detail_upload_info, video_info):
 
 
 
-def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list):
+def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info):
     """
     直接获取时候投稿video_info的用户列表
     :param user_detail_upload_info:
@@ -800,7 +848,7 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
         return []
 
     can_use_count = get_available_count(manager, video_info)
-    match_user_list = match_user(user_detail_upload_info, video_info)
+    match_user_list = match_user(user_detail_upload_info, video_info, all_video_info)
     video_info['match_user_list'] = match_user_list
     sample_size = min(len(match_user_list), can_use_count)
     sample_size = min(sample_size, 1)
@@ -928,6 +976,9 @@ def send_good_plan(manager):
     """
     need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
+    all_video_info = query_all_material_videos(manager, False)
+
+
 
     # 获取需要投稿的数据
     to_upload_video_list = build_need_upload_video()
@@ -935,7 +986,7 @@ def send_good_plan(manager):
     final_video_list = []
 
     for video_info in to_upload_video_list:
-        chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list)
+        chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info)
         for user_name in chosen_user_list:
             copy_video_info = video_info.copy()
             copy_video_info['user_name'] = user_name
@@ -970,4 +1021,4 @@ if __name__ == "__main__":
 
         # 暂停 30 分钟 (30 * 60 秒)
         print("等待30分钟后再次运行...")
-        time.sleep(60 * 10)
+        time.sleep(60 * 30)
