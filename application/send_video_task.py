@@ -926,7 +926,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
 
     # 获取需要投稿的数据

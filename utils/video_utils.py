@@ -15,6 +15,7 @@ import random
 import shlex
 import tempfile
 import uuid
+from datetime import datetime
 from typing import Union, List
 
 import json
@@ -3654,3 +3655,32 @@ def adjust_audio_duration(
     except Exception as e:
         print(f"处理过程中发生未知错误: {e}")
         return fallback_copy()
+
+
+def has_audio(path):
+    LOG_FILE = r'W:\project\python_project\auto_video\config\error_audio.txt'
+    try:
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        # 解析 JSON
+        streams = json.loads(result.stdout).get('streams', [])
+
+        # 判断是否存在音频流
+        audio_exists = any(stream['codec_type'] == 'audio' for stream in streams)
+
+        # 如果没有音频，写入日志
+        if not audio_exists:
+            # 获取当前时间
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # 使用 'a' (append) 模式打开文件，确保追加而不是覆盖
+            with open(LOG_FILE, 'a', encoding='utf-8') as f:
+                f.write(f"[{current_time}] Path: {path}\n")
+
+        return audio_exists
+
+    except Exception as e:
+        # 简单的错误处理，防止 ffprobe 失败导致程序崩溃
+        print(f"Error processing {path}: {e}")
+        return False

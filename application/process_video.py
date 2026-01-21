@@ -25,7 +25,7 @@ from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_l
 from application.video_process import gen_video_by_script
 from utils.bilibili.bili_utils import check_duplicate_video
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
-    clip_and_merge_segments
+    clip_and_merge_segments, has_audio
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths, \
     check_failure_details, fix_split_time_points
@@ -403,7 +403,10 @@ def prepare_basic_video_info(video_info_dict):
                 print(f"{log_pre} 视频 {video_id} 下载并移动成功。")
                 video_info['metadata'] = metadata
 
-
+            check_result = has_audio(origin_video_path)
+            if not check_result:
+                print(f"{log_pre} 警告: 视频 {video_id} 不包含音频轨道，可能影响后续处理。")
+                raise ValueError(f"视频 {video_id} 不包含音频轨道")
             # 步骤B: 保证评论信息完整
             comment_list = video_info.get('comment_list', [])
             if not comment_list or NEED_REFRESH_COMMENT:
@@ -889,7 +892,7 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  '_id': ObjectId("69687104e22dbe4a9bd4826d")
+  '_id': ObjectId("69663233e22dbe4a9bd47fa8")
 }
     # recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
