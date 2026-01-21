@@ -407,7 +407,7 @@ def _process_material_construction(input_video_list: List[Dict],
             errors.append(f"第 {idx} 条记录时间戳错误 (URL: {url}): {time_err}")
             continue
 
-        final_material['video_overlays_text_info'] = None
+        # final_material['video_overlays_text_info'] = None
 
         # D. 加入结果集
         current_batch_video_ids.add(video_id)

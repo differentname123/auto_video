@@ -390,7 +390,7 @@ def check_timestamp(all_timestamps, duration):
     return ""
 
 
-def get_remaining_segments(duration_ms, remove_segments, min_duration=1):
+def get_remaining_segments(duration_ms, remove_segments, min_duration=1000):
     """
     计算删除指定时间段后的视频保留区间（左闭右开区间 [start, end)）。
 
@@ -1131,7 +1131,7 @@ def gen_true_type_and_tags(upload_info_list):
             if category_name:
                 category_name_list.append(category_name)
         category_name_list_str = str(category_name_list)
-        video_type = "no"
+        video_type = "fun"
         if category_name_list_str:
             if "游戏" in category_name_list_str:
                 video_type = "game"

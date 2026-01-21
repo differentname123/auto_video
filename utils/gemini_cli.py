@@ -2,6 +2,7 @@ import functools
 import os
 import subprocess
 import json
+import tempfile
 import traceback
 import time
 from filelock import FileLock, Timeout
@@ -61,22 +62,24 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     try:
         # vvvvvv 这里是函数核心逻辑 vvvvvv
         try:
-            npm_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'npm')
-            gemini_executable = os.path.join(npm_path, 'gemini.cmd' if os.name == 'nt' else 'gemini')
-            command = [gemini_executable, '-m', model_name, '-o', 'json']
+            with tempfile.TemporaryDirectory() as temp_dir:
+                npm_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'npm')
+                gemini_executable = os.path.join(npm_path, 'gemini.cmd' if os.name == 'nt' else 'gemini')
+                command = [gemini_executable, '-m', model_name, '-o', 'json']
 
-            result = subprocess.run(
-                command,
-                input=prompt,
-                capture_output=True,
-                text=True,
-                check=True,  # check=True 会在返回码非0时抛出 CalledProcessError
-                encoding='utf-8'
-            )
+                result = subprocess.run(
+                    command,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    encoding='utf-8',
+                    cwd=temp_dir  # 指定空临时目录作为 CWD
+                )
 
-            response_data = json.loads(result.stdout)
-            text_content = response_data.get('response')
-            return text_content.strip()
+                response_data = json.loads(result.stdout)
+                text_content = response_data.get('response')
+                return text_content.strip()
 
         except subprocess.CalledProcessError as e:
             # 当 gemini-cli 调用失败时，捕获异常并打印详细信息
@@ -104,9 +107,15 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
 
 # --- 业务代码 (同样无需修改) ---
 if __name__ == "__main__":
-    from multiprocessing import Pool
 
-    prompts = [f"任务 {i}" for i in range(1, 7)]
-    with Pool(processes=4) as pool:
-        results = pool.map(ask_gemini, prompts)
-    print("\n--- 所有任务完成 ---")
+    data = ask_gemini("你觉得我是干什么的，这次给你的完整提示词是什么，请完整的返回给我")
+    print(data)
+
+    #
+    # from multiprocessing import Pool
+    #
+    # prompts = [f"任务 {i}" for i in range(1, 7)]
+    # with Pool(processes=4) as pool:
+    #     results = pool.map(ask_gemini, prompts)
+    #
+    # print("\n--- 所有任务完成 ---")

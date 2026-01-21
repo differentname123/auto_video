@@ -271,8 +271,7 @@ def find_motion_bbox(video_path, start_frame=60, end_frame_offset=60, num_sample
     points = cv2.findNonZero(motion_accumulator)
     if points is None:
         print("警告：在指定片段内未检测到任何运动。将返回整个视频区域。")
-        return 0, 0, frame_width, frame_height
-
+        return ((0, 0, frame_width, frame_height), frame_width, frame_height)
     # 后续处理与之前相同
     x, y, w, h = cv2.boundingRect(points)
     x = max(0, x - padding)
@@ -782,14 +781,44 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
     使用 filter_complex 将一小批 video_paths 合并为 output_path。
     probe_fn 是你现有的 probe_video_new，接受路径返回 (w,h,fps,sar)
     """
-    import json
-    import subprocess
 
-    def has_audio(path):
-        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', path]
+    def _probe_audio_and_duration(path):
+        """
+        获取文件是否有音频流以及文件的总时长
+        """
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', path]
         result = subprocess.run(cmd, capture_output=True, text=True)
-        streams = json.loads(result.stdout).get('streams', [])
-        return any(stream['codec_type'] == 'audio' for stream in streams)
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return False, 0.0
+
+        streams = data.get('streams', [])
+        fmt = data.get('format', {})
+
+        # 判断是否有音频
+        has_audio_stream = any(stream['codec_type'] == 'audio' for stream in streams)
+
+        # 获取时长，优先从 format 获取，失败则从 streams 获取
+        duration = 0.0
+        try:
+            if 'duration' in fmt:
+                duration = float(fmt['duration'])
+        except:
+            pass
+
+        if duration <= 0:
+            for stream in streams:
+                if 'duration' in stream:
+                    try:
+                        d = float(stream['duration'])
+                        if d > 0:
+                            duration = d
+                            break
+                    except:
+                        pass
+
+        return has_audio_stream, duration
 
     if not video_paths:
         raise ValueError("video_paths 不能为空")
@@ -814,6 +843,9 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
     for idx, path in enumerate(video_paths):
         inputs += ["-i", path]
 
+        # 获取音频状态和时长
+        has_audio_flag, duration_val = _probe_audio_and_duration(path)
+
         if idx == 0:
             vf_filters.append(
                 f"[{idx}:v]"
@@ -833,7 +865,7 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
                 f"setpts=PTS-STARTPTS[v{idx}]"
             )
 
-        if has_audio(path):
+        if has_audio_flag:
             vf_filters.append(
                 f"[{idx}:a]"
                 f"volume=1,"
@@ -842,8 +874,9 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
                 f"asetpts=PTS-STARTPTS[a{idx}]"
             )
         else:
+            # 修改点：生成静音时必须指定 duration，否则流是无限长的，会导致 concat 卡死
             vf_filters.append(
-                f"anullsrc=channel_layout=stereo:sample_rate=48000[a{idx}]"
+                f"anullsrc=channel_layout=stereo:sample_rate=48000:duration={duration_val}[a{idx}]"
             )
 
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(video_paths)))

@@ -469,6 +469,7 @@ def gen_derive_videos(video_info_dict):
         try:
             process_origin_video(video_id, video_info)
         except Exception as e:
+            traceback.print_exc()
             error_info = f"严重错误: 处理视频 {video_id} 的原始视频时发生异常: {str(e)}"
             print(error_info)
             failure_details[video_id] = {
@@ -611,6 +612,7 @@ def process_single_task(task_info, manager, gen_video=False):
             return failure_details, video_info_dict, chosen_script
         task_info['status'] = TaskStatus.TO_UPLOADED
         manager.upsert_tasks([task_info])
+        update_video_info(video_info_dict, manager, failure_details, error_key='gen_video_error')
         print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
     print(f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
@@ -886,9 +888,9 @@ if __name__ == '__main__':
         }
     }
 
-#     query_2 = {
-#   '_id': ObjectId("69689b57e22dbe4a9bd4829e")
-# }
+    query_2 = {
+  '_id': ObjectId("69687104e22dbe4a9bd4826d")
+}
     # recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()

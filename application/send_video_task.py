@@ -562,6 +562,14 @@ def gen_standard_video_info_by_dig_data(plan_info):
             dig_type = plan_info.get('dig_type', 0)
             creative_guidance = plan_info.get('creative_guidance', '')
             timestamp = plan_info.get('timestamp', 0)
+            # 获取当前的timestamp
+            now_timestamp = int(datetime.now().timestamp())
+            # 计算相差的小时数量
+            hours_diff = (now_timestamp - timestamp) / 3600
+            final_score = (100 - hours_diff) / 100 * final_score
+            if final_score < 0:
+                continue
+
             temp_dict = {
                 'video_id_list': video_id_list,
                 'video_theme': video_theme,
@@ -747,6 +755,9 @@ def match_user(user_detail_upload_info, video_info):
         hot_topic_count += 1
 
     for user_name, detail_info in user_detail_upload_info.items():
+        need_count = detail_info.get('need_count', 0)
+        if need_count <= 0 and not is_high_score:
+            continue
         user_type = get_user_type(user_name)
         if user_type != video_type:
             continue
@@ -959,4 +970,4 @@ if __name__ == "__main__":
 
         # 暂停 30 分钟 (30 * 60 秒)
         print("等待30分钟后再次运行...")
-        time.sleep(60 * 30)
+        time.sleep(60 * 10)

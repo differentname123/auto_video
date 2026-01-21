@@ -1010,6 +1010,8 @@ def gen_hudong_by_llm(video_path, video_info):
     # 模型选择逻辑（与原版保持一致）
     max_duration = 600
     model_name = "gemini-3-flash-preview"
+    # model_name = "gemini-flash-latest"
+
     if duration > max_duration:
         # 即使超过时长，模型名也没变，但保留打印语句
         print(f"{log_pre} 视频时长 {duration} 秒超过最大限制 {max_duration} 秒，使用默认处理方式。  ")
@@ -1472,7 +1474,9 @@ def gen_upload_info_llm(task_info, video_info_dict):
     prompt_file_path = './prompt/投稿相关信息的生成.txt'
     prompt = read_file_to_str(prompt_file_path)
     full_prompt = build_upload_info_prompt(prompt, task_info, video_info_dict)
+    model_name = "gemini-flash-latest"
     model_name = "gemini-3-flash-preview"
+
     video_script_info = task_info.get('video_script_info', [])
 
     error_info = ""
