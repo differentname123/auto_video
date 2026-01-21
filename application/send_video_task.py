@@ -562,11 +562,13 @@ def gen_standard_video_info_by_dig_data(plan_info):
             final_score = plan_info.get('final_score', 0)
             dig_type = plan_info.get('dig_type', 0)
             creative_guidance = plan_info.get('creative_guidance', '')
-            timestamp = plan_info.get('timestamp', 0)
-            # 获取当前的timestamp
             now_timestamp = int(datetime.now().timestamp())
+
+            dig_time = plan_info.get('dig_time', now_timestamp - 3600 * 5)
+            update_time = plan_info.get('update_time', 0)
+            # 获取当前的timestamp
             # 计算相差的小时数量
-            hours_diff = (now_timestamp - timestamp) / 3600
+            hours_diff = (now_timestamp - dig_time) / 3600
             final_score = (100 - hours_diff) / 100 * final_score
             if final_score < 0:
                 continue
@@ -578,7 +580,8 @@ def gen_standard_video_info_by_dig_data(plan_info):
                 'video_type': video_type,
                 'final_score': final_score,
                 'dig_type': dig_type,
-                'timestamp': timestamp,
+                'dig_time': dig_time,
+                'update_time': update_time,
                 "creative_guidance": creative_guidance,
             }
             standard_video_list.append(temp_dict)
@@ -974,7 +977,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 

@@ -301,6 +301,9 @@ def gen_hot_video_llm(video_info, hot_video=None):
             is_valid, error_message = check_video_content_plan(video_content_plans, valid_video_list)
             if not is_valid:
                 raise ValueError(f"第 {attempt} 次尝试: LLM 返回的数据格式或内容无效: {error_message}")
+
+            for plan in video_content_plans:
+                plan['dig_time'] = int(time.time())
             return video_content_plans
         except Exception as e:
             print(f"第 {attempt} 次尝试: 生成视频内容计划时出错: {e}")
@@ -360,7 +363,7 @@ def get_need_dig_video_list():
         all_dig_video_list.extend(final_good_video_list)
     formatted_map = json.dumps(video_type_count_map, ensure_ascii=False, indent=4)
     print(f"本次挖掘总共涉及热门视频数量: {len(all_dig_video_list)} ，各题材视频数量分布:\n {formatted_map} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    return all_dig_video_list, good_tags_info
+    return all_dig_video_list, good_tags_info, good_video_list
 
 
 def get_target_video(all_video_info, target_tags, target_video_type):
@@ -404,6 +407,33 @@ def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=5):
         return False
     return True
 
+def update_exist_dig_data(exist_video_plan_info, good_video_list):
+    """
+    根据good_video_list更新exist_video_plan_info已有话题的得分
+    :param exist_video_plan_info:
+    :param good_video_list:
+    :return:
+    """
+    hot_topic_score_map = {}
+
+    for video_info in good_video_list:
+        upload_params = video_info.get('upload_params', {})
+        hot_video = upload_params.get('title', '变得有吸引力一点')
+        final_score = video_info.get('final_score', 0)
+        hot_topic_score_map[hot_video] = final_score
+
+    for hot_topic, video_info_list in exist_video_plan_info.items():
+        if hot_topic in hot_topic_score_map:
+            final_score = hot_topic_score_map[hot_topic]
+            for plan in video_info_list:
+                plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.5
+                plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        else:
+            for plan in video_info_list:
+                plan['final_score'] = plan['score']
+                plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    return exist_video_plan_info
+
 
 def find_good_plan(manager):
     """
@@ -411,11 +441,13 @@ def find_good_plan(manager):
     :return:
     """
     # 获取本轮待挖掘的视频
-    all_dig_video_list, good_tags_info = get_need_dig_video_list()
-
+    all_dig_video_list, good_tags_info, good_video_list = get_need_dig_video_list()
     # 判断是否有新的话题，有的化就需要重新拉取数据
     is_need_refresh = False
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+    exist_video_plan_info = update_exist_dig_data(exist_video_plan_info, good_video_list)
+    save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+
     for selected_video_info in all_dig_video_list:
         upload_params = selected_video_info.get('upload_params', {})
         hot_video = upload_params.get('title', '变得有吸引力一点')
@@ -452,7 +484,7 @@ def find_good_plan(manager):
         for plan in exist_video_plan_info[hot_video]:
             creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
             plan['video_type'] = target_video_type
-            plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
+            plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.5
             plan['dig_type'] = "exist_video_dig"
             plan['timestamp'] = int(time.time())
             plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
