@@ -539,6 +539,7 @@ def gen_standard_video_info_by_statistic_data(good_video_list):
             'dig_type': dig_type,
             "creative_guidance": creative_guidance,
         }
+        temp_dict.update(video_info)
         standard_video_list.append(temp_dict)
     return standard_video_list
 
@@ -651,6 +652,8 @@ def gen_user_detail_upload_info(manager, user_list):
 
     simple_need_process_users = user_config.get('simple_need_process_users', [])
     for user_name, detail_info in user_detail_upload_info.items():
+        if user_name == "xiaoxiaosu":
+            print()
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
         total_today = total_count + platform_upload_count
@@ -678,7 +681,11 @@ def get_available_count(manager, video_info):
     final_score = video_info.get('final_score', 0)
     if final_score > 1000:
         single_count += 1
+    if final_score > 5000:
+        single_count += 2
 
+    if final_score > 10000:
+        single_count += 3
     video_id_list = video_info.get('video_id_list', [])
     query_2 = {
         'video_id_list': video_id_list,
@@ -693,7 +700,7 @@ def get_available_count(manager, video_info):
     else:
         latest_create_time = now
     is_within_3_hours = latest_create_time >= (now - timedelta(hours=3))
-    if is_within_3_hours:
+    if is_within_3_hours and final_score > 1000:
         single_count += 1
     if len(exist_tasks) > 1:
         single_count += 1
@@ -711,6 +718,8 @@ def get_available_count(manager, video_info):
     video_info['can_use_count'] = can_use_count
 
     video_info['latest_create_time'] = latest_create_time.strftime('%Y-%m-%d %H:%M:%S')
+    # if "资本反噬实录" in video_info.get('hot_topic', ''):
+    #     print()
 
 
 
@@ -776,10 +785,12 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
         used_video_list.append(video_id)
     used_video_list = list(set(used_video_list))
     if is_all_used:
+        video_info['reason'] = "视频全部使用过，跳过"
         return []
 
     can_use_count = get_available_count(manager, video_info)
     match_user_list = match_user(user_detail_upload_info, video_info)
+    video_info['match_user_list'] = match_user_list
     sample_size = min(len(match_user_list), can_use_count)
     sample_size = min(sample_size, 1)
 
@@ -904,7 +915,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['xiaosu']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
 
     # 获取需要投稿的数据
