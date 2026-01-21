@@ -933,12 +933,16 @@ def auto_upload(manager):
     # 注意：tobe_upload_video_info 在 process_idle_tasks 中可能被修改，这里使用修改后的值，逻辑正确
     gen_all_statistic_info(already_upload_users, user_upload_info, filter_task_list, tobe_upload_video_info)
     concurrent.futures.wait(futures, timeout=None)
+    return len(sort_not_existing_video_tasks)
 
 
 if __name__ == "__main__":
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     while True:
-        auto_upload(manager)
+        exist_count = auto_upload(manager)
         print(f"本轮投稿处理完成，等待下一轮...当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(60)  # 每分钟运行一次
+        if exist_count == 0:
+            time.sleep(60)  # 每分钟运行一次
+        else:
+            print("检测到本轮还有未生成视频的任务，马上进行下一轮投稿处理...")
