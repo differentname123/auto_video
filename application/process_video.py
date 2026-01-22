@@ -855,7 +855,7 @@ def recover_task():
         },
         "failure_details": {
             "$not": {
-                "$regex": "禁止"
+                "$regex": "禁止|Content blocked"
             }
         }
     }
