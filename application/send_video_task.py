@@ -1024,5 +1024,5 @@ if __name__ == "__main__":
             print(f"出错了: {e}")
 
         # 暂停 30 分钟 (30 * 60 秒)
-        print("等待30分钟后再次运行...")
+        print(f"等待30分钟后再次运行...当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
         time.sleep(60 * 30)

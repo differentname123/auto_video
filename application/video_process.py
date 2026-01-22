@@ -1202,12 +1202,57 @@ def gen_video_by_script(task_info, video_info_dict):
 
 
 if __name__ == "__main__":
-    mongo_base_instance = gen_db_object()
-    manager = MongoManager(mongo_base_instance)
-    video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
-    # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
-    for video_info in video_info_list:
-        video_id = video_info.get('video_id')
-        # fix_owner_asr_by_subtitle(video_info)
-        _process_single_video(video_id, video_info, is_need_narration=True)
+    # mongo_base_instance = gen_db_object()
+    # manager = MongoManager(mongo_base_instance)
+    # video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
+    # # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+    # video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
+    # for video_info in video_info_list:
+    #     video_id = video_info.get('video_id')
+    #     # fix_owner_asr_by_subtitle(video_info)
+    #     _process_single_video(video_id, video_info, is_need_narration=True)
+
+    # time_list = [11167, 12433, 11750]
+    # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
+    # for timestamp in time_list:
+    #     timestamp = timestamp / 1000
+    #     save_frames_around_timestamp(my_video_path, timestamp, 3, str(os.path.join(os.path.dirname(my_video_path), 'scenes', f"{timestamp}")))
+
+    merged_timestamps = read_json(r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution_scenes\merged_timestamps.json")
+    valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
+    max_delta_ms = 1000
+    target_ts = 11750
+    # 2. 筛选候选者
+    candidates = [
+        shot for shot in valid_camera_shots
+        if abs(shot[0] - target_ts) <= max_delta_ms
+    ]
+
+    # 3. 寻找最佳匹配 (Visual)
+    best_shot = None
+    if candidates:
+        # --- 步骤 1: 预处理 (加工数据) ---
+        # 我们创建一个新的列表，把 score 和 diff 算好放进去
+        # 新的结构变成了: (原始ts, 原始count, score, diff)
+        processed_candidates = []
+
+        for shot in candidates:
+            ts = shot[0]
+            count = shot[1]
+
+            # 计算逻辑
+            diff = ts - target_ts
+            ratio = 1
+            if diff > 0:
+                ratio = 1
+            diff = abs(ts - target_ts) * ratio
+            score = diff / count if count > 0 else float('inf')
+
+            # 【关键点】把算好的 score 和 diff 加到元组后面
+            # 现在的结构是: index 0=ts, 1=count, 2=score, 3=diff
+            processed_candidates.append((ts, count, score, diff))
+
+        # --- 步骤 2: 评选 (直接根据 index 2 的 score 选) ---
+        # x[2] 就是我们在上面算好的 score
+        best_shot = min(processed_candidates, key=lambda x: x[2])
+    print()

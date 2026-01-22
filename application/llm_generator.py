@@ -381,14 +381,32 @@ def align_single_timestamp(target_ts, merged_timestamps, video_path, max_delta_m
     # 3. 寻找最佳匹配 (Visual)
     best_shot = None
     if candidates:
-        def calculate_key(shot):
+        # 计算所有候选者的分数并存储为 (score, shot)
+        scored_candidates = []
+        for shot in candidates:
             diff = abs(shot[0] - target_ts)
             count = shot[1]
             # 评分逻辑：Diff 越小越好，Count 越大越好
             score = diff / count if count > 0 else float('inf')
-            return (score, diff)
+            scored_candidates.append((score, shot))
 
-        best_shot = min(candidates, key=calculate_key)
+        # 按分数升序排序（分数越小越好）
+        scored_candidates.sort(key=lambda x: x[0])
+
+        if len(scored_candidates) == 1:
+            # 只有一个候选项，直接选中
+            best_shot = scored_candidates[0][1]
+        else:
+            best_score = scored_candidates[0][0]
+            second_score = scored_candidates[1][0]
+
+            # 逻辑：
+            # 1. 如果最好的分数 < 150，直接选中 (绝对优秀，无需比较)
+            # 2. 如果最好的分数 >= 150，则要求它比第二名小 50 以上 (相对优势)
+            if best_score < 150 or (second_score - best_score > 50):
+                best_shot = scored_candidates[0][1]
+            else:
+                best_shot = None  # 既不够优秀，优势也不够大，放弃
 
     # 4. 决策与执行
     # 策略 A: 视觉对齐 (找到且 count >= 2)
@@ -1702,6 +1720,7 @@ def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path
     valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
 
     # 2. 筛选候选者
+    # 2. 筛选候选者
     candidates = [
         shot for shot in valid_camera_shots
         if abs(shot[0] - target_ts) <= max_delta_ms
@@ -1710,14 +1729,32 @@ def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path
     # 3. 寻找最佳匹配 (Visual)
     best_shot = None
     if candidates:
-        def calculate_key(shot):
+        # 计算所有候选者的分数并存储为 (score, shot)
+        scored_candidates = []
+        for shot in candidates:
             diff = abs(shot[0] - target_ts)
             count = shot[1]
             # 评分逻辑：Diff 越小越好，Count 越大越好
             score = diff / count if count > 0 else float('inf')
-            return (score, diff)
+            scored_candidates.append((score, shot))
 
-        best_shot = min(candidates, key=calculate_key)
+        # 按分数升序排序（分数越小越好）
+        scored_candidates.sort(key=lambda x: x[0])
+
+        if len(scored_candidates) == 1:
+            # 只有一个候选项，直接选中
+            best_shot = scored_candidates[0][1]
+        else:
+            best_score = scored_candidates[0][0]
+            second_score = scored_candidates[1][0]
+
+            # 逻辑：
+            # 1. 如果最好的分数 < 150，直接选中 (绝对优秀，无需比较)
+            # 2. 如果最好的分数 >= 150，则要求它比第二名小 50 以上 (相对优势)
+            if best_score < 150 or (second_score - best_score > 50):
+                best_shot = scored_candidates[0][1]
+            else:
+                best_shot = None  # 既不够优秀，优势也不够大，放弃
 
     # 4. 决策与执行
     # 策略 A: 视觉对齐 (找到且 count >= 2)
