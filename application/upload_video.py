@@ -945,4 +945,5 @@ if __name__ == "__main__":
         if exist_count == 0:
             time.sleep(60)  # 每分钟运行一次
         else:
+            time.sleep(1)  # 每分钟运行一次
             print("检测到本轮还有未生成视频的任务，马上进行下一轮投稿处理...")

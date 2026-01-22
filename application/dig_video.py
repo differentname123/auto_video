@@ -416,11 +416,24 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
     """
     hot_topic_score_map = {}
 
+    video_score_info = {}
+
     for video_info in good_video_list:
         upload_params = video_info.get('upload_params', {})
         hot_video = upload_params.get('title', '变得有吸引力一点')
         final_score = video_info.get('final_score', 0)
         hot_topic_score_map[hot_video] = final_score
+        video_id_list = video_info.get('video_id_list', [])
+        for video_id in video_id_list:
+            if video_id not in video_score_info:
+                video_score_info[video_id] = []
+            video_score_info[video_id].append(final_score)
+
+    # 最终生成一个video_id的平均得分的map
+    video_id_avg_score_map = {}
+    for video_id, score_list in video_score_info.items():
+        avg_score = sum(score_list) / len(score_list)
+        video_id_avg_score_map[video_id] = avg_score
 
     for hot_topic, video_info_list in exist_video_plan_info.items():
         if hot_topic in hot_topic_score_map:
@@ -430,9 +443,18 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
                 plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         else:
             for plan in video_info_list:
-                plan['final_score'] = plan['score']
+                final_score = 100
+                video_id_list = plan.get('video_id_list', [])
+                temp_score_list = []
+                for video_id in video_id_list:
+                    temp_score_list.append(video_id_avg_score_map.get(video_id, 0))
+                # 计算平均值
+                if len(temp_score_list) > 0:
+                    final_score = sum(temp_score_list) / len(temp_score_list) + final_score
+
+                plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
                 plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-    return exist_video_plan_info
+    return exist_video_plan_info, video_id_avg_score_map
 
 
 def find_good_plan(manager):
@@ -445,7 +467,7 @@ def find_good_plan(manager):
     # 判断是否有新的话题，有的化就需要重新拉取数据
     is_need_refresh = False
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
-    exist_video_plan_info = update_exist_dig_data(exist_video_plan_info, good_video_list)
+    exist_video_plan_info, video_id_avg_score_map = update_exist_dig_data(exist_video_plan_info, good_video_list)
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
     for selected_video_info in all_dig_video_list:
@@ -509,6 +531,15 @@ def find_good_plan(manager):
             exist_video_plan_info[hot_video].append(plan_info)
             final_score = 100
             for plan in exist_video_plan_info[hot_video]:
+
+                video_id_list = plan.get('video_id_list', [])
+                temp_score_list = []
+                for video_id in video_id_list:
+                    temp_score_list.append(video_id_avg_score_map.get(video_id, 0))
+                # 计算平均值
+                if len(temp_score_list) > 0:
+                    final_score = sum(temp_score_list) / len(temp_score_list) + final_score
+
                 creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8

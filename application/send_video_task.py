@@ -619,6 +619,7 @@ def gen_user_detail_upload_info(manager, user_list):
             "hot_topic": {},
             "success_count": 0,
             "total_count": 0,
+            "unique_video_id_list":[]
         } for user_name in user_list
     }
 
@@ -651,6 +652,11 @@ def gen_user_detail_upload_info(manager, user_list):
         hot_topic = creation_guidance_info.get('hot_topic', '未知主题')
         user_data["hot_topic"][hot_topic] = user_data["hot_topic"].get(hot_topic, 0) + 1
 
+        video_id_list = task_info.get('video_id_list', [])
+        for video_id in video_id_list:
+            if video_id not in user_data["unique_video_id_list"]:
+                user_data["unique_video_id_list"].append(video_id)
+
         # 统计状态
         status = task_info.get('status')
         if status == TaskStatus.UPLOADED:
@@ -663,13 +669,15 @@ def gen_user_detail_upload_info(manager, user_list):
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
 
     simple_need_process_users = user_config.get('simple_need_process_users', [])
+    max_exist_similar_count, max_total_count = get_send_count_by_hour()
+
     for user_name, detail_info in user_detail_upload_info.items():
         if user_name == "xiaoxiaosu":
             print()
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
         total_today = total_count + platform_upload_count
-        target_count = 20
+        target_count = max_total_count
         if user_name in simple_need_process_users:
             target_count = 2
         need_count = max(target_count - total_today, 0)
@@ -783,6 +791,32 @@ def check_user_tags(user_name, video_info, all_video_info):
     return False
 
 
+def get_send_count_by_hour():
+    """
+    通过时间范围来确定几个比较重要的变量信息
+    :return:
+    """
+    current_hour = datetime.now().hour
+    if 0 <= current_hour < 5:
+        max_exist_similar_count = 0
+        max_total_count = 6
+    elif 5 <= current_hour < 12:
+        max_exist_similar_count = 3
+        max_total_count = 10
+    elif 12 <= current_hour < 18:
+        max_exist_similar_count = 6
+        max_total_count = 15
+    elif 18 <= current_hour < 22:
+        max_exist_similar_count = 9
+        max_total_count = 20
+    else:
+        max_exist_similar_count = 10
+        max_total_count = 22
+
+    return max_exist_similar_count, max_total_count
+
+
+
 def match_user(user_detail_upload_info, video_info, all_video_info):
     """
     获取匹配的用户列表,主要是进行主题太多的检查以及相似稿件的数量
@@ -797,7 +831,7 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
     dig_type = video_info.get('dig_type', 'exist_video')
     high_similar_dig_type_list = ['exist_video', 'exist_video_dig']
     hot_topic_count = 1
-    exist_video_count = 10
+    max_exist_similar_count, max_total_count = get_send_count_by_hour()
 
     is_high_score = final_score > 5000
     if is_high_score:
@@ -814,6 +848,17 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         if check_user_tags(user_name, video_info, all_video_info) is False:
             continue
 
+        video_id_list = video_info.get('video_id_list', [])
+        exist_video_id_list = detail_info.get('unique_video_id_list', [])
+        # 如果都在已存在列表中，跳过
+        all_exist = True
+        for video_id in video_id_list:
+            if video_id not in exist_video_id_list:
+                all_exist = False
+                break
+        if all_exist:
+            continue
+
         # 检查是否重复题材超过限制
         hot_topic_info = detail_info.get('hot_topic', {})
         exist_hot_topic_count = hot_topic_info.get(hot_topic, 0)
@@ -825,7 +870,7 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
             exist_similar_count = 0
             for similar_dig_type in high_similar_dig_type_list:
                 exist_similar_count += detail_info.get('dig_type', {}).get(similar_dig_type, 0)
-            if exist_similar_count >= exist_video_count:
+            if exist_similar_count >= max_exist_similar_count:
                 continue
         matched_user.append(user_name)
 
