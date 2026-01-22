@@ -861,7 +861,7 @@ def recover_task():
     }
 
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    print()
+    print(f"找到 {len(all_task)} 个需要恢复的任务。")
     for task_info in all_task:
         task_info['failed_count'] = 0
         # process_single_task(task_info, manager, gen_video=True)

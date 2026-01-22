@@ -496,6 +496,8 @@ def find_good_plan(manager):
 
     # 进行自由挖掘
     for target_video_type, target_tags in good_tags_info.items():
+        if target_video_type == 'sport':
+            continue
         final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
         video_data = build_prompt_data(final_good_video_list)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

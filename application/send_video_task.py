@@ -669,7 +669,7 @@ def gen_user_detail_upload_info(manager, user_list):
         total_count = user_statistic_info.get(user_name, {}).get('today_process', 0)
         platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
         total_today = total_count + platform_upload_count
-        target_count = 30
+        target_count = 20
         if user_name in simple_need_process_users:
             target_count = 2
         need_count = max(target_count - total_today, 0)
@@ -693,11 +693,12 @@ def get_available_count(manager, video_info):
     final_score = video_info.get('final_score', 0)
     if final_score > 1000:
         single_count += 1
-    if final_score > 5000:
+    if final_score > 3000:
         single_count += 2
-
-    if final_score > 10000:
+    if final_score > 5000:
         single_count += 3
+    if final_score > 10000:
+        single_count += 5
     video_id_list = video_info.get('video_id_list', [])
     query_2 = {
         'video_id_list': video_id_list,
@@ -846,9 +847,9 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
             is_all_used = False
         used_video_list.append(video_id)
     used_video_list = list(set(used_video_list))
-    if is_all_used:
-        video_info['reason'] = "视频全部使用过，跳过"
-        return []
+    # if is_all_used:
+    #     video_info['reason'] = "视频全部使用过，跳过"
+    #     return []
 
     can_use_count = get_available_count(manager, video_info)
     match_user_list = match_user(user_detail_upload_info, video_info, all_video_info)
@@ -977,7 +978,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
+    need_process_users = ['xiaoxue', 'lin', 'dahao', 'zhong', "qizhu", 'mama', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
