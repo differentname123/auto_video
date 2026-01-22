@@ -716,7 +716,7 @@ def process_video_data(data: dict, video_type: str, user_name) -> dict:
         results = []
         for task_info in filtered_videos:
             dig_type = task_info.get('creation_guidance_info', {}).get('dig_type', "exist")
-            user_name = task_info.get('userName', '')
+            temp_user_name = task_info.get('userName', '')
 
             # 1. 豁免权检查：如果有 dig，无视黑名单，直接通过
             if "free_dig" in dig_type:
@@ -724,7 +724,7 @@ def process_video_data(data: dict, video_type: str, user_name) -> dict:
                 continue
 
             # 2. 常规检查：没有 dig 的情况下，必须不在黑名单里
-            if user_name not in self_user_list:
+            if temp_user_name not in self_user_list:
                 results.append(task_info)
 
         filtered_videos = results
