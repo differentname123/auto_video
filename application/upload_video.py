@@ -16,6 +16,7 @@ import traceback
 from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import cv2
 from rich import box
@@ -656,53 +657,110 @@ def process_idle_tasks(
         processed_task_ids
 ):
     """
-    利用上传等待的空闲时间，处理未生成视频的任务
+    利用上传等待的空闲时间，并行处理未生成视频的任务 (2个并发)，同时保持日志和功能与原版高度一致。
     """
-    total_candidates = len(tasks)
-    start_time = time.time()
+    # 1. 预先筛选任务，并补上缺失的“跳过”日志
+    candidate_tasks = []
+    original_total = len(tasks)
     print(
-        f"开始处理 {total_candidates} 个未生成视频的任务 利用空闲时间...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-    count = 0
+        f"开始处理 {original_total} 个未生成视频的任务 利用空闲时间...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    used_video_id_list = []
     for task_info in tasks:
         bvid = task_info.get('bvid', '')
+        video_id_list = task_info.get('video_id_list', [])
+        # 判断video_id_list是否有在used_video_id_list中
+        if any(vid in used_video_id_list for vid in video_id_list):
+            print(f" 任务的 video_id_list {video_id_list} 中有已使用的视频ID，跳过...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            continue
+
         status = task_info.get('status')
         if bvid or status == TaskStatus.UPLOADED or str(task_info.get('_id')) in processed_task_ids:
             print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
             continue
+        used_video_id_list.extend(video_id_list)
+        candidate_tasks.append(task_info)
 
-        count += 1
+    total_candidates = len(candidate_tasks)
+    if total_candidates == 0:
+        print("没有需要处理的空闲任务。")
+        return
+
+    # 包装 gen_video 以在线程内部打印“开始处理”日志
+    def gen_video_wrapper(task_info, *args):
         user_name = task_info.get('userName')
-        # 注意：修正了原代码f-string中引号嵌套的潜在兼容性问题
-        print(f"处理用户 {user_name} 的任务{task_info.get('video_id_list', [])}...已有的数量{tobe_upload_video_info.get(user_name)} 进度 {count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
-
-        # 生成视频核心逻辑
-        gen_video(task_info, config_map, user_config, manager)
-
-        # 计算时间与状态
-        processing_duration = time.time() - start_time
-        pending_uploads_count = sum(1 for f in futures if not f.done())
-        is_uploading = pending_uploads_count > 0
-
-        # 更新统计信息 (引用传递，会同步修改外部字典)
-        if user_name not in tobe_upload_video_info:
-            tobe_upload_video_info[user_name] = 0
-        tobe_upload_video_info[user_name] += 1
-
+        # 在实际工作开始前，打印与原版一致的“开始处理”日志
+        # 注意：这里的 tobe_upload_video_info.get(user_name) 无法实时反映主线程的计数值，但能提供一个大概的上下文
         print(
-            f"处理完成，处理用户 {user_name} 的任务{task_info.get('video_id_list', [])} 耗时 {processing_duration:.2f} 秒，当前待上传任务数 {pending_uploads_count}，是否有上传任务正在进行: {is_uploading} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            f"处理用户 {user_name} 的任务{task_info.get('video_id_list', [])}...已有的数量{tobe_upload_video_info.get(user_name, 0)} (并行处理中) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
 
-        # 核心退出逻辑：如果处理时间超过200秒且没有后台上传在进行，则结束“压榨算力”
-        if processing_duration > 200 and not is_uploading:
-            print(
-                f"🎉 【有效处理完成】 任务 '{task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. 且无后台投稿。 进度 {count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
-            print("   - 目标达成，备用处理流程结束。")
-            break
+        # 调用真正的视频生成函数
+        gen_video(task_info, *args)
 
-        if processing_duration > 200:
-            print(
-                f"   ⚡ [算力压榨] 耗时已超 {processing_duration:.2f}s，利用 {pending_uploads_count} 个后台上传间隙继续处理...")
-        else:
-            print(f"   ⚡ 未进行实际的处理 处理太快了 {processing_duration:.2f}s，继续处理...")
+        # 返回结果，以便主线程可以识别任务
+        return task_info
+
+    start_time = time.time()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future_to_task = {}
+
+        # 提交所有候选任务
+        for task_info in candidate_tasks:
+            # 这是一个功能变更，但对于并发是好的实践。提前标记，防止重复。
+            processed_task_ids.add(str(task_info.get('_id')))
+            future = executor.submit(gen_video_wrapper, task_info, config_map, user_config, manager)
+            future_to_task[future] = task_info
+
+        completed_count = 0
+        try:
+            for future in as_completed(future_to_task):
+                completed_count += 1
+                try:
+                    # 获取执行结果。如果 gen_video 内部报错，这里会抛出
+                    completed_task_info = future.result()
+                    user_name = completed_task_info.get('userName')
+                except Exception as e:
+                    task_info_on_error = future_to_task[future]
+                    print(f"❌ 处理任务 {task_info_on_error.get('video_id_list', [])} 发生异常: {e}")
+                    traceback.print_exc()
+                    continue  # 继续处理下一个已完成的任务
+
+                # 更新统计信息 (在主线程中更新，线程安全)
+                if user_name not in tobe_upload_video_info:
+                    tobe_upload_video_info[user_name] = 0
+                tobe_upload_video_info[user_name] += 1
+
+                # 计算时间与状态
+                processing_duration = time.time() - start_time
+                pending_uploads_count = sum(1 for f in futures if not f.done())
+                is_uploading = pending_uploads_count > 0
+
+                print(
+                    f"处理完成，处理用户 {user_name} 的任务{completed_task_info.get('video_id_list', [])} 耗时 {processing_duration:.2f} 秒，当前待上传任务数 {pending_uploads_count}，是否有上传任务正在进行: {is_uploading} 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+
+                # 核心退出逻辑
+                if processing_duration > 200 and not is_uploading:
+                    # 补上与原版一致的、包含任务信息的退出日志
+                    print(
+                        f"🎉 【有效处理完成】 任务 '{completed_task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. 且无后台投稿。 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+                    print("   - 目标达成，备用处理流程结束。将取消未开始的任务。")
+                    # 主动取消队列中还未开始的任务
+                    for f in future_to_task:
+                        if not f.done():
+                            f.cancel()
+                    break  # 跳出 as_completed 循环
+
+                # 补上与原版一致的“算力压榨”日志逻辑
+                if processing_duration > 200:
+                    print(
+                        f"   ⚡ [算力压榨] 耗时已超 {processing_duration:.2f}s，利用 {pending_uploads_count} 个后台上传间隙继续处理...")
+                else:
+                    # 补上缺失的 "处理太快" 日志
+                    print(f"   ⚡ 未进行实际的处理 处理太快了 {processing_duration:.2f}s，继续处理...")
+        finally:
+            # 确保即使发生意外，也能尝试关闭执行器
+            # with 语句会自动处理 shutdown，但这里的消息可以提供更好的日志
+            print("所有任务处理循环结束，等待正在运行的线程完成...")
 
 
 def gen_all_files_to_cleanup(task_info):
