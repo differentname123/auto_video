@@ -690,8 +690,17 @@ def process_idle_tasks(
     # 【新增】定义一个停止事件，用于控制 wrapper 里的“1秒后检查”
     stop_event = threading.Event()
 
+    # 使用原子计数器（线程安全）来记录已处理的数量，用于日志打印
+    completed_counter = threading.atomic_count = 0
+    lock = threading.Lock()
+
     # 包装 gen_video 以在线程内部打印“开始处理”日志
-    def gen_video_wrapper(task_info, *args):
+    def gen_video_wrapper(task_info, index, total, start_time_ref, *args):
+        """
+        :param index: 当前任务在候选列表中的索引（1-based）
+        :param total: 总任务数
+        :param start_time_ref: 这一批次任务开始的时间戳
+        """
         # 【修改】核心改动：先等待1秒，给主线程留出cancel的时间窗口
         time.sleep(1)
 
@@ -700,13 +709,33 @@ def process_idle_tasks(
             return None  # 如果被叫停，直接返回None，不执行后续逻辑
 
         user_name = task_info.get('userName')
-        # 在实际工作开始前，打印与原版一致的“开始处理”日志
-        # 注意：这里的 tobe_upload_video_info.get(user_name) 无法实时反映主线程的计数值，但能提供一个大概的上下文
+
+        # 1. 打印“开始处理”日志（已优化：加入进度信息）
         print(
-            f"处理用户 {user_name} 的任务{task_info.get('video_id_list', [])}...已有的数量{tobe_upload_video_info.get(user_name, 0)} (并行处理中) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            f"🚀 [并行] 开始处理用户 {user_name} 的任务 {task_info.get('video_id_list', [])} "
+            f"(进度: {index}/{total}) 已生成数量: {tobe_upload_video_info.get(user_name, 0)} "
+            f"当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+        )
 
         # 调用真正的视频生成函数
         gen_video(task_info, *args)
+
+        # 2. 打印“处理完成”日志 (按你的要求移入内部，确保必打)
+        # 获取最新的状态信息
+        current_duration = time.time() - start_time_ref
+        pending_uploads = sum(1 for f in futures if not f.done())
+        is_uploading_now = pending_uploads > 0
+
+        if not is_uploading_now:
+            upload_status_str = "且无后台投稿"
+        else:
+            upload_status_str = f"后台有 {pending_uploads} 个投稿进行中"
+
+        print(
+            f"🎉 【有效处理完成】 任务 '{task_info.get('video_id_list', [])}' "
+            f"耗时 {current_duration:.2f} 秒. {upload_status_str}。 "
+            f"进度 {index}/{total} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} "
+        )
 
         # 返回结果，以便主线程可以识别任务
         return task_info
@@ -717,10 +746,13 @@ def process_idle_tasks(
         future_to_task = {}
 
         # 提交所有候选任务
-        for task_info in candidate_tasks:
+        # 使用 enumerate 获取序号，方便传入 wrapper
+        for idx, task_info in enumerate(candidate_tasks, 1):
             # 这是一个功能变更，但对于并发是好的实践。提前标记，防止重复。
             processed_task_ids.add(str(task_info.get('_id')))
-            future = executor.submit(gen_video_wrapper, task_info, config_map, user_config, manager)
+
+            # 注意：这里把 idx, total_candidates, start_time 传进去了
+            future = executor.submit(gen_video_wrapper, task_info, idx, total_candidates, start_time, config_map, user_config, manager)
             future_to_task[future] = task_info
 
         completed_count = 0
@@ -752,11 +784,6 @@ def process_idle_tasks(
                 pending_uploads_count = sum(1 for f in futures if not f.done())
                 is_uploading = pending_uploads_count > 0
 
-                if not is_uploading:
-                    upload_status_desc = "且无后台投稿"
-                else:
-                    upload_status_desc = f"后台有 {pending_uploads_count} 个投稿进行中"
-                print(f"🎉 【有效处理完成】 任务 '{completed_task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. {upload_status_desc}。 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
                 # 核心退出逻辑
                 if processing_duration > 200 and not is_uploading:
                     # 补上与原版一致的、包含任务信息的退出日志
