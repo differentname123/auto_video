@@ -169,6 +169,8 @@ def login_and_save_session(model_name: str = "gemini-2.5-pro"):
     with sync_playwright() as p:
         # 使用自带的 chromium，并启动持久化上下文
         context = p.chromium.launch_persistent_context(
+            channel="chrome",  # 【关键1】强制调用本地安装的 Google Chrome 正式版
+
             user_data_dir=USER_DATA_DIR,
             headless=False,  # 必须为 False 以便用户可以看到和操作浏览器
             args=['--disable-blink-features=AutomationControlled', '--start-maximized', '--disable-gpu',
