@@ -17,7 +17,7 @@ from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
+import threading  # 需要确保头部导入了这个
 import cv2
 from rich import box
 from rich.console import Console
@@ -670,12 +670,14 @@ def process_idle_tasks(
         video_id_list = task_info.get('video_id_list', [])
         # 判断video_id_list是否有在used_video_id_list中
         if any(vid in used_video_id_list for vid in video_id_list):
-            print(f" 任务的 video_id_list {video_id_list} 中有已使用的视频ID，跳过...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            print(
+                f" 任务的 video_id_list {video_id_list} 中有已使用的视频ID，跳过...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
             continue
 
         status = task_info.get('status')
         if bvid or status == TaskStatus.UPLOADED or str(task_info.get('_id')) in processed_task_ids:
-            print(f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
+            print(
+                f"任务已有 bvid {bvid} 或状态为已上传，跳过 {task_info.get('video_id_list', [])}...当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
             continue
         used_video_id_list.extend(video_id_list)
         candidate_tasks.append(task_info)
@@ -685,8 +687,18 @@ def process_idle_tasks(
         print("没有需要处理的空闲任务。")
         return
 
+    # 【新增】定义一个停止事件，用于控制 wrapper 里的“1秒后检查”
+    stop_event = threading.Event()
+
     # 包装 gen_video 以在线程内部打印“开始处理”日志
     def gen_video_wrapper(task_info, *args):
+        # 【修改】核心改动：先等待1秒，给主线程留出cancel的时间窗口
+        time.sleep(1)
+
+        # 【修改】睡醒后，检查是否收到了停止信号
+        if stop_event.is_set():
+            return None  # 如果被叫停，直接返回None，不执行后续逻辑
+
         user_name = task_info.get('userName')
         # 在实际工作开始前，打印与原版一致的“开始处理”日志
         # 注意：这里的 tobe_upload_video_info.get(user_name) 无法实时反映主线程的计数值，但能提供一个大概的上下文
@@ -718,6 +730,11 @@ def process_idle_tasks(
                 try:
                     # 获取执行结果。如果 gen_video 内部报错，这里会抛出
                     completed_task_info = future.result()
+
+                    # 【修改】如果因为stop_event返回了None，说明该任务被跳过了，直接处理下一个
+                    if completed_task_info is None:
+                        continue
+
                     user_name = completed_task_info.get('userName')
                 except Exception as e:
                     task_info_on_error = future_to_task[future]
@@ -735,15 +752,19 @@ def process_idle_tasks(
                 pending_uploads_count = sum(1 for f in futures if not f.done())
                 is_uploading = pending_uploads_count > 0
 
-                print(
-                    f"处理完成，处理用户 {user_name} 的任务{completed_task_info.get('video_id_list', [])} 耗时 {processing_duration:.2f} 秒，当前待上传任务数 {pending_uploads_count}，是否有上传任务正在进行: {is_uploading} 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
-
+                if not is_uploading:
+                    upload_status_desc = "且无后台投稿"
+                else:
+                    upload_status_desc = f"后台有 {pending_uploads_count} 个投稿进行中"
+                print(f"🎉 【有效处理完成】 任务 '{completed_task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. {upload_status_desc}。 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
                 # 核心退出逻辑
                 if processing_duration > 200 and not is_uploading:
                     # 补上与原版一致的、包含任务信息的退出日志
-                    print(
-                        f"🎉 【有效处理完成】 任务 '{completed_task_info.get('video_id_list', [])}' 耗时 {processing_duration:.2f} 秒. 且无后台投稿。 进度 {completed_count}/{total_candidates} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} ")
                     print("   - 目标达成，备用处理流程结束。将取消未开始的任务。")
+
+                    # 【修改】设置停止标志，通知那些正在 sleep(1) 的线程不要继续了
+                    stop_event.set()
+
                     # 主动取消队列中还未开始的任务
                     for f in future_to_task:
                         if not f.done():
