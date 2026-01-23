@@ -816,21 +816,24 @@ def get_send_count_by_hour():
     return max_exist_similar_count, max_total_count
 
 
-
 def match_user(user_detail_upload_info, video_info, all_video_info):
     """
     获取匹配的用户列表,主要是进行主题太多的检查以及相似稿件的数量
     :param user_detail_upload_info:
     :param video_info:
-    :return:
+    :return: matched_user (list), detail_match_info (dict)
     """
     matched_user = []
+    # 新增：用于存放不匹配的原因 {user_name: reason}
+    detail_match_info = {}
+
     video_type = video_info.get('video_type', '')
     final_score = video_info.get('final_score', 0)
     hot_topic = video_info.get('hot_topic', '')
     dig_type = video_info.get('dig_type', 'exist_video')
     high_similar_dig_type_list = ['exist_video', 'exist_video_dig']
     hot_topic_count = 1
+    # 假设 get_send_count_by_hour() 定义在外部或已导入
     max_exist_similar_count, max_total_count = get_send_count_by_hour()
 
     is_high_score = final_score > 5000
@@ -839,42 +842,56 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
 
     for user_name, detail_info in user_detail_upload_info.items():
         need_count = detail_info.get('need_count', 0)
+
+        # 1. 检查需求量
         if need_count <= 0 and not is_high_score:
-            continue
-        user_type = get_user_type(user_name)
-        if user_type != video_type:
+            detail_match_info[user_name] = "需求量不足且非高分稿件"
             continue
 
-        if check_user_tags(user_name, video_info, all_video_info) is False:
+        # 2. 检查用户类型
+        user_type = get_user_type(user_name)  # 假设函数已定义
+        if user_type != video_type:
+            # detail_match_info[user_name] = f"用户类型不匹配: 用户({user_type}) vs 视频({video_type})"
+            continue
+
+        # 3. 检查用户标签
+        if check_user_tags(user_name, video_info, all_video_info) is False:  # 假设函数已定义
+            detail_match_info[user_name] = "用户标签校验未通过"
             continue
 
         video_id_list = video_info.get('video_id_list', [])
         exist_video_id_list = detail_info.get('unique_video_id_list', [])
-        # 如果都在已存在列表中，跳过
+
+        # 4. 检查视频ID是否已存在
         all_exist = True
         for video_id in video_id_list:
             if video_id not in exist_video_id_list:
                 all_exist = False
                 break
         if all_exist:
+            detail_match_info[user_name] = "视频ID已存在于该用户列表"
             continue
 
-        # 检查是否重复题材超过限制
+        # 5. 检查是否重复题材超过限制
         hot_topic_info = detail_info.get('hot_topic', {})
         exist_hot_topic_count = hot_topic_info.get(hot_topic, 0)
         if exist_hot_topic_count >= hot_topic_count:
+            detail_match_info[user_name] = f"热门题材({hot_topic})数量超限: {exist_hot_topic_count}/{hot_topic_count}"
             continue
 
-        # 检查来源是否超过限制
+        # 6. 检查来源是否超过限制
         if dig_type in high_similar_dig_type_list:
             exist_similar_count = 0
             for similar_dig_type in high_similar_dig_type_list:
                 exist_similar_count += detail_info.get('dig_type', {}).get(similar_dig_type, 0)
             if exist_similar_count >= max_exist_similar_count:
+                detail_match_info[user_name] = f"相似来源稿件超限: {exist_similar_count}/{max_exist_similar_count}"
                 continue
+
+        # 通过所有检查
         matched_user.append(user_name)
 
-    return matched_user
+    return matched_user, detail_match_info
 
 
 
@@ -897,8 +914,10 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
     #     return []
 
     can_use_count = get_available_count(manager, video_info)
-    match_user_list = match_user(user_detail_upload_info, video_info, all_video_info)
+    match_user_list, detail_match_info = match_user(user_detail_upload_info, video_info, all_video_info)
     video_info['match_user_list'] = match_user_list
+    video_info['detail_match_info'] = detail_match_info
+
     sample_size = min(len(match_user_list), can_use_count)
     sample_size = min(sample_size, 1)
 
