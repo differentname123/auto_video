@@ -190,7 +190,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
     :return:
     """
     creation_guidance_info = task_info.get('creation_guidance_info', {})
-    log_pre = f"{task_info.get('video_id_list', [])} {creation_guidance_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    log_pre = f"{task_info.get('video_id_list', [])} {task_info.get('_id', '')} {creation_guidance_info} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     global error_user_map
     bvid = task_info.get('bvid', '')
     if bvid:

@@ -17,6 +17,7 @@ import re
 import shutil
 import time
 import traceback
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -1197,27 +1198,7 @@ def gen_video_by_script(task_info, video_info_dict):
     cost_time_info['生成视频耗时'] = time.time() - start_time
     return failure_details, chosen_script, cost_time_info
 
-
-
-
-
-if __name__ == "__main__":
-    # mongo_base_instance = gen_db_object()
-    # manager = MongoManager(mongo_base_instance)
-    # video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
-    # # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    # video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
-    # for video_info in video_info_list:
-    #     video_id = video_info.get('video_id')
-    #     # fix_owner_asr_by_subtitle(video_info)
-    #     _process_single_video(video_id, video_info, is_need_narration=True)
-
-    # time_list = [11167, 12433, 11750]
-    # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
-    # for timestamp in time_list:
-    #     timestamp = timestamp / 1000
-    #     save_frames_around_timestamp(my_video_path, timestamp, 3, str(os.path.join(os.path.dirname(my_video_path), 'scenes', f"{timestamp}")))
-
+def save_frame_demo():
     merged_timestamps = read_json(r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution_scenes\merged_timestamps.json")
     valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
     max_delta_ms = 1000
@@ -1256,3 +1237,109 @@ if __name__ == "__main__":
         # x[2] 就是我们在上面算好的 score
         best_shot = min(processed_candidates, key=lambda x: x[2])
     print()
+
+
+def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
+    """
+    扫描并清理 MP4 文件，同时计算释放的磁盘空间（MB）。
+    """
+    target_dir = Path(directory_path)
+    if not target_dir.exists():
+        print(f"错误：目录 '{directory_path}' 不存在。")
+        return
+
+    # 1. 设定时间阈值
+    cutoff_time = time.time() - (days * 24 * 60 * 60)
+
+    # 存储待删除文件信息的列表
+    files_to_delete = []
+    total_size_bytes = 0  # 累计大小（字节）
+
+    print(f"========== 阶段 1: 扫描目录 ==========")
+    print(f"目标路径: {target_dir.absolute()}")
+    print(f"保留策略: {days}天内修改 或 文件名以_origin结尾\n")
+
+    total_scanned = 0
+    # 使用 rglob 递归扫描所有子文件夹
+    for file_path in target_dir.rglob('*.mp4'):
+        total_scanned += 1
+
+        # 获取文件状态（一次性获取大小和时间）
+        try:
+            stat = file_path.stat()
+            mtime = stat.st_mtime
+            f_size = stat.st_size
+        except OSError:
+            # 如果文件在扫描时被占用或无法读取，跳过
+            continue
+
+        # 判断逻辑
+        is_recent = mtime > cutoff_time
+        is_origin = file_path.name.endswith('_origin.mp4')
+
+        # 既不是最近修改，也不是 origin，加入待删除列表
+        if not is_recent and not is_origin:
+            files_to_delete.append({
+                'path': file_path,
+                'size': f_size,
+                'mtime': mtime
+            })
+            total_size_bytes += f_size
+
+    # 计算总 MB
+    total_size_mb = total_size_bytes / (1024 * 1024)
+
+    # 2. 报告扫描结果
+    print(f"扫描完成。共扫描 MP4 文件: {total_scanned} 个")
+    print(f"符合删除条件的文件: {len(files_to_delete)} 个")
+    print(f"预计释放空间: {total_size_mb:.2f} MB")  # 核心修改：打印总大小
+
+    if len(files_to_delete) == 0:
+        print("没有发现需要清理的文件。")
+        return
+
+    # 3. 执行阶段
+    print(f"\n========== 阶段 2: 执行操作 ==========")
+    if dry_run:
+        print("当前为 [预演模式 dry_run=True]，未执行任何删除。")
+        print(f"确认无误后（共 {total_size_mb:.2f} MB），请将 dry_run 改为 False 执行。")
+    else:
+        print("正在执行批量删除...")
+        success_count = 0
+        fail_count = 0
+
+        for item in files_to_delete:
+            f_path = item['path']
+            try:
+                f_path.unlink()
+                print(f"[已删除] {f_path.name}")
+                success_count += 1
+            except Exception as e:
+                print(f"[删除失败] {f_path.name} -> {e}")
+                fail_count += 1
+
+        print(f"\n操作结束: 成功删除 {success_count} 个，失败 {fail_count} 个。")
+
+
+
+if __name__ == "__main__":
+    # mongo_base_instance = gen_db_object()
+    # manager = MongoManager(mongo_base_instance)
+    # video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
+    # # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+    # video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
+    # for video_info in video_info_list:
+    #     video_id = video_info.get('video_id')
+    #     # fix_owner_asr_by_subtitle(video_info)
+    #     _process_single_video(video_id, video_info, is_need_narration=True)
+
+    # time_list = [11167, 12433, 11750]
+    # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
+    # for timestamp in time_list:
+    #     timestamp = timestamp / 1000
+    #     save_frames_around_timestamp(my_video_path, timestamp, 3, str(os.path.join(os.path.dirname(my_video_path), 'scenes', f"{timestamp}")))
+
+    video_dir = r"W:\project\python_project\auto_video\videos"
+    # 删除所有超时的MP4
+    batch_cleanup_mp4(video_dir, dry_run=False)
+

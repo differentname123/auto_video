@@ -254,7 +254,7 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
     # 1. 循环申请账号
     while time.time() - start_time < wait_timeout:
         account_name, user_data_dir = manager.allocate_account(model_name=model_name)
-        if file_path and any(x in os.path.basename(file_path).lower() for x in no_file_name_list):
+        if file_path and user_data_dir and any(x in user_data_dir for x in no_file_name_list):
             account_name, user_data_dir = None, None
         if account_name:
             break
