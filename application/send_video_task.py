@@ -679,7 +679,7 @@ def gen_user_detail_upload_info(manager, user_list):
         total_today = total_count + platform_upload_count
         target_count = max_total_count
         if user_name in simple_need_process_users:
-            target_count = 2
+            target_count = 1
         need_count = max(target_count - total_today, 0)
         need_count = min(need_count, 1)
         detail_info['need_count'] = need_count
@@ -798,20 +798,20 @@ def get_send_count_by_hour():
     """
     current_hour = datetime.now().hour
     if 0 <= current_hour < 5:
-        max_exist_similar_count = 0
+        max_exist_similar_count = 2
         max_total_count = 10
     elif 5 <= current_hour < 12:
-        max_exist_similar_count = 5
+        max_exist_similar_count = 7
         max_total_count = 15
     elif 12 <= current_hour < 18:
-        max_exist_similar_count = 7
+        max_exist_similar_count = 9
         max_total_count = 17
     elif 18 <= current_hour < 22:
-        max_exist_similar_count = 9
-        max_total_count = 20
+        max_exist_similar_count = 11
+        max_total_count = 19
     else:
-        max_exist_similar_count = 10
-        max_total_count = 22
+        max_exist_similar_count = 13
+        max_total_count = 21
 
     return max_exist_similar_count, max_total_count
 
@@ -835,6 +835,10 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
     hot_topic_count = 1
     # 假设 get_send_count_by_hour() 定义在外部或已导入
     max_exist_similar_count, max_total_count = get_send_count_by_hour()
+    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+
+    simple_need_process_users = user_config.get('simple_need_process_users', [])
+
 
     is_high_score = final_score > 5000
     if is_high_score:
@@ -842,7 +846,9 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
 
     for user_name, detail_info in user_detail_upload_info.items():
         need_count = detail_info.get('need_count', 0)
-
+        if user_name in simple_need_process_users and need_count < 1:
+            detail_match_info[user_name] = "简化用户且需求量不足"
+            continue
         # 1. 检查需求量
         if need_count <= 0 and not is_high_score:
             detail_match_info[user_name] = "需求量不足且非高分稿件"
@@ -1042,7 +1048,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
+    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'mama', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
