@@ -135,7 +135,11 @@ class GeminiAccountManager:
             # 5. 筛选可用账号
             candidates = []
             for name, info in stats.items():
-                # if info.get('status') == 'idle':
+                # 【修复】必须检查状态是否为 idle
+                if info.get('status') != 'idle':
+                    continue
+
+                # 下面的逻辑保持不变
                 count = info.get('model_usage', {}).get(model_name, {}).get('count', 0)
                 candidates.append({
                     'name': name,
@@ -239,13 +243,13 @@ manager = GeminiAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
 # 【修改 3】: 实现无可用账号时的阻塞等待
-def generate_gemini_content_managed(prompt, model_name="gemini-2.5-pro", files=None, wait_timeout=600):
+def generate_gemini_content_managed(prompt, model_name="gemini-3.0-pro", files=None, wait_timeout=600):
     """
     对外提供的统一接口。
 
     Args:
         prompt (str): 提示词。
-        model_name (str): 模型名称。
+        model_name (str): 模型名称。gemini-3.0-pro, gemini-2.5-pro, gemini-2.5-flash
         files (list, optional): 文件路径列表。
         wait_timeout (int): 当无可用账号时，最长等待时间（秒）。
 
@@ -300,7 +304,7 @@ if __name__ == "__main__":
 
     print("开始测试...")
     test_file = ['test.mp4']
-    for i in range(2):
+    for i in range(1):
         try:
             err, res = generate_gemini_content_managed(
                 prompt="你是谁？",
