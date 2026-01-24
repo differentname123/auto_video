@@ -300,7 +300,7 @@ if __name__ == "__main__":
 
     print("开始测试...")
     test_file = ['test.mp4']
-    for i in range(4):
+    for i in range(2):
         try:
             err, res = generate_gemini_content_managed(
                 prompt="你是谁？",
