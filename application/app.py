@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import os
 import time
 import traceback
 import multiprocessing
@@ -9,17 +12,19 @@ from flask import Flask, request, jsonify, render_template, Response
 
 from application.process_video import query_need_process_tasks, _task_process_worker, _task_producer_worker, \
     check_task_queue
-from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target, get_user_type
+from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target, get_user_type, \
+    is_valid_target_file_simple
+from utils.video_utils import create_snapshot_from_video
 # 导入配置和工具
 from video_common_config import TaskStatus, _configure_third_party_paths, ErrorMessage, ResponseStatus, \
     ALLOWED_USER_LIST, LOCAL_ORIGIN_URL_ID_INFO_PATH, fix_split_time_points, build_video_paths, \
-    USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, VIDEO_MAX_RETRY_TIMES
+    USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, VIDEO_MAX_RETRY_TIMES, SNAPSHOT_CACHE_DIR
 
 _configure_third_party_paths()
 
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
-from third_party.TikTokDownloader.douyin_downloader import get_meta_info
+from third_party.TikTokDownloader.douyin_downloader import get_meta_info, download_douyin_video_sync
 
 app = Flask(__name__)
 
@@ -69,6 +74,62 @@ def parse_douyin_video(video_url: str):
 
         print(f"解析URL '{video_url}' 异常: {e}")
         return False, None, f"解析异常: {e}"
+
+
+def download_origin_video(video_url):
+    """
+    下载单个抖音视频，返回下载的文件路径
+    """
+    try:
+        log_pre = f"[视频下载 - {video_url}]"
+        original_url_id_info = read_json(LOCAL_ORIGIN_URL_ID_INFO_PATH)
+        url = video_url.strip()
+        video_id = original_url_id_info.get(url)
+        if not video_id:
+            result = download_douyin_video_sync(video_url)
+
+            if not result:
+                error_info = f"{log_pre}错误: 视频 {video_id} 下载失败。"
+                print(error_info)
+                return None, error_info
+
+            # 下载成功
+            original_file_path, metadata = result
+            video_id = metadata[0].get('id')
+            original_url_id_info[url] = video_id
+            save_json(LOCAL_ORIGIN_URL_ID_INFO_PATH, original_url_id_info)
+            if not video_id:
+                error_info = f"{log_pre}错误: 视频 {video_id} 无法解析到 ID。"
+                print(error_info)
+                return None, error_info
+
+            all_path_info = build_video_paths(video_id)
+            origin_video_path = all_path_info.get('origin_video_path')
+            os.makedirs(os.path.dirname(origin_video_path), exist_ok=True)
+            os.replace(original_file_path, origin_video_path)
+
+
+        all_path_info = build_video_paths(video_id)
+        origin_video_path = all_path_info.get('origin_video_path')
+
+        if not is_valid_target_file_simple(origin_video_path):
+            print(f"{log_pre} 视频 {video_id} 的原始文件不存在，准备下载...")
+            result = download_douyin_video_sync(video_url)
+
+            if not result:
+                error_info = f"{log_pre}错误: 视频 {video_id} 下载失败。"
+                print(error_info)
+                return None, error_info
+
+            # 下载成功
+            original_file_path, metadata = result
+            os.makedirs(os.path.dirname(origin_video_path), exist_ok=True)
+            os.replace(original_file_path, origin_video_path)
+            print(f"{log_pre} 视频 {video_id} 下载并移动成功。")
+        return origin_video_path, None
+    except Exception as e:
+        traceback.print_exc()
+        return None, f"{e}"
 
 def validate_timestamp(video_item, duration):
     """
@@ -812,21 +873,6 @@ def build_today_videos(user_name):
     return today_videos
 
 
-@app.route('/get_good_video', methods=['GET'])
-def get_good_video_info():
-    user_name = request.args.get('username')
-    print(f"接收到的用户名: {user_name}")
-    user_type = get_user_type(user_name)
-    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
-    data_info = process_video_data(statistic_play_info, user_type, user_name)
-    print(f"处理后的视频数据: {data_info}")
-    return jsonify(data_info)
-
-
-# =============================================================================
-# 5. 进程监控与主程序入口
-# =============================================================================
-
 def _monitor_processes():
     """
     [新增] 后台监控线程：专门用于监控和重启挂掉的子进程。
@@ -864,6 +910,72 @@ def _monitor_processes():
         except Exception as e:
             print(f"监控线程发生错误: {e}")
             time.sleep(60)
+
+@app.route('/get_good_video', methods=['GET'])
+def get_good_video_info():
+    user_name = request.args.get('username')
+    print(f"接收到的用户名: {user_name}")
+    user_type = get_user_type(user_name)
+    statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
+    data_info = process_video_data(statistic_play_info, user_type, user_name)
+    print(f"处理后的视频数据: {data_info}")
+    return jsonify(data_info)
+
+
+@app.route('/get-video-snapshot', methods=['POST'])
+def get_video_snapshot():
+    data = request.json
+    print(f"收到截图请求: {data}")
+    if not data:
+        return jsonify({'status': 'error', 'message': '请求体不能为空'}), 400
+
+    video_url = data.get('url')
+
+
+    # 时间格式可能为 "00:00:00" 或秒数
+
+    if not video_url:
+        return jsonify({'status': 'error', 'message': '缺少 "url" 参数'}), 400
+
+
+    try:
+        # 2. 下载视频（调用你已有的函数）
+        origin_video_path, error_info = download_origin_video(video_url)
+        if error_info:
+            return jsonify({'status': 'error', 'message': f"视频处理失败: {error_info}"}), 500
+        if not os.path.exists(SNAPSHOT_CACHE_DIR):
+            os.makedirs(SNAPSHOT_CACHE_DIR)
+        start_time = data.get('start_time', '00:00:00')  # 提供一个默认值
+        end_time = data.get('end_time', '00:00:10')
+        unique_string = f"{os.path.abspath(origin_video_path)}-{start_time}-{end_time}"
+        file_hash = hashlib.md5(unique_string.encode('utf-8')).hexdigest()
+        snapshot_filename = f"{file_hash}.jpg"
+        snapshot_path = os.path.join(SNAPSHOT_CACHE_DIR, snapshot_filename)
+        # 3. 创建截图（如果已缓存则直接获取路径）
+        snapshot_path, error_info = create_snapshot_from_video(origin_video_path, start_time, end_time, snapshot_path)
+        if error_info:
+            return jsonify({'status': 'error', 'message': f"截图生成失败: {error_info}"}), 500
+
+        # 4. 读取截图文件，转为 Base64
+        with open(snapshot_path, 'rb') as f:
+            image_data = f.read()
+
+        base64_encoded_image = base64.b64encode(image_data).decode('utf-8')
+        image_base64_string = f"data:image/jpeg;base64,{base64_encoded_image}"
+
+        # 5. 返回成功响应
+        return jsonify({
+            'status': 'success',
+            'image_base64': image_base64_string
+        })
+
+    except Exception as e:
+        # 捕获其他意料之外的异常
+        print(f"发生未知错误: {e}")
+        return jsonify({'status': 'error', 'message': '服务器内部发生未知错误'}), 500
+
+
+
 
 if __name__ == "__main__":
     # 1. 初始化 Multiprocessing Manager

@@ -3684,3 +3684,103 @@ def has_audio(path):
         # 简单的错误处理，防止 ffprobe 失败导致程序崩溃
         print(f"Error processing {path}: {e}")
         return False
+
+
+def create_snapshot_from_video(video_path, start_time, end_time, snapshot_path):
+    """
+    为指定视频在 start_time 和 end_time 中间时间点创建一张截图，并利用文件名实现缓存。
+
+    Args:
+        video_path (str): 本地视频文件的路径。
+        start_time (str): 开始时间，格式 "HH:MM:SS" (也可为可被 time_to_ms 解析的形式)。
+        end_time (str): 结束时间，格式 "HH:MM:SS"。若为 "0"（或解析后为 0），则自动使用视频总时长。
+        snapshot_path (str): 目标截图保存路径。
+
+    Returns:
+        tuple: 成功时 (截图文件路径, None)，失败时 (None, 错误信息字符串)
+    """
+    try:
+        # 解析时间为毫秒（假定 time_to_ms 已存在并可用）
+        start_ms = time_to_ms(start_time)
+    except Exception as e:
+        return None, f"解析 start_time 失败: {e}"
+    try:
+        total_ms = int(probe_duration(video_path) * 1000)
+    except Exception as e:
+        return None, f"获取视频时长失败: {e}"
+
+    try:
+        end_ms = time_to_ms(end_time)
+    except Exception:
+        # 若无法解析 end_time，则视为 0（即使用总时长）
+        end_ms = 0
+
+    # 如果 end_time 解析为 0，则使用视频总时长
+    if end_ms == 0:
+        end_ms = total_ms
+
+    # 边界与合法性处理
+    if start_ms < 0:
+        start_ms = 0
+    if end_ms < 0:
+        end_ms = 0
+    # 限定不超过总时长
+    if start_ms > total_ms:
+        start_ms = total_ms
+    if end_ms > total_ms:
+        end_ms = total_ms
+
+    # 如果 start > end，交换它们
+    if start_ms > end_ms:
+        start_ms, end_ms = end_ms, start_ms
+
+    # 取中间时间点（向下取整为毫秒整数）
+    mid_ms = int((start_ms + end_ms) / 2)
+    # 再次确保不超过总时长
+    if mid_ms > total_ms:
+        mid_ms = total_ms
+
+    target_time_str = ms_to_time(mid_ms)
+
+    # 2. 检查缓存是否存在
+    if os.path.exists(snapshot_path):
+        print(f"缓存命中，直接返回已存在的截图: {snapshot_path}")
+        return snapshot_path, None
+
+    # 3. 如果缓存不存在，则执行 ffmpeg 命令来生成截图
+    print(f"缓存未命中，正在为 {video_path} 在 {target_time_str}（中点）生成新截图...")
+    command = [
+        'ffmpeg',
+        '-ss', target_time_str,
+        '-i', video_path,
+        '-vframes', '1',
+        '-q:v', '10',
+        '-y',
+        '-loglevel', 'error',
+        snapshot_path
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        print(f"截图成功生成: {snapshot_path}")
+        return snapshot_path, None
+
+    except FileNotFoundError:
+        error_msg = "错误：ffmpeg 命令未找到。请确保 ffmpeg 已安装并配置在系统 PATH 中。"
+        print(error_msg)
+        return None, error_msg
+
+    except subprocess.CalledProcessError as e:
+        error_msg = f"FFmpeg 执行失败: {e.stderr.strip()}"
+        print(error_msg)
+        if os.path.exists(snapshot_path):
+            os.remove(snapshot_path)
+        return None, error_msg
+
+
