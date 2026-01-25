@@ -969,6 +969,10 @@ def auto_upload(manager):
         id_str = str(task.get('_id'))
         if id_str in exist_id_list:
             continue
+        user_name = task.get('userName')
+        if user_name not in config_map:
+            print(f"用户 {user_name} 未在配置中找到，跳过任务 {task.get('video_id_list', [])} ")
+            continue
         exist_id_list.append(id_str)
         filter_task_list.append(task)
 

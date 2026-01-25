@@ -178,7 +178,7 @@ user_sign_map = {
 def init_users():
     """初始化多账号信息"""
 
-    user_name_list = ['yang', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
+    user_name_list = ['xiaoxiaosu']
     for name in user_name_list:
         cookie = get_config(f"{name}_bilibili_total_cookie")
         token = get_config(f"{name}_bilibili_csrf_token")

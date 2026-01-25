@@ -873,7 +873,7 @@ def fun(manager):
         commenter_map = {}
         for key, detail_config in config_map.items():
             name = detail_config.get('name', key)
-            if name in ['yang', 'xue','danzhu', 'xiaosu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']:
+            if name in ['xiaoxiaosu']:
                 continue
             cookie = detail_config.get('total_cookie', '')
             all_params = detail_config.get('all_params', {})
@@ -898,10 +898,12 @@ def fun(manager):
 
             if NEED_UPDATE_SIGN:
                 detail_config = config_map[uid]
+                name = detail_config.get('name', key)
+
                 signature = random.choice(signatures)
                 cookie = detail_config.get('total_cookie', '')
                 result = update_bili_user_sign(cookie, signature)
-                print(f"更新用户签名结果: {result}")
+                print(f"更新用户签名结果: {result} {name}")
 
             logging.info(f"  > 正在获取UP主(UID: {uid} {name})的最新动态...")
             temp_found_videos = commenter.get_user_videos(mid=uid, desired_count=25)
