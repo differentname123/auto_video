@@ -1023,7 +1023,7 @@ def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.m
 
 def probe_video(path: str) -> dict:
     """
-    使用 ffprobe 获取视频的详细信息（宽、高、帧率、SAR、时长）。
+    使用 ffprobe 获取视频的详细信息（宽、高、帧率、SAR、时长s）。
     """
     if not shutil.which("ffprobe"):
         raise FileNotFoundError("ffprobe command not found. Please install FFmpeg.")
@@ -1217,6 +1217,280 @@ def cover_video_area_simple(
         raise RuntimeError(f"FFmpeg failed:\n{proc.stderr}")
     print(f"[SUCCESS] Output saved to {output_path}")
 
+def dynamic_video_area_blur(
+        video_path: str,
+        output_path: str,
+        blur_segments: list,
+        blur_strength: int = 50,
+        target_quality: int = 24,  # NVENC的CQ值，越小画质越好，24-26通常为视觉无损
+        use_gpu: bool = True
+):
+    """
+    高性能版：使用 NVIDIA NVENC 加速，使用高斯模糊提升视觉质感。
+    """
+
+    # --- 1. 环境与输入检查 ---
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError("Error: ffmpeg is not installed.")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Error: Input video not found at {video_path}")
+
+    # --- 2. 获取视频信息 ---
+    try:
+        cmd_probe = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", video_path
+        ]
+        result = subprocess.run(cmd_probe, capture_output=True, text=True)
+        info = json.loads(result.stdout)
+        video_w = info['streams'][0]['width']
+        video_h = info['streams'][0]['height']
+    except Exception as e:
+        raise RuntimeError(f"Failed to probe video info: {e}")
+
+    # --- 3. 构建 Filter Complex ---
+    filter_chains = []
+    last_stream = "[0:v]"
+
+    # 【视觉优化】使用高斯模糊 (gblur) 代替 boxblur
+    # sigma 是模糊强度，steps 是模糊次数(默认为1即可)
+    # 相比 boxblur，gblur 边缘更柔和，像毛玻璃，不像马赛克
+    gblur_sigma = blur_strength
+    blur_filter = f"gblur=sigma={gblur_sigma}:steps=1"
+
+    valid_segments_count = 0
+
+    for i, seg in enumerate(blur_segments):
+        start = seg.get("start", 0)
+        end = seg.get("end", 0)
+        x1, y1, x2, y2 = seg.get("bbox", (0, 0, 0, 0))
+
+        # --- 3.1 坐标修正 (保持原有健壮逻辑) ---
+        x1 = max(0, min(x1, video_w - 1))
+        y1 = max(0, min(y1, video_h - 1))
+        x2 = max(x1 + 1, min(x2, video_w))
+        y2 = max(y1 + 1, min(y2, video_h))
+
+        w = x2 - x1
+        h = y2 - y1
+
+        # 偶数修正 (YUV420p)
+        if x1 % 2 != 0: x1 -= 1
+        if y1 % 2 != 0: y1 -= 1
+        if w % 2 != 0: w -= 1
+        if h % 2 != 0: h -= 1
+
+        if w < 2 or h < 2: continue
+        if x1 + w > video_w: w -= 2
+        if y1 + h > video_h: h -= 2
+
+        valid_segments_count += 1
+
+        # --- 3.2 生成滤镜链 ---
+        split_crop = f"crop_{i}"
+        split_main = f"main_{i}"
+        blurred = f"blur_{i}"
+        out_label = f"v{i + 1}"
+
+        # 逻辑：分离 -> 裁剪 -> 高斯模糊 -> 覆盖回原处
+        cmd_part = (
+            f"{last_stream}split=2[{split_main}][{split_crop}];"
+            f"[{split_crop}]crop={w}:{h}:{x1}:{y1},{blur_filter}[{blurred}];"
+            f"[{split_main}][{blurred}]overlay={x1}:{y1}:enable='between(t,{start},{end})':shortest=1[{out_label}]"
+        )
+        # 注意：overlay 添加 shortest=1 防止因浮点数精度导致视频长度微变
+
+        filter_chains.append(cmd_part)
+        last_stream = f"[{out_label}]"
+
+    # --- 4. 编码参数 (核心优化点) ---
+    if valid_segments_count == 0:
+        print("[INFO] No valid segments. Copying.")
+        final_args = ["-c", "copy"]
+        filter_complex_args = []
+    else:
+        filter_str = ";".join(filter_chains)
+        filter_complex_args = ["-filter_complex", filter_str, "-map", last_stream]
+
+        if use_gpu:
+            # === NVIDIA GPU 编码配置 (HEVC/H.265) ===
+            encode_args = [
+                "-c:v", "hevc_nvenc",       # 调用 N卡 硬件编码器
+                "-preset", "p6",            # p1-p7，p6/p7 为高质量慢速，p4为中等。p6 此时性价比最高
+                "-tune", "hq",              # 调优为高质量
+                "-rc", "vbr",               # 动态码率
+                "-cq", str(target_quality), # 恒定质量参数 (类似CRF)，NVENC下 24-26 约等于 CRF 23
+                "-b:v", "0",                # 让 cq 接管码率控制
+                "-tag:v", "hvc1",           # Apple 兼容性
+                "-pix_fmt", "yuv420p"
+            ]
+            print(f"[INFO] Using GPU Encoding: hevc_nvenc (CQ: {target_quality})")
+        else:
+            # === CPU 兜底配置 (libx265) ===
+            encode_args = [
+                "-c:v", "libx265",
+                "-preset", "medium",
+                "-crf", str(target_quality + 2), # CPU CRF 和 NVENC CQ 值略有差异，微调补偿
+                "-tag:v", "hvc1",
+                "-pix_fmt", "yuv420p"
+            ]
+            print(f"[INFO] Using CPU Encoding: libx265 (CRF: {target_quality + 2})")
+
+        final_args = filter_complex_args + ["-map", "0:a?", "-c:a", "copy"] + encode_args
+
+    # --- 5. 执行 ---
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video_path] + final_args + [output_path]
+
+    print(f"Executing FFmpeg with {valid_segments_count} blur segments...")
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+
+    if proc.returncode != 0:
+        # 如果 NVENC 失败（例如驱动问题或显卡不支持），这里可以尝试降级回 CPU，
+        # 但为简单起见，直接抛出详细错误供调试。
+        if "hevc_nvenc" in str(proc.stderr):
+             raise RuntimeError(f"GPU Encoding failed. Please update drivers or set use_gpu=False.\nDetails: {proc.stderr}")
+        raise RuntimeError(f"FFmpeg Error:\n{proc.stderr}")
+
+    print(f"[SUCCESS] Saved to: {output_path}")
+
+
+def dynamic_video_area_blur_h265(
+        video_path: str,
+        output_path: str,
+        blur_segments: list,
+        blur_strength: int = 15,
+        crf: int = 26,  # 修改默认值：稍微调高CRF以减小体积
+        preset: str = "medium",  # 修改默认值：medium 比 fast 压缩率更好
+        codec: str = "libx265"  # 新增：默认使用 H.265 以大幅减小体积
+):
+    """
+    优化版：修复坐标Bug，支持H.265压缩。
+    """
+
+    # --- 1. 环境检查 ---
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError("Error: ffmpeg is not installed.")
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Error: Input video not found at {video_path}")
+
+    # --- 2. 获取视频信息 ---
+    try:
+        cmd_probe = [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "json", video_path
+        ]
+        result = subprocess.run(cmd_probe, capture_output=True, text=True)
+        info = json.loads(result.stdout)
+        video_w = info['streams'][0]['width']
+        video_h = info['streams'][0]['height']
+    except Exception as e:
+        raise RuntimeError(f"Failed to probe video info: {e}")
+
+    # --- 3. 构建 Filter Complex ---
+    filter_chains = []
+    last_stream = "[0:v]"
+
+    # 模糊参数
+    luma_radius = blur_strength
+    chroma_radius = min(blur_strength, 10)
+    boxblur_args = f"{luma_radius}:{chroma_radius}"
+
+    valid_segments_count = 0
+
+    for i, seg in enumerate(blur_segments):
+        start = seg.get("start", 0)
+        end = seg.get("end", 0)
+        x1, y1, x2, y2 = seg.get("bbox", (0, 0, 0, 0))
+
+        # --- 3.1 坐标健壮性修正 (修复版) ---
+        # 1. 边界限制
+        x1 = max(0, min(x1, video_w - 1))
+        y1 = max(0, min(y1, video_h - 1))
+        x2 = max(x1 + 1, min(x2, video_w))
+        y2 = max(y1 + 1, min(y2, video_h))
+
+        w = x2 - x1
+        h = y2 - y1
+
+        # 2. 【修复 Bug】不仅宽高要是偶数，起始坐标(x,y)也必须是偶数
+        # 这是为了满足 yuv420p 的 2x2 子采样要求
+        if x1 % 2 != 0: x1 -= 1
+        if y1 % 2 != 0: y1 -= 1
+        if w % 2 != 0: w -= 1
+        if h % 2 != 0: h -= 1
+
+        # 3. 尺寸过小或无效检查
+        if w < 2 or h < 2:
+            continue
+
+        # 4. 再次检查右下角是否越界 (因为上面减小了 x1, y1 可能导致 w, h 变化)
+        if x1 + w > video_w: w -= 2
+        if y1 + h > video_h: h -= 2
+
+        valid_segments_count += 1
+
+        # --- 3.2 生成滤镜 ---
+        # 优化提示：如果 blur_segments 数量 > 20，建议使用 sendcmd 或 ass 遮罩，
+        # 但为了保持 Python 逻辑简单，这里保留 filter 链，只做逻辑修复。
+
+        split_crop = f"crop_{i}"
+        split_main = f"main_{i}"
+        blurred = f"blur_{i}"
+        out_label = f"v{i + 1}"
+
+        # 使用简化的 label 名以减少命令行长度
+        cmd_part = (
+            f"{last_stream}split=2[{split_main}][{split_crop}];"
+            f"[{split_crop}]crop={w}:{h}:{x1}:{y1},boxblur={boxblur_args}[{blurred}];"
+            f"[{split_main}][{blurred}]overlay={x1}:{y1}:enable='between(t,{start},{end})'[{out_label}]"
+        )
+
+        filter_chains.append(cmd_part)
+        last_stream = f"[{out_label}]"
+
+    # --- 4. 编码参数优化 (针对体积) ---
+    if valid_segments_count == 0:
+        print("[INFO] No valid segments. Copying.")
+        final_args = ["-c", "copy"]
+        filter_complex_args = []
+    else:
+        filter_str = ";".join(filter_chains)
+        filter_complex_args = ["-filter_complex", filter_str, "-map", last_stream]
+
+        # 智能选择编码参数
+        if codec == "libx265":
+            # H.265 配置
+            # tag:hvc1 确保苹果设备兼容性
+            encode_args = [
+                "-c:v", "libx265",
+                "-preset", preset,
+                "-crf", str(crf + 4),  # H.265 的 CRF 28 约等于 H.264 的 23，所以自动补偿一下
+                "-tag:v", "hvc1",
+                "-pix_fmt", "yuv420p"
+            ]
+        else:
+            # H.264 配置
+            encode_args = [
+                "-c:v", "libx264",
+                "-preset", preset,
+                "-crf", str(crf),
+                "-pix_fmt", "yuv420p"
+            ]
+
+        final_args = filter_complex_args + ["-map", "0:a?", "-c:a", "copy"] + encode_args
+
+    # --- 5. 执行 ---
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", video_path] + final_args + [output_path]
+
+    print(f"Executing FFmpeg with {valid_segments_count} blur segments...")
+    # print(" ".join(cmd)) # 调试时可以打开
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg Error:\n{proc.stderr}")
+
+    print(f"[SUCCESS] Saved to: {output_path} (Codec: {codec})")
 
 def cover_subtitle(
     video_path: str,

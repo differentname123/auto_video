@@ -25,7 +25,7 @@ from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_l
 from application.video_process import gen_video_by_script
 from utils.bilibili.bili_utils import check_duplicate_video
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
-    clip_and_merge_segments, has_audio
+    clip_and_merge_segments, has_audio, probe_video, dynamic_video_area_blur
 from video_common_config import VIDEO_MAX_RETRY_TIMES, VIDEO_MATERIAL_BASE_PATH, VIDEO_ERROR, \
     _configure_third_party_paths, TaskStatus, NEED_REFRESH_COMMENT, ERROR_STATUS, build_video_paths, \
     check_failure_details, fix_split_time_points
@@ -142,8 +142,83 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
     return fixed_remove_time_segments
 
 
+def generate_blur_segments(raw_data: list, video_w: int, video_h: int, duration) -> list:
+    """
+    将包含归一化坐标的原始数据转换为 dynamic_video_area_blur 可用的像素级参数列表。
 
-@safe_process_limit(limit=2, name="process_origin_video")
+    :param raw_data: 包含 start_time, end_time, boxes 的列表
+    :param video_w: 视频总宽度 (px)
+    :param video_h: 视频总高度 (px)
+    :return: 格式化后的 blur_segments 列表
+    """
+    formatted_segments = []
+
+    for item in raw_data:
+        # 获取当前时间段
+        start = item.get("start_time", "00:00")
+        end = item.get("end_time", "00:00")
+        start = time_to_ms(start) / 1000
+        end = time_to_ms(end) / 1000
+        if end == 0 or end > duration:
+            end = duration
+        boxes = item.get("boxes", [])
+
+        for box in boxes:
+            # 1. 提取归一化坐标 (假设输入为 x, y, w, h 且为 0.0-1.0 的比例)
+            # 注意：这里假设 x, y 是左上角坐标。如果是中心点坐标，计算方式需调整。
+            norm_x = box.get("x", 0)
+            norm_y = box.get("y", 0)
+            norm_w = box.get("w", 0)
+            norm_h = box.get("h", 0)
+
+            # 2. 转换为绝对像素坐标
+            # 使用 int() 向下取整，确保坐标是整数
+            pixel_x = int(norm_x * video_w)
+            pixel_y = int(norm_y * video_h)
+            pixel_w = int(norm_w * video_w)
+            pixel_h = int(norm_h * video_h)
+
+            # 3. 计算右下角坐标 (x2, y2)
+            # x2 = x1 + w, y2 = y1 + h
+            x1 = pixel_x
+            y1 = pixel_y
+            x2 = pixel_x + pixel_w
+            y2 = pixel_y + pixel_h
+
+            # 4. 构建符合 dynamic_video_area_blur 要求的字典
+            segment = {
+                "start": start,
+                "end": end,
+                "bbox": (x1, y1, x2, y2)
+            }
+            formatted_segments.append(segment)
+
+    return formatted_segments
+
+def gen_blur_video_path(video_path, output_path, watermark_list):
+    """
+    生成模糊指定区域的视频
+    :return:
+    """
+    start_time = time.time()
+    if not watermark_list:
+        shutil.copy2(video_path, output_path)
+        return
+    video_info = probe_video(video_path)
+    width = video_info['width']
+    height = video_info['height']
+    duration = video_info['duration']
+    blur_configs = generate_blur_segments(watermark_list, width, height, duration)
+    dynamic_video_area_blur(video_path, output_path, blur_configs)
+    video_size = os.path.getsize(video_path)
+    print(f"模糊视频生成完成: {output_path}，耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    if not is_valid_target_file_simple(output_path, video_size * 0.1):
+        raise Exception(f"模糊视频生成失败: {output_path}")
+
+
+
+@safe_process_limit(limit=1, name="process_origin_video")
 def process_origin_video(video_id, video_info):
     """
     处理原始视频生成后续需要处理的视频
@@ -152,6 +227,7 @@ def process_origin_video(video_id, video_info):
     """
     video_path_info = build_video_paths(video_id)
     origin_video_path = video_path_info['origin_video_path']
+    origin_video_path_blur = video_path_info['origin_video_path_blur']
     origin_video_delete_part_path = video_path_info['origin_video_delete_part_path']
     low_origin_video_path = video_path_info['low_origin_video_path']
     static_cut_video_path = video_path_info['static_cut_video_path']
@@ -164,11 +240,16 @@ def process_origin_video(video_id, video_info):
     # 使用一个变量标识文件状态是否发生变更，利用连锁反应触发后续更新
     file_changed = False
 
+    # 进行指定区域的模糊处理
+    if not is_valid_target_file_simple(origin_video_path_blur):
+        watermark_list = video_info.get('extra_info', {}).get('watermark_list', [])
+        gen_blur_video_path(origin_video_path, origin_video_path_blur, watermark_list)
+
     # 1. 剪切片段处理
     # 如果文件不存在，或者强制要求重剪，则执行
     if not is_valid_target_file_simple(origin_video_delete_part_path) or video_info.get('need_recut', True):
         remove_time_segments = video_info.get('extra_info', {}).get('remove_time_segments', [])
-        fixed_remove_time_segments = cutoff_target_segment(origin_video_path, remove_time_segments, origin_video_delete_part_path)
+        fixed_remove_time_segments = cutoff_target_segment(origin_video_path_blur, remove_time_segments, origin_video_delete_part_path)
         video_info['extra_info']['fixed_remove_time_segments'] = fixed_remove_time_segments
         video_info['need_recut'] = False
         split_time_points = video_info.get('extra_info', {}).get('split_time_points', [])
@@ -892,11 +973,11 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  '_id': ObjectId("6975fb77bfaf783377cf3607")
+  '_id': ObjectId("69768e91bfaf783377cf36b1")
 }
     # recover_task()
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
     for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
+        process_single_task(task_info, manager, gen_video=False)
         break

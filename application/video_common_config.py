@@ -118,6 +118,9 @@ def build_video_paths(video_id):
     :return:
     """
     origin_video_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin.mp4")  # 直接下载下来的原始视频，没有任何的加工
+
+    origin_video_path_blur = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin_blur.mp4")  # 直接下载下来的原始视频，没有任何的加工
+
     origin_video_delete_part_path = os.path.join(VIDEO_MATERIAL_BASE_PATH, f"{video_id}/{video_id}_origin_delete.mp4")  # 直接下载下来的原始视频，没有任何的加工
 
 
@@ -137,6 +140,7 @@ def build_video_paths(video_id):
                                          f"{video_id}/{video_id}_image_text.mp4")  # 图片文字表情包等添加后的视频地址
     return {
         'origin_video_path': origin_video_path,
+        'origin_video_path_blur': origin_video_path_blur,
         'origin_video_delete_part_path': origin_video_delete_part_path,
         'low_origin_video_path': low_origin_video_path,
         'static_cut_video_path': static_cut_video_path,

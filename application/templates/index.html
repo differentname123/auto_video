@@ -1019,7 +1019,7 @@
                     const e = getCompositeTime(eGroup);
 
                     // --- 新增：水印/字幕遮挡时间段校验 ---
-                    if (compareTimeStrings(s, e) >= 0) {
+                    if (compareTimeStrings(s, e) > 0) {
                         err = `第 ${i + 1} 个视频的水印遮挡设置错误：结束时间不能小于开始时间`;
                         return;
                     }
