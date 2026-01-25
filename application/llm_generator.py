@@ -1773,7 +1773,7 @@ def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path
 
     # 策略 B: 字幕对齐 (无候选 或 count < 2)
     else:
-        reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot[1]}<2)"
+        reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot}<2)"
 
         # 调用字幕对齐函数
         ts_range = gen_precise_owner_timestamp_by_subtitle(video_path, target_ts, target_text)
