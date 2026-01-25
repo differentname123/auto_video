@@ -235,8 +235,7 @@ def generate_audio_and_get_duration_sync(
                 # 1. 生成原始音频
                 async def _generate_task():
                     communicate = edge_tts.Communicate(text, voice_name, volume='+100%', rate=rate, pitch=pitch)
-                    await communicate.save(str(raw_mp3))
-
+                    await asyncio.wait_for(communicate.save(str(raw_mp3)), timeout=30.0)
                 # 在新的尝试中，确保异步事件循环是干净的
                 # asyncio.run() 每次都会创建并关闭一个新的事件循环，所以这里没问题
                 asyncio.run(_generate_task())
