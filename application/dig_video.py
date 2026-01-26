@@ -554,7 +554,7 @@ def find_good_plan(manager):
 
 
 if __name__ == '__main__':
-    # time.sleep(3600 * 8)
+    # time.sleep(3600 * 1)
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
     while True:

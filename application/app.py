@@ -721,11 +721,19 @@ def get_user_upload_info() -> Response:
         user_name = request.args.get('userName', '').strip()
         user_upload_info = read_json(USER_STATISTIC_INFO_PATH)
         user_info = user_upload_info.get(user_name, {})
+        user_type = get_user_type(user_name)
+        type_cn_map = {
+            "fun": "娱乐",
+            "game": "游戏",
+            "sport": "体育",
+        }
+        user_type_cn = type_cn_map.get(user_type, "通用")
         response_data = {
             'status': ResponseStatus.SUCCESS,
             'message': '获取成功',
             'errors': [],
             'data': {
+                'video_type': user_type_cn,
                 'tomorrow_process': user_info.get('tomorrow_process', 0),
                 'today_process': user_info.get('today_process', 0),
                 'today_upload_count': user_info.get('today_upload_count', 0),

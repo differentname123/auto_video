@@ -52,7 +52,10 @@
         .video-item-card:hover { border-color: #b3d8ff; box-shadow: var(--shadow-hover); }
 
         /* 高亮与提示 */
+        /* 修改高亮逻辑适应Radio组 */
+        .field-synced-radio span { background-color: #fffbe6 !important; border-color: var(--warning-color) !important; color: var(--warning-color) !important; box-shadow: 0 0 0 1px var(--warning-color); }
         .field-synced { border-color: var(--warning-color) !important; background-color: #fffbe6 !important; box-shadow: 0 0 0 2px rgba(250, 173, 20, 0.2) !important; transition: all 0.5s; }
+
         .history-row { background-color: #fffbe6 !important; border: 1px dashed #ffe58f !important; position: relative; margin-top: 8px; }
         .history-badge { position: absolute; top: -8px; left: 10px; background-color: #faad14; color: white; font-size: 10px; padding: 1px 6px; border-radius: 4px; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .sync-tip { display: block; font-size: 11px; color: var(--warning-color); margin-top: 4px; font-weight: bold; animation: fadeIn 0.5s; }
@@ -68,10 +71,26 @@
         .btn-remove-card:hover { transform: scale(1.1) rotate(90deg); background: #ff7875; }
 
         /* 选项布局优化 */
-        .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px 20px; padding-top: 5px; }
+        .options-grid { display: grid; grid-template-columns: 1fr; gap: 15px 20px; padding-top: 5px; }
         .option-item { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
         .option-label { font-size: 0.85rem; color: #555; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .required-star { color: #ff4d4f; }
+
+        /* Radio Button 组样式 (新增) */
+        .radio-group { display: flex; flex-wrap: wrap; gap: 8px; }
+        .radio-btn { cursor: pointer; user-select: none; margin: 0; }
+        .radio-btn input { display: none; }
+        .radio-btn span {
+            display: inline-block; padding: 7px 14px; background: #fff; border: 1px solid #d9d9d9;
+            border-radius: 6px; color: #666; font-size: 0.9rem; transition: all 0.2s;
+            min-width: 60px; text-align: center;
+        }
+        .radio-btn:hover span { border-color: var(--primary-color); color: var(--primary-color); }
+        .radio-btn input:checked + span {
+            background: #e6f7ff; border-color: var(--primary-color); color: var(--primary-color); font-weight: 500; box-shadow: 0 0 0 1px var(--primary-color);
+        }
+        /* 针对日期选择等长内容的调整 */
+        .radio-group.wide .radio-btn span { width: 100%; text-align: center; }
 
         /* 动态时间段区域 */
         .dynamic-section { margin-top: 20px; padding-top: 15px; border-top: 1px dashed #eee; }
@@ -118,8 +137,6 @@
         .hidden { display: none !important; }
         .loader { width: 24px; height: 24px; border: 3px solid #f3f3f3; border-top: 3px solid var(--primary-color); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 10px; display: inline-block; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-        select.input-styled { appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e"); background-repeat: no-repeat; background-position: right 10px center; background-size: 16px; padding-right: 30px; }
 
         /* ================= 画板 Modal 样式 ================= */
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); z-index: 9999; display: flex; flex-direction: column; visibility: hidden; opacity: 0; transition: opacity 0.3s; }
@@ -206,59 +223,48 @@
                 <div id="advanced-options" class="advanced-options">
                     <div class="settings-header">🛠️ 创作参数设置</div>
                     <div class="form-row">
-                        <div class="label-wrap"><label class="option-label">视频风格类型</label><i
-                                class="info-icon">?</i><span
-                                class="tooltip-text">针对不同的类型题材能够有更好的创作效果</span></div>
-                        <select id="video-type" class="input-styled">
-                            <option value="通用" selected>通用</option>
-                            <option value="游戏">游戏</option>
-                            <option value="体育">体育</option>
-                            <option value="娱乐">娱乐</option>
-                        </select>
+                        <div class="label-wrap"><label class="option-label">视频风格类型</label><i class="info-icon">?</i><span class="tooltip-text">针对不同的类型题材能够有更好的创作效果</span></div>
+                        <div class="radio-group" id="video-type-group">
+                            <label class="radio-btn"><input type="radio" name="video-type" value="通用" checked><span>通用</span></label>
+                            <label class="radio-btn"><input type="radio" name="video-type" value="游戏"><span>游戏</span></label>
+                            <label class="radio-btn"><input type="radio" name="video-type" value="体育"><span>体育</span></label>
+                            <label class="radio-btn"><input type="radio" name="video-type" value="娱乐"><span>娱乐</span></label>
+                        </div>
                     </div>
                     <div class="form-row">
-                        <div class="label-wrap"><label class="option-label">素材保留比例</label><i
-                                class="info-icon">?</i><span class="tooltip-text">• 无要求: 自动智能方案<br>• 全量保留: 所有场景保留<br>• 较多保留: 保留一半以上</span>
+                        <div class="label-wrap"><label class="option-label">素材保留比例</label><i class="info-icon">?</i><span class="tooltip-text">• 无要求: 自动智能方案<br>• 全量保留: 所有场景保留<br>• 较多保留: 保留一半以上</span></div>
+                        <div class="radio-group">
+                            <label class="radio-btn"><input type="radio" name="retention-ratio" value="free" checked><span>智能保留</span></label>
+                            <label class="radio-btn"><input type="radio" name="retention-ratio" value="full"><span>全量保留</span></label>
+                            <label class="radio-btn"><input type="radio" name="retention-ratio" value="major"><span>较多保留</span></label>
                         </div>
-                        <select id="retention-ratio" class="input-styled">
-                            <option value="free" selected>无要求 (智能推荐)</option>
-                            <option value="full">全量保留</option>
-                            <option value="major">较多保留</option>
-                        </select>
                     </div>
                     <div class="form-row">
-                        <div class="label-wrap"><label class="option-label">预计投稿日期</label><i
-                                class="info-icon">?</i><span
-                                class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span></div>
-                        <select id="schedule-date" class="input-styled"></select>
+                        <div class="label-wrap"><label class="option-label">预计投稿日期</label><i class="info-icon">?</i><span class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span></div>
+                        <!-- 日期将由JS生成Radio组 -->
+                        <div class="radio-group wide" id="schedule-date-container"></div>
                     </div>
-                    <div class="options-grid"
-                         style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px;">
-                        <div class="option-item">
-                            <div class="label-wrap"><span class="option-label">原作者音频替换</span><i
-                                    class="info-icon">?</i><span
-                                    class="tooltip-text">把原作者的旁白进行重新创作并进行新音色替换</span></div>
-                            <select id="audio-replace" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
-                        </div>
-                        <div class="option-item">
-                            <div class="label-wrap"><span class="option-label">场景标题与摘要</span><i
-                                    class="info-icon">?</i><span class="tooltip-text">画面上方增加摘要及标题</span>
+                    <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px; grid-template-columns: 1fr;">
+                        <div class="option-item" style="flex-direction: row; align-items: center; justify-content: space-between;">
+                            <div class="label-wrap"><span class="option-label">原作者音频替换</span><i class="info-icon">?</i><span class="tooltip-text">把原作者的旁白进行重新创作并进行新音色替换</span></div>
+                            <div class="radio-group">
+                                <label class="radio-btn"><input type="radio" name="audio-replace" value="yes" checked><span>是</span></label>
+                                <label class="radio-btn"><input type="radio" name="audio-replace" value="no"><span>否</span></label>
                             </div>
-                            <select id="scene-title" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
                         </div>
-                        <div class="option-item">
-                            <div class="label-wrap"><span class="option-label">是否增加过渡解说</span><i
-                                    class="info-icon">?</i><span class="tooltip-text">场景切换时增加衔接语</span></div>
-                            <select id="allow-commentary" class="input-styled">
-                                <option value="yes" selected>是</option>
-                                <option value="no">否</option>
-                            </select>
+                        <div class="option-item" style="flex-direction: row; align-items: center; justify-content: space-between;">
+                            <div class="label-wrap"><span class="option-label">场景标题与摘要</span><i class="info-icon">?</i><span class="tooltip-text">画面上方增加摘要及标题</span></div>
+                            <div class="radio-group">
+                                <label class="radio-btn"><input type="radio" name="scene-title" value="yes" checked><span>是</span></label>
+                                <label class="radio-btn"><input type="radio" name="scene-title" value="no"><span>否</span></label>
+                            </div>
+                        </div>
+                        <div class="option-item" style="flex-direction: row; align-items: center; justify-content: space-between;">
+                            <div class="label-wrap"><span class="option-label">是否增加过渡解说</span><i class="info-icon">?</i><span class="tooltip-text">场景切换时增加衔接语</span></div>
+                            <div class="radio-group">
+                                <label class="radio-btn"><input type="radio" name="allow-commentary" value="yes" checked><span>是</span></label>
+                                <label class="radio-btn"><input type="radio" name="allow-commentary" value="no"><span>否</span></label>
+                            </div>
                         </div>
                     </div>
                     <div style="margin-top: 5px;">
@@ -339,76 +345,42 @@
 
         <div class="options-grid">
             <div class="option-item">
-                <div class="label-wrap"><span class="option-label">是否包含作者声音? <span
-                        class="required-star">*</span></span><i class="info-icon">?</i><span class="tooltip-text">客观的标识原视频中是否包含原作者的声音。</span>
+                <div class="label-wrap"><span class="option-label">是否包含作者声音? <span class="required-star">*</span></span><i class="info-icon">?</i><span class="tooltip-text">客观的标识原视频中是否包含原作者的声音。</span></div>
+                <div class="radio-group">
+                    <label class="radio-btn"><input type="radio" name="voice" class="select-voice" value="yes"><span>是</span></label>
+                    <label class="radio-btn"><input type="radio" name="voice" class="select-voice" value="no"><span>否</span></label>
                 </div>
-                <select class="input-styled select-voice">
-                    <option value="" disabled selected>请选择...</option>
-                    <option value="yes">是</option>
-                    <option value="no">否</option>
-                </select>
             </div>
             <div class="option-item">
-                <div class="label-wrap"><span class="option-label">是否包含BGM?</span><i class="info-icon">?</i><span
-                        class="tooltip-text">标识原视频是否全局都包含背景音乐。</span></div>
-                <select class="input-styled select-bgm">
-                    <option value="yes" selected>是</option>
-                    <option value="no">否</option>
-                </select>
+                <div class="label-wrap"><span class="option-label">是否包含BGM?</span><i class="info-icon">?</i><span class="tooltip-text">标识原视频是否全局都包含背景音乐。</span></div>
+                <div class="radio-group">
+                    <label class="radio-btn"><input type="radio" name="bgm" class="select-bgm" value="yes" checked><span>是</span></label>
+                    <label class="radio-btn"><input type="radio" name="bgm" class="select-bgm" value="no"><span>否</span></label>
+                </div>
             </div>
             <div class="option-item">
-                <div class="label-wrap"><span class="option-label">是否包含广告/原作者画面?</span><i
-                        class="info-icon">?</i><span
-                        class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span></div>
-                <select class="input-styled select-ad-face">
-                    <option value="auto" selected>自动检测</option>
-                    <option value="yes">是</option>
-                    <option value="no">否</option>
-                </select>
+                <div class="label-wrap"><span class="option-label">是否包含广告/原作者画面?</span><i class="info-icon">?</i><span class="tooltip-text">标识视频中是否有硬广或植入或者保留原作者身份的画面。</span></div>
+                <div class="radio-group">
+                    <label class="radio-btn"><input type="radio" name="ad-face" class="select-ad-face" value="auto" checked><span>自动检测</span></label>
+                    <label class="radio-btn"><input type="radio" name="ad-face" class="select-ad-face" value="yes"><span>是</span></label>
+                    <label class="radio-btn"><input type="radio" name="ad-face" class="select-ad-face" value="no"><span>否</span></label>
+                </div>
             </div>
             <div class="option-item">
-                <div class="label-wrap"><span class="option-label">是否实时视频?</span><i class="info-icon">?</i><span
-                        class="tooltip-text">是否为新闻、热点事件等强时效素材。</span></div>
-                <select class="input-styled select-realtime">
-                    <option value="yes" selected>是</option>
-                    <option value="no">否</option>
-                </select>
+                <div class="label-wrap"><span class="option-label">最多分解场景数</span><i class="info-icon">?</i><span class="tooltip-text">限制分解数量。</span></div>
+                <div class="radio-group">
+                    <label class="radio-btn"><input type="radio" name="max-scenes" class="select-max-scenes" value="0" checked><span>自动</span></label>
+                    <label class="radio-btn"><input type="radio" name="max-scenes" class="select-max-scenes" value="1"><span>≤1个</span></label>
+                    <label class="radio-btn"><input type="radio" name="max-scenes" class="select-max-scenes" value="5"><span>≤5个</span></label>
+                    <label class="radio-btn"><input type="radio" name="max-scenes" class="select-max-scenes" value="10"><span>≤10个</span></label>
+                </div>
             </div>
-            <div class="option-item">
-                <div class="label-wrap"><span class="option-label">自动配情绪文字?</span><i class="info-icon">?</i><span
-                        class="tooltip-text">自动在画面内添加文字</span></div>
-                <select class="input-styled select-text">
-                    <option value="yes" selected>是</option>
-                    <option value="no">否</option>
-                </select>
-            </div>
-            <div class="option-item">
-                <div class="label-wrap"><span class="option-label">自动配表情包?</span><i class="info-icon">?</i><span
-                        class="tooltip-text">自动添加趣味表情包。</span></div>
-                <select class="input-styled select-emoji">
-                    <option value="yes" selected>是</option>
-                    <option value="no">否</option>
-                </select>
-            </div>
-            <div class="option-item">
-                <div class="label-wrap"><span class="option-label">最多分解场景数</span><i class="info-icon">?</i><span
-                        class="tooltip-text">限制分解数量。</span></div>
-                <select class="input-styled select-max-scenes">
-                    <option value="0" selected>自动分割</option>
-                    <option value="1">不超过1个场景</option>
-                    <option value="5">不超过5个场景</option>
-                    <option value="10">不超过10个场景</option>
-                </select>
-            </div>
-            <div class="option-item">
-                <div class="label-wrap"><span class="option-label">场景顺序是否固定</span><i
-                        class="info-icon">?</i><span class="tooltip-text">锁定素材的时间线顺序。</span></div>
-                <select class="input-styled select-scene-order-fixed">
-                    <option value="auto" selected>智能判断</option>
-                    <option value="yes">是</option>
-                    <option value="no">否</option>
-                </select>
-            </div>
+
+            <!-- 以下选项已隐藏，但保留默认值传递给后端 -->
+            <input type="hidden" class="select-realtime" value="yes">
+            <input type="hidden" class="select-text" value="yes">
+            <input type="hidden" class="select-emoji" value="yes">
+            <input type="hidden" class="select-scene-order-fixed" value="auto">
         </div>
 
         <div style="margin-top: 15px;">
@@ -455,7 +427,7 @@
         videoList: document.getElementById('video-list-container'),
         addVideoBtn: document.getElementById('add-video-btn'),
         submitBtn: document.getElementById('submit-task-btn'),
-        dateSelect: document.getElementById('schedule-date'),
+        dateContainer: document.getElementById('schedule-date-container'), // 改为容器
         btnDetails: document.getElementById('btn-submission-details'),
         stats: {
             uploadedPlatform: document.getElementById('stat-uploaded-platform'),
@@ -468,194 +440,160 @@
     };
 
     const WatermarkManager = {
-    modal: document.getElementById('watermark-modal'),
-    loading: document.getElementById('wm-loading'),
-    container: document.getElementById('wm-canvas-container'),
-    img: document.getElementById('wm-bg-img'),
-    layer: document.getElementById('wm-draw-layer'),
-    activeRow: null,
+        modal: document.getElementById('watermark-modal'),
+        loading: document.getElementById('wm-loading'),
+        container: document.getElementById('wm-canvas-container'),
+        img: document.getElementById('wm-bg-img'),
+        layer: document.getElementById('wm-draw-layer'),
+        activeRow: null,
+        startX: 0, startY: 0,
+        isDrawing: false,
+        currentBox: null,
+        isMoving: false,
+        movingBox: null,
+        moveOffsetX: 0, moveOffsetY: 0,
 
-    // 状态变量
-    startX: 0, startY: 0,
-    isDrawing: false,
-    currentBox: null,
-
-    // 新增：移动相关的状态变量
-    isMoving: false,
-    movingBox: null,
-    moveOffsetX: 0, moveOffsetY: 0,
-
-    init() {
-        // 画布背景用于“画新框”
-        this.layer.addEventListener('mousedown', this.startDraw.bind(this));
-        this.layer.addEventListener('touchstart', (e) => {
-            if (e.target.classList.contains('box-close') || e.target.classList.contains('draw-box')) return;
-            if (e.touches.length === 1) {
-                e.preventDefault();
-                this.startDraw(e.touches[0]);
-            }
-        }, {passive: false});
-
-        // 全局移动事件（处理画框大小 或 拖拽位置）
-        this.layer.addEventListener('mousemove', this.drawing.bind(this));
-        this.layer.addEventListener('touchmove', (e) => {
-            if (e.touches.length === 1) { e.preventDefault(); this.drawing(e.touches[0]); }
-        }, {passive: false});
-
-        // 全局结束事件
-        window.addEventListener('mouseup', this.endDraw.bind(this));
-        window.addEventListener('touchend', this.endDraw.bind(this));
-    },
-
-    // ... open 方法保持不变 ...
-    async open(rowElement) {
-        // (保持你原来的 open 代码不变，直接复制过来即可)
-        const card = rowElement.closest('.video-item-card');
-        const url = card.querySelector('.video-url-input').value.trim();
-        if (!url) return alert("视频链接为空，无法加载画面");
-
-        const startTime = getCompositeTime(rowElement.querySelector('.start-group')) || "00:00:00";
-        const endTime = getCompositeTime(rowElement.querySelector('.end-group')) || "00:00:00";
-        this.activeRow = rowElement;
-        this.modal.classList.add('active');
-        this.container.classList.add('hidden');
-        this.loading.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
-
-        try {
-            // 模拟请求，请替换回你的真实逻辑
-            const res = await fetch('/get-video-snapshot', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ url: url, start_time: startTime, end_time: endTime })
-            });
-            const data = await res.json();
-
-            if (data.status === 'success' && data.image_base64) {
-                this.img.src = data.image_base64;
-            } else {
-                this.img.src = "";
-                this.img.style.minHeight = "300px";
-                this.img.style.background = "#333";
-                if (!confirm(`提示：${data.message || '暂无预览图'}\n\n是否继续在空白板上绘制区域？`)) {
-                    this.close(); return;
+        init() {
+            this.layer.addEventListener('mousedown', this.startDraw.bind(this));
+            this.layer.addEventListener('touchstart', (e) => {
+                if (e.target.classList.contains('box-close') || e.target.classList.contains('draw-box')) return;
+                if (e.touches.length === 1) {
+                    e.preventDefault();
+                    this.startDraw(e.touches[0]);
                 }
+            }, {passive: false});
+
+            this.layer.addEventListener('mousemove', this.drawing.bind(this));
+            this.layer.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 1) { e.preventDefault(); this.drawing(e.touches[0]); }
+            }, {passive: false});
+
+            window.addEventListener('mouseup', this.endDraw.bind(this));
+            window.addEventListener('touchend', this.endDraw.bind(this));
+        },
+
+        async open(rowElement) {
+            const card = rowElement.closest('.video-item-card');
+            const url = card.querySelector('.video-url-input').value.trim();
+            if (!url) return alert("视频链接为空，无法加载画面");
+
+            const startTime = getCompositeTime(rowElement.querySelector('.start-group')) || "00:00:00";
+            const endTime = getCompositeTime(rowElement.querySelector('.end-group')) || "00:00:00";
+            this.activeRow = rowElement;
+            this.modal.classList.add('active');
+            this.container.classList.add('hidden');
+            this.loading.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+
+            try {
+                const res = await fetch('/get-video-snapshot', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ url: url, start_time: startTime, end_time: endTime })
+                });
+                const data = await res.json();
+
+                if (data.status === 'success' && data.image_base64) {
+                    this.img.src = data.image_base64;
+                } else {
+                    this.img.src = "";
+                    this.img.style.minHeight = "300px";
+                    this.img.style.background = "#333";
+                    if (!confirm(`提示：${data.message || '暂无预览图'}\n\n是否继续在空白板上绘制区域？`)) {
+                        this.close(); return;
+                    }
+                }
+
+                this.img.onload = () => this.renderExistingBoxes();
+                this.img.onerror = () => {
+                    this.img.style.height = '300px'; this.img.style.width = '100%'; this.img.style.background = '#333';
+                    this.renderExistingBoxes();
+                }
+                this.loading.classList.add('hidden');
+                this.container.classList.remove('hidden');
+
+            } catch (e) {
+                alert("请求截图失败，请检查网络");
+                this.close();
             }
+        },
 
-            this.img.onload = () => this.renderExistingBoxes();
-            this.img.onerror = () => {
-                this.img.style.height = '300px'; this.img.style.width = '100%'; this.img.style.background = '#333';
-                this.renderExistingBoxes();
-            }
-            this.loading.classList.add('hidden');
-            this.container.classList.remove('hidden');
+        renderExistingBoxes() {
+            this.layer.innerHTML = '';
+            const jsonStr = this.activeRow.querySelector('.watermark-data').value;
+            let boxes = [];
+            try { boxes = JSON.parse(jsonStr); } catch (e) {}
 
-        } catch (e) {
-            alert("请求截图失败，请检查网络");
-            this.close();
-        }
-    },
+            boxes.forEach(box => {
+                const div = document.createElement('div');
+                div.className = 'draw-box';
+                div.style.left = (box.x * 100) + '%';
+                div.style.top = (box.y * 100) + '%';
+                div.style.width = (box.w * 100) + '%';
+                div.style.height = (box.h * 100) + '%';
 
-    renderExistingBoxes() {
-        this.layer.innerHTML = '';
-        const jsonStr = this.activeRow.querySelector('.watermark-data').value;
-        let boxes = [];
-        try { boxes = JSON.parse(jsonStr); } catch (e) {}
+                this.bindBoxEvents(div);
+                this.appendCloseBtn(div);
+                this.layer.appendChild(div);
+            });
+        },
 
-        boxes.forEach(box => {
-            const div = document.createElement('div');
-            div.className = 'draw-box';
-            div.style.left = (box.x * 100) + '%';
-            div.style.top = (box.y * 100) + '%';
-            div.style.width = (box.w * 100) + '%';
-            div.style.height = (box.h * 100) + '%';
+        bindBoxEvents(box) {
+            const startMoveHandler = (e) => {
+                e.stopPropagation();
+                const evt = e.touches ? e.touches[0] : e;
+                this.isMoving = true;
+                this.movingBox = box;
+                const rect = box.getBoundingClientRect();
+                this.moveOffsetX = evt.clientX - rect.left;
+                this.moveOffsetY = evt.clientY - rect.top;
+                box.style.cursor = 'grabbing';
+            };
+            box.addEventListener('mousedown', startMoveHandler);
+            box.addEventListener('touchstart', startMoveHandler, {passive: false});
+        },
 
-            this.bindBoxEvents(div); // 绑定移动事件
-            this.appendCloseBtn(div);
-            this.layer.appendChild(div);
-        });
-    },
+        startDraw(e) {
+            if (e.target.classList.contains('box-close') || this.isMoving) return;
+            const rect = this.layer.getBoundingClientRect();
+            this.startX = (e.clientX || e.pageX) - rect.left;
+            this.startY = (e.clientY || e.pageY) - rect.top;
 
-    // 新增：给框绑定“开始拖拽”事件
-    bindBoxEvents(box) {
-        const startMoveHandler = (e) => {
-            e.stopPropagation(); // 阻止冒泡，避免触发 startDraw
-            const evt = e.touches ? e.touches[0] : e;
+            this.currentBox = document.createElement('div');
+            this.currentBox.className = 'draw-box';
+            this.currentBox.style.left = this.startX + 'px';
+            this.currentBox.style.top = this.startY + 'px';
+            this.layer.appendChild(this.currentBox);
+            this.isDrawing = true;
+        },
 
-            this.isMoving = true;
-            this.movingBox = box;
-
-            // 计算鼠标点击点相对于盒子左上角的偏移量
-            const rect = box.getBoundingClientRect();
-            this.moveOffsetX = evt.clientX - rect.left;
-            this.moveOffsetY = evt.clientY - rect.top;
-
-            box.style.cursor = 'grabbing';
-        };
-
-        box.addEventListener('mousedown', startMoveHandler);
-        box.addEventListener('touchstart', startMoveHandler, {passive: false});
-    },
-
-    startDraw(e) {
-        if (e.target.classList.contains('box-close') || this.isMoving) return;
-        const rect = this.layer.getBoundingClientRect();
-        this.startX = (e.clientX || e.pageX) - rect.left;
-        this.startY = (e.clientY || e.pageY) - rect.top;
-
-        this.currentBox = document.createElement('div');
-        this.currentBox.className = 'draw-box';
-        this.currentBox.style.left = this.startX + 'px';
-        this.currentBox.style.top = this.startY + 'px';
-        this.layer.appendChild(this.currentBox);
-        this.isDrawing = true;
-    },
-
-    drawing(e) {
-            // 1. 获取触摸点或鼠标点
+        drawing(e) {
             const evt = e.touches ? e.touches[0] : e;
             const rect = this.layer.getBoundingClientRect();
-
-            // 2. 计算原始坐标（相对于容器左上角）
             let rawX = (evt.clientX || evt.pageX) - rect.left;
             let rawY = (evt.clientY || evt.pageY) - rect.top;
-
-            // ================== 核心修复：边界限制 ==================
-            // 强制 X 坐标：不能小于 0，也不能大于容器宽度
             const currentX = Math.max(0, Math.min(rawX, rect.width));
-            // 强制 Y 坐标：不能小于 0，也不能大于容器高度
             const currentY = Math.max(0, Math.min(rawY, rect.height));
-            // ======================================================
 
-            // --- 场景 A：如果你正在拖拽移动框 (即上一条建议的代码) ---
             if (this.isMoving && this.movingBox) {
                 let newLeft = currentX - this.moveOffsetX;
                 let newTop = currentY - this.moveOffsetY;
-
                 const boxW = this.movingBox.offsetWidth;
                 const boxH = this.movingBox.offsetHeight;
-
-                // 移动时的二次检查，防止把框完全拖出去
                 if (newLeft < 0) newLeft = 0;
                 if (newTop < 0) newTop = 0;
                 if (newLeft + boxW > rect.width) newLeft = rect.width - boxW;
                 if (newTop + boxH > rect.height) newTop = rect.height - boxH;
-
                 this.movingBox.style.left = newLeft + 'px';
                 this.movingBox.style.top = newTop + 'px';
                 return;
             }
 
-            // --- 场景 B：正在画新框 (你的当前问题) ---
             if (this.isDrawing && this.currentBox) {
-                // 使用经过限制的 currentX/Y 来计算宽高，绝对不会超出去
                 const width = Math.abs(currentX - this.startX);
                 const height = Math.abs(currentY - this.startY);
-
-                // 左上角坐标也必须基于限制后的数值
                 const left = Math.min(this.startX, currentX);
                 const top = Math.min(this.startY, currentY);
-
                 this.currentBox.style.width = width + 'px';
                 this.currentBox.style.height = height + 'px';
                 this.currentBox.style.left = left + 'px';
@@ -663,77 +601,73 @@
             }
         },
 
-    endDraw() {
-        // 结束拖拽
-        if (this.isMoving) {
-            if (this.movingBox) this.movingBox.style.cursor = 'move';
-            this.isMoving = false;
-            this.movingBox = null;
-            return;
-        }
-
-        // 结束画框
-        if (!this.isDrawing) return;
-        this.isDrawing = false;
-        if (this.currentBox) {
-            if (this.currentBox.offsetWidth < 10 || this.currentBox.offsetHeight < 10) {
-                this.currentBox.remove();
-            } else {
-                this.bindBoxEvents(this.currentBox); // 新画好的框也要绑定移动事件
-                this.appendCloseBtn(this.currentBox);
+        endDraw() {
+            if (this.isMoving) {
+                if (this.movingBox) this.movingBox.style.cursor = 'move';
+                this.isMoving = false;
+                this.movingBox = null;
+                return;
             }
-            this.currentBox = null;
-        }
-    },
+            if (!this.isDrawing) return;
+            this.isDrawing = false;
+            if (this.currentBox) {
+                if (this.currentBox.offsetWidth < 10 || this.currentBox.offsetHeight < 10) {
+                    this.currentBox.remove();
+                } else {
+                    this.bindBoxEvents(this.currentBox);
+                    this.appendCloseBtn(this.currentBox);
+                }
+                this.currentBox = null;
+            }
+        },
 
-    appendCloseBtn(box) {
-        const btn = document.createElement('div');
-        btn.className = 'box-close';
-        btn.innerHTML = '×';
-        const removeBox = (e) => {
-            e.stopPropagation();
-            if(e.type === 'touchend') e.preventDefault();
-            box.remove();
-        };
-        btn.onclick = removeBox;
-        btn.ontouchend = removeBox;
-        box.appendChild(btn);
-    },
+        appendCloseBtn(box) {
+            const btn = document.createElement('div');
+            btn.className = 'box-close';
+            btn.innerHTML = '×';
+            const removeBox = (e) => {
+                e.stopPropagation();
+                if(e.type === 'touchend') e.preventDefault();
+                box.remove();
+            };
+            btn.onclick = removeBox;
+            btn.ontouchend = removeBox;
+            box.appendChild(btn);
+        },
 
-    save() {
-        // (保持你原来的 save 代码不变)
-        if (!this.activeRow) return;
-        const boxes = [];
-        const rect = this.layer.getBoundingClientRect();
-        const cw = rect.width || 1; const ch = rect.height || 1;
+        save() {
+            if (!this.activeRow) return;
+            const boxes = [];
+            const rect = this.layer.getBoundingClientRect();
+            const cw = rect.width || 1; const ch = rect.height || 1;
 
-        this.layer.querySelectorAll('.draw-box').forEach(el => {
-            boxes.push({
-                x: parseFloat((el.offsetLeft / cw).toFixed(4)),
-                y: parseFloat((el.offsetTop / ch).toFixed(4)),
-                w: parseFloat((el.offsetWidth / cw).toFixed(4)),
-                h: parseFloat((el.offsetHeight / ch).toFixed(4))
+            this.layer.querySelectorAll('.draw-box').forEach(el => {
+                boxes.push({
+                    x: parseFloat((el.offsetLeft / cw).toFixed(4)),
+                    y: parseFloat((el.offsetTop / ch).toFixed(4)),
+                    w: parseFloat((el.offsetWidth / cw).toFixed(4)),
+                    h: parseFloat((el.offsetHeight / ch).toFixed(4))
+                });
             });
-        });
 
-        this.activeRow.querySelector('.watermark-data').value = JSON.stringify(boxes);
-        const btn = this.activeRow.querySelector('.btn-draw-trigger');
-        btn.innerText = `🎨 点击画框 (${boxes.length})`;
-        if (boxes.length > 0) {
-            btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
-        } else {
-            btn.style = '';
+            this.activeRow.querySelector('.watermark-data').value = JSON.stringify(boxes);
+            const btn = this.activeRow.querySelector('.btn-draw-trigger');
+            btn.innerText = `🎨 点击画框 (${boxes.length})`;
+            if (boxes.length > 0) {
+                btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
+            } else {
+                btn.style = '';
+            }
+            this.close();
+        },
+
+        close() {
+            this.modal.classList.remove('active');
+            document.body.style.overflow = '';
+            this.activeRow = null;
+            this.isMoving = false;
         }
-        this.close();
-    },
-
-    close() {
-        this.modal.classList.remove('active');
-        document.body.style.overflow = '';
-        this.activeRow = null;
-        this.isMoving = false; // 重置移动状态
-    }
-};
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
         if (APP.currentUser) initMainApp();
@@ -772,33 +706,56 @@
     function initDateSelect() {
         const today = new Date();
         const opts = ['今天', '明天', '后天'];
-        UI.dateSelect.innerHTML = opts.map((text, i) => {
+        // 改为生成 Radio Buttons
+        UI.dateContainer.innerHTML = opts.map((text, i) => {
             const d = new Date(today); d.setDate(today.getDate() + i);
             const val = d.toISOString().split('T')[0];
-            return `<option value="${val}">${text} (${val})</option>`;
+            const checked = i === 0 ? 'checked' : '';
+            return `<label class="radio-btn">
+                        <input type="radio" name="schedule-date" value="${val}" ${checked}>
+                        <span>${text} (${val})</span>
+                    </label>`;
         }).join('');
     }
 
     async function fetchUploadStats() {
-        try {
-            const r = await fetch(`/get_user_upload_info?userName=${encodeURIComponent(APP.currentUser)}`);
-            if (r.ok) {
-                const d = await r.json();
-                if (d.status === 'success') {
-                    UI.stats.uploadedPlatform.textContent = d.data.today_upload_count || 0;
-                    UI.stats.processToday.textContent = d.data.today_process || 0;
-                    UI.stats.processTomorrow.textContent = d.data.tomorrow_process || 0;
-                }
-            }
-        } catch (e) { console.error("获取统计数据失败", e); }
-    }
+            try {
+                const r = await fetch(`/get_user_upload_info?userName=${encodeURIComponent(APP.currentUser)}`);
+                if (r.ok) {
+                    const d = await r.json();
+                    if (d.status === 'success') {
+                        UI.stats.uploadedPlatform.textContent = d.data.today_upload_count || 0;
+                        UI.stats.processToday.textContent = d.data.today_process || 0;
+                        UI.stats.processTomorrow.textContent = d.data.tomorrow_process || 0;
 
+                        // --- 新增代码开始 ---
+                        // 如果接口返回了 video_type，自动选中对应的单选框
+                        if (d.data.video_type) {
+                            // 在 id="video-type-group" 容器内查找 value 等于接口返回值的 radio
+                            const targetRadio = document.querySelector(`#video-type-group input[value="${d.data.video_type}"]`);
+                            if (targetRadio) {
+                                targetRadio.checked = true;
+                            }
+                        }
+                        // --- 新增代码结束 ---
+                    }
+                }
+            } catch (e) { console.error("获取统计数据失败", e); }
+        }
     /* --- DOM 操作 --- */
 
     function addVideoCard() {
         APP.videoCounter++;
+        const cardId = APP.videoCounter;
         const card = UI.tplCard.content.cloneNode(true).firstElementChild;
-        card.id = `video-card-${APP.videoCounter}`;
+        card.id = `video-card-${cardId}`;
+
+        // 关键：给新卡片内的 Radio Group 的 name 属性增加唯一后缀，防止不同卡片冲突
+        // 查找所有 radio 类型的 input
+        card.querySelectorAll('input[type="radio"]').forEach(radio => {
+            radio.name = radio.name + '_' + cardId; // 例如 name="voice" 变为 name="voice_1"
+        });
+
         if (UI.videoList.children.length === 0) card.querySelector('.btn-remove-card').style.display = 'none';
         else {
             const firstBtn = UI.videoList.firstElementChild?.querySelector('.btn-remove-card');
@@ -819,14 +776,12 @@
         }
 
         const row = document.createElement('div');
-        // 设置基本 class
         row.className = 'dynamic-row';
         if (type === 'segment') row.classList.add('time-segment-row');
         else if (type === 'point') row.classList.add('split-point-row');
         else if (type === 'watermark') row.classList.add('watermark-row');
 
         if (type === 'watermark') {
-            // 修复：直接追加内容，避免嵌套
             const tpl = UI.tplWatermark.content.cloneNode(true);
             const g1 = UI.tplTime.content.cloneNode(true).firstElementChild;
             const g2 = UI.tplTime.content.cloneNode(true).firstElementChild;
@@ -927,6 +882,8 @@
 
     function clearSyncHighlights() {
         document.querySelectorAll('.field-synced').forEach(el => el.classList.remove('field-synced'));
+        // 清除 Radio 按钮的高亮
+        document.querySelectorAll('.field-synced-radio').forEach(el => el.classList.remove('field-synced-radio'));
         document.querySelectorAll('.sync-tip').forEach(el => el.remove());
         document.querySelectorAll('.history-row').forEach(el => {
             el.classList.remove('history-row');
@@ -937,7 +894,6 @@
     function getCompositeTime(group) {
         if (!group) return null;
         const pad = (n, len = 2) => (n || '0').toString().padStart(len, '0');
-        // 修复：添加可选链操作符，防止元素已被删除时报错
         const minInput = group.querySelector('.t-min');
         if (!minInput) return "00:00:00.000";
 
@@ -967,20 +923,54 @@
     }
 
     function updateAndHighlight(el, newValue) {
-        if (!el || el.value === String(newValue)) return;
+        if (!el) return;
+
+        // 处理 Radio 按钮的情况
+        if (el.tagName === 'INPUT' && el.type === 'radio') {
+            // 查找同名 Radio 组中 value 等于 newValue 的元素
+            const groupName = el.name;
+            // 在 el 所在的 form 或 card 范围内查找
+            const container = el.closest('.video-item-card') || el.closest('.global-settings-box');
+            const targetRadio = container.querySelector(`input[name="${groupName}"][value="${newValue}"]`);
+
+            if (targetRadio && !targetRadio.checked) {
+                targetRadio.checked = true;
+                const label = targetRadio.closest('.radio-btn');
+                if (label) label.classList.add('field-synced-radio');
+
+                // 添加提示 (添加到 radio group 容器后面)
+                const groupContainer = label.closest('.radio-group');
+                if (groupContainer && !groupContainer.parentNode.querySelector('.sync-tip')) {
+                    const tip = document.createElement('span'); tip.className = 'sync-tip'; tip.innerText = '⚠️ 发现历史配置差异';
+                    groupContainer.parentNode.appendChild(tip);
+                }
+            }
+            return;
+        }
+
+        // 处理普通 Input/Textarea/Select (Hidden Input也在这里处理)
+        if (el.value === String(newValue)) return;
         if (el.tagName === 'TEXTAREA' && el.value.trim() && !el.value.includes(newValue)) {
             el.value += `\n\n[⬇️ 历史配置参考 ⬇️]\n${newValue}`;
         } else {
             el.value = String(newValue);
         }
-        el.classList.add('field-synced');
-        if (!el.parentNode.querySelector('.sync-tip')) {
-            const tip = document.createElement('span'); tip.className = 'sync-tip'; tip.innerText = '⚠️ 发现历史配置差异';
-            el.parentNode.appendChild(tip);
+
+        if (el.type !== 'hidden') {
+            el.classList.add('field-synced');
+            if (!el.parentNode.querySelector('.sync-tip')) {
+                const tip = document.createElement('span'); tip.className = 'sync-tip'; tip.innerText = '⚠️ 发现历史配置差异';
+                el.parentNode.appendChild(tip);
+            }
         }
     }
 
     /* --- 核心提交逻辑 --- */
+
+    function getRadioValue(name, container = document) {
+        const el = container.querySelector(`input[name="${name}"]:checked`);
+        return el ? el.value : '';
+    }
 
     function collectFormData() {
         const cards = document.querySelectorAll('.video-item-card');
@@ -993,7 +983,9 @@
             const url = urlInput.value.trim();
             if (!url) { err = `第 ${i + 1} 个视频链接为空！`; urlInput.focus(); break; }
 
-            const voice = card.querySelector('.select-voice').value;
+            // Radio获取值，注意name是动态的，所以使用类选择器辅助查找
+            const voiceEl = card.querySelector('input.select-voice:checked');
+            const voice = voiceEl ? voiceEl.value : '';
             if (!voice) { err = `请确认第 ${i + 1} 个视频“是否包含作者声音”`; break; }
 
             const removeSegments = [];
@@ -1013,10 +1005,9 @@
                 if (p !== "00:00:00.000") splitPoints.push(p);
             });
 
-            // 修复：确保数据收集不会因为空行而崩溃
             const watermarkList = [];
             card.querySelectorAll('.watermark-row').forEach(row => {
-                if (err) return; // 如果已经有错误，不再继续检查
+                if (err) return;
                 const sGroup = row.querySelector('.start-group');
                 const eGroup = row.querySelector('.end-group');
                 const dataInput = row.querySelector('.watermark-data');
@@ -1025,7 +1016,6 @@
                     const s = getCompositeTime(sGroup);
                     const e = getCompositeTime(eGroup);
 
-                    // --- 新增：水印/字幕遮挡时间段校验 ---
                     if (compareTimeStrings(s, e) > 0) {
                         err = `第 ${i + 1} 个视频的水印遮挡设置错误：结束时间不能小于开始时间`;
                         return;
@@ -1038,19 +1028,30 @@
                     }
                 }
             });
-            if (err) break; // 跳出外层循环
+            if (err) break;
+
+            // 获取 Hidden Input 的值
+            const realtime = card.querySelector('.select-realtime').value;
+            const text = card.querySelector('.select-text').value;
+            const emoji = card.querySelector('.select-emoji').value;
+            const orderFixed = card.querySelector('.select-scene-order-fixed').value;
+
+            // 获取其他 Radio 的值
+            const bgm = card.querySelector('input.select-bgm:checked')?.value || 'yes';
+            const adFace = card.querySelector('input.select-ad-face:checked')?.value || 'auto';
+            const maxScenes = card.querySelector('input.select-max-scenes:checked')?.value || '0';
 
             vList.push({
                 _cardDomId: card.id,
                 original_url: url,
                 is_contains_author_voice: voice === 'yes',
-                is_contains_bgm: card.querySelector('.select-bgm').value === 'yes',
-                is_realtime_video: card.querySelector('.select-realtime').value === 'yes',
-                is_requires_text: card.querySelector('.select-text').value === 'yes',
-                is_needs_stickers: card.querySelector('.select-emoji').value === 'yes',
-                max_scenes: parseInt(card.querySelector('.select-max-scenes').value, 10),
-                has_ad_or_face: card.querySelector('.select-ad-face').value,
-                scene_order_fixed: card.querySelector('.select-scene-order-fixed').value,
+                is_contains_bgm: bgm === 'yes',
+                is_realtime_video: realtime === 'yes',
+                is_requires_text: text === 'yes',
+                is_needs_stickers: emoji === 'yes',
+                max_scenes: parseInt(maxScenes, 10),
+                has_ad_or_face: adFace,
+                scene_order_fixed: orderFixed === 'auto' ? 'auto' : (orderFixed === 'yes'), // 简单处理，保持原来逻辑
                 split_guidance: card.querySelector('.textarea-split-guidance').value.trim(),
                 remove_time_segments: removeSegments,
                 split_time_points: splitPoints,
@@ -1061,7 +1062,7 @@
         if (err) { alert(err); return null; }
         if (!vList.length) { alert('请至少添加一个有效的视频链接'); return null; }
 
-        if (document.getElementById('audio-replace').value === 'yes' && vList.every(v => !v.is_contains_author_voice)) {
+        if (getRadioValue('audio-replace', document.getElementById('advanced-options')) === 'yes' && vList.every(v => !v.is_contains_author_voice)) {
             alert('⚠️ 设置冲突提醒：开启了【音频替换】但所有素材均无作者声音。');
             return null;
         }
@@ -1069,12 +1070,12 @@
         return {
             userName: APP.currentUser,
             global_settings: {
-                video_type: document.getElementById('video-type').value,
-                retention_ratio: document.getElementById('retention-ratio').value,
-                is_need_audio_replace: document.getElementById('audio-replace').value === 'yes',
-                is_need_scene_title: document.getElementById('scene-title').value === 'yes',
-                is_need_commentary: document.getElementById('allow-commentary').value === 'yes',
-                schedule_date: UI.dateSelect.value,
+                video_type: getRadioValue('video-type', document.getElementById('advanced-options')),
+                retention_ratio: getRadioValue('retention-ratio', document.getElementById('advanced-options')),
+                is_need_audio_replace: getRadioValue('audio-replace', document.getElementById('advanced-options')) === 'yes',
+                is_need_scene_title: getRadioValue('scene-title', document.getElementById('advanced-options')) === 'yes',
+                is_need_commentary: getRadioValue('allow-commentary', document.getElementById('advanced-options')) === 'yes',
+                schedule_date: getRadioValue('schedule-date', document.getElementById('advanced-options')),
                 creative_guidance: document.getElementById('creative-guidance').value.trim()
             },
             video_list: vList
@@ -1113,20 +1114,28 @@
                         const card = document.getElementById(curr._cardDomId);
                         if (!card || !db) return;
 
+                        // 检查项映射 [选择器, 数据库值, 当前值, 是否布尔]
+                        // 对于 Radio 按钮，选择器传入 class
                         const checks = [
                             ['.select-voice', db.is_contains_author_voice, curr.is_contains_author_voice, true],
                             ['.select-bgm', db.is_contains_bgm, curr.is_contains_bgm, true],
-                            ['.select-realtime', db.is_realtime_video, curr.is_realtime_video, true],
+                            ['.select-realtime', db.is_realtime_video, curr.is_realtime_video, true], // Hidden
                             ['.select-ad-face', db.has_ad_or_face, curr.has_ad_or_face, false],
                             ['.select-max-scenes', db.max_scenes, curr.max_scenes, false],
                             ['.textarea-split-guidance', db.split_guidance || '', curr.split_guidance, false],
-                            ['.select-scene-order-fixed', typeof db.scene_order_fixed === 'boolean' ? (db.scene_order_fixed ? 'yes' : 'no') : db.scene_order_fixed, curr.scene_order_fixed, false]
+                            ['.select-scene-order-fixed', typeof db.scene_order_fixed === 'boolean' ? (db.scene_order_fixed ? 'yes' : 'no') : db.scene_order_fixed, curr.scene_order_fixed, false] // Hidden
                         ];
 
                         checks.forEach(([sel, dbVal, currVal, isBool]) => {
                             const dbStr = isBool ? (dbVal ? 'yes' : 'no') : String(dbVal);
                             const currStr = isBool ? (currVal ? 'yes' : 'no') : String(currVal);
-                            if (dbStr !== currStr) { updateAndHighlight(card.querySelector(sel), dbStr); hasChanges = true; }
+
+                            if (dbStr !== currStr) {
+                                // 查找元素：对于Radio，我们查找该组的任意一个，updateAndHighlight会处理
+                                const el = card.querySelector(sel);
+                                updateAndHighlight(el, dbStr);
+                                hasChanges = true;
+                            }
                         });
 
                         if (JSON.stringify(db.remove_time_segments) !== JSON.stringify(curr.remove_time_segments)) {

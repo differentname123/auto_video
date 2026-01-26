@@ -1323,23 +1323,22 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
 
 
 if __name__ == "__main__":
-    # mongo_base_instance = gen_db_object()
-    # manager = MongoManager(mongo_base_instance)
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
     # video_path = r"W:\project\python_project\auto_video\videos\material\7576626385520040674\7576848259886691321_origin.mp4"
     # # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    # video_info_list = manager.find_materials_by_ids(['7595599977959771419'])
-    # for video_info in video_info_list:
-    #     video_id = video_info.get('video_id')
-    #     # fix_owner_asr_by_subtitle(video_info)
-    #     _process_single_video(video_id, video_info, is_need_narration=True)
+    video_info_list = manager.find_materials_by_ids(['7598869943144172846'])
+    for video_info in video_info_list:
+        video_id = video_info.get('video_id')
+        fix_owner_asr_by_subtitle(video_info)
+        # _process_single_video(video_id, video_info, is_need_narration=True)
 
     # time_list = [11167, 12433, 11750]
     # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
     # for timestamp in time_list:
     #     timestamp = timestamp / 1000
     #     save_frames_around_timestamp(my_video_path, timestamp, 3, str(os.path.join(os.path.dirname(my_video_path), 'scenes', f"{timestamp}")))
-
-    video_dir = r"W:\project\python_project\auto_video\videos"
-    # 删除所有超时的MP4
-    batch_cleanup_mp4(video_dir, dry_run=False)
+    # video_dir = r"W:\project\python_project\auto_video\videos"
+    # # 删除所有超时的MP4
+    # batch_cleanup_mp4(video_dir, dry_run=False)
 

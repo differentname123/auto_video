@@ -488,15 +488,18 @@ def _submit_prompt(page: Page, prompt: str):
     expect(prompt_input).to_be_editable(timeout=15000)
     prompt_input.fill(prompt)
 
-    # --- 3. 定位并点击运行按钮 (增加对 "Generate" 的兼容) ---
-    # 使用正则表达式同时匹配 "Run" 和 "Generate"
-    run_button = page.get_by_role(
-        "button",
-        name=re.compile(r"^(Run|Generate)$", re.IGNORECASE)
-    )
+    # --- 3. 定位并点击运行按钮 (已修改：精准定位策略) ---
+    # 修改说明：放弃 Regex 文本匹配，改用精准的 CSS 结构定位。
+    # 定位 <ms-run-button> 组件下的 submit 按钮，不依赖 "Run" 或 "Ctrl" 等文本内容
+    run_button = page.locator("ms-run-button button[type='submit']")
 
-    expect(run_button).to_be_enabled(timeout=300000)
+    # 等待按钮变更为可用状态 (to_be_enabled 会自动等待附件上传完成，即 aria-disabled 变为 false)
+    # 考虑到附件上传可能需要时间，建议保持较长的 timeout (如 60秒)
+    expect(run_button).to_be_enabled(timeout=60000)
+
     _remove_google_grounding(page)
+
+    print("[*] 按钮已就绪，正在点击...")
     run_button.click()
 
 
