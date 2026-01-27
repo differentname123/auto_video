@@ -15,7 +15,7 @@ import time
 import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
-    DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE
+    DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
     gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
@@ -65,12 +65,17 @@ def query_all_material_videos(manager, is_need_refresh):
     for video_info in all_material_list:
         video_id = video_info['video_id']
         logical_scene_info = video_info.get('logical_scene_info', {})
+        owner_asr_info = video_info.get('owner_asr_info', [])
+        max_scenes = video_info.get('extra_info', {}).get('max_scenes', 0)
         tags_info = get_tags_info(logical_scene_info)
         if tags_info:
             temp_dict = {}
             temp_dict['tags_info'] = tags_info
             temp_dict['logical_scene_info'] = logical_scene_info
             temp_dict['video_type'] = all_video_type_map.get(video_id, 'game')
+            temp_dict['max_scenes'] = max_scenes
+            temp_dict['owner_asr_info'] = owner_asr_info
+
             local_material_video_info[video_id] = temp_dict
 
     count_before_filter = len(local_material_video_info)  # [新增] 记录过滤前的数据总量
@@ -180,7 +185,35 @@ def gen_target_tags(user_name='danzhu'):
     target_tags = {tag: 1 for tag in user_tags_list}
     return target_tags
 
-def build_prompt_data(video_info):
+def build_merged_scene_list_auto(
+    new_scene_info,
+    owner_asr_info,
+    max_scenes,
+    is_need_narration=False
+):
+    """
+    自动判断 merge_mode，然后生成 merged_scene_list
+    """
+
+    if not new_scene_info:
+        return []
+
+    if max_scenes == 1:
+        merge_mode = 'global'
+    else:
+        if is_need_narration and is_contain_owner_speaker(owner_asr_info):
+            merge_mode = 'none'
+        else:
+            merge_mode = 'smart'
+
+    return analyze_scene_content(
+        new_scene_info,
+        owner_asr_info,
+        merge_mode=merge_mode
+    )
+
+
+def build_prompt_data(video_info, video_type=None):
     """
     构建提示词数据
     :param video_info:
@@ -195,6 +228,9 @@ def build_prompt_data(video_info):
         for new_scene in new_scene_info:
             scene_summary = new_scene.get('scene_summary', '')
             scene_summary_list.append(scene_summary)
+
+        if video_type == 'game':
+            merged_scene_list = build_merged_scene_list_auto(new_scene_info, info.get('owner_asr_info', []), info.get('max_scenes', 0), is_need_narration=True)
 
         prompt_entry = {
             'video_id': vid,
@@ -287,7 +323,7 @@ def gen_hot_video_llm(video_info, hot_video=None):
 
     full_prompt = f"{base_prompt}\n视频素材信息 (Video Materials)如下：\n{video_info}\n\n{last_prompt}"
     model_name = "gemini-2.5-pro"
-    model_name = "gemini-3-pro-preview"
+    # model_name = "gemini-3-pro-preview"
     max_retries = 3
     video_content_plans = []
     for attempt in range(1, max_retries + 1):
@@ -366,12 +402,22 @@ def get_need_dig_video_list():
     return all_dig_video_list, good_tags_info, good_video_list
 
 
-def get_target_video(all_video_info, target_tags, target_video_type):
+def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False):
     """
     获取本次挖掘最终的素材列表
     :return:
     """
     filter_all_video_info = {vid: info for vid, info in all_video_info.items() if info.get('video_type') == target_video_type}
+    if target_video_type == 'game' and no_asr:
+        delete_keys = []
+        for vid, info in filter_all_video_info.items():
+            owner_asr_info = info.get('owner_asr_info', [])
+            if is_contain_owner_speaker(owner_asr_info):
+                delete_keys.append(vid)
+
+        for vid in delete_keys:
+            del filter_all_video_info[vid]
+
     sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags)
     top_n = 100
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
@@ -498,7 +544,7 @@ def find_good_plan(manager):
             target_tags = get_target_tags(manager, selected_video_info)
 
             final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
-            video_data = build_prompt_data(final_good_video_list)
+            video_data = build_prompt_data(final_good_video_list, target_video_type)
             print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             video_content_plans = gen_hot_video_llm(video_data, hot_video)
             exist_video_plan_info[hot_video].extend(video_content_plans)
@@ -520,8 +566,8 @@ def find_good_plan(manager):
     for target_video_type, target_tags in good_tags_info.items():
         if target_video_type == 'sport':
             continue
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
-        video_data = build_prompt_data(final_good_video_list)
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=True)
+        video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_content_plans = gen_hot_video_llm(video_data, None)
         for plan_info in video_content_plans:

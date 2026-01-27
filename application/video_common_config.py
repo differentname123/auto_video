@@ -458,3 +458,131 @@ ALL_MATERIAL_VIDEO_INFO_PATH = r'W:\project\python_project\auto_video\config\all
 DIG_HOT_VIDEO_PLAN_FILE = r'W:\project\python_project\auto_video\config\dig_hot_video_plan.json'  # 用于存放挖热点视频的计划信息
 
 SNAPSHOT_CACHE_DIR = r'W:\project\python_project\auto_video\videos\snapshot_cache'
+
+
+def is_contain_owner_speaker(owner_asr_info):
+    """
+    检查是否包含owner的文本
+    """
+    if owner_asr_info:
+        for asr_info in owner_asr_info:
+            speaker = asr_info.get('speaker', 'unknown')
+            final_text = asr_info.get('final_text', '').strip()
+            if speaker == 'owner' and final_text:
+                return True
+    return False
+
+
+def analyze_scene_content(scene_list, owner_asr_info, top_k=3, merge_mode='global'):
+    """
+    分析场景列表。
+    """
+
+    if not scene_list:
+        return []
+
+    # --- 1. 内部辅助函数：处理一组场景 ---
+    # 这部分函数是修改的重点
+    def _process_segment(segment_scenes):
+        scene_summaries = []
+        all_tags = []
+        scene_number_list = []
+
+        if not segment_scenes:
+            return {}
+
+        # 1. 确定当前场景段落的整体时间范围
+        segment_start = min(s['start'] for s in segment_scenes)
+        segment_end = max(s['end'] for s in segment_scenes)
+
+        original_script_list = []
+        narration_script_list = []
+
+        # 2. 遍历 ASR，使用中心点判定归属
+        if owner_asr_info:
+            for asr_item in owner_asr_info:
+                asr_start = asr_item.get('start', 0)
+                asr_end = asr_item.get('end', 0)
+                asr_mid = (asr_start + asr_end) / 2
+                if segment_start <= asr_mid < segment_end:
+                    text = asr_item.get('final_text', '')
+                    speaker = asr_item.get('speaker', '')
+                    if speaker == 'owner':
+                        narration_script_list.append(text)
+                    else:
+                        original_script_list.append(text)
+
+        # 遍历 segment_scenes 来提取所需信息
+        for scene in segment_scenes:
+            # 提取 visual_description
+            v_desc = scene.get('scene_summary')
+            if v_desc:
+                scene_summaries.append(v_desc)
+
+            # 提取 tags
+            tags = scene.get('tags', [])
+            if tags:
+                all_tags.extend(tags)
+
+            # --- 新增代码 Start ---
+            # 提取 scene_number_list
+            # 使用 .get() 方法以防该字段不存在
+            origin_id = scene.get('scene_number')
+            if origin_id is not None:  # 确保ID存在才添加
+                scene_number_list.append(origin_id)
+            # --- 新增代码 End ---
+
+        # 计数并取 Top K
+        top_all_tags = [tag for tag, count in Counter(all_tags).most_common(top_k)]
+
+        # 在返回的字典中增加 origin_scene_id_list 字段
+        return {
+            'scene_summary': scene_summaries,
+            'scene_number_list': scene_number_list,
+            'tags': top_all_tags,
+            'narration_script_list': narration_script_list,
+            'original_script_list': original_script_list,
+        }
+
+    # --- 2. 根据模式构建 Segments ---
+    # 这部分逻辑保持不变
+    segments = []
+
+    if merge_mode == 'global':
+        segments.append(scene_list)
+
+    elif merge_mode == 'none':
+        for scene in scene_list:
+            segments.append([scene])
+
+    elif merge_mode == 'smart':
+        if not scene_list:
+            return []
+
+        buffer = []
+        for scene in scene_list:
+            if not buffer:
+                buffer.append(scene)
+                continue
+
+            is_adjustable = scene.get('sequence_info', {}).get('is_adjustable', False)
+
+            if is_adjustable:
+                segments.append(buffer)
+                buffer = [scene]
+            else:
+                buffer.append(scene)
+
+        if buffer:
+            segments.append(buffer)
+
+    else:
+        raise ValueError(f"Unsupported merge_mode: {merge_mode}")
+
+    # --- 3. 处理结果 ---
+    # 这部分逻辑保持不变
+    result_list = []
+    for segment in segments:
+        result_list.append(_process_segment(segment))
+
+    return result_list
