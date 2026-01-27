@@ -2954,11 +2954,36 @@ def create_video_from_image_smooth(
     command = [
         'ffmpeg', '-y',
         '-loglevel', 'error',
-        '-loop', '1', '-i', image_path,
+
+        # --- 输入部分 ---
+        '-loop', '1', '-i', image_path,  # 输入0: 图片循环
+
+        # <<< 修改1: 添加虚拟静音音频源
+        # anullsrc: 生成空音频 (null source)
+        # channel_layout=stereo: 立体声
+        # sample_rate=44100: 采样率 44.1kHz (通用标准)
+        '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+
+        # --- 滤镜部分 ---
         '-filter_complex', final_filter_complex,
+
+        # --- 视频编码设置 ---
         '-c:v', 'libx264',
         '-preset', 'slow', '-crf', '18',
-        '-t', str(duration), '-r', str(fps),
+
+        # <<< 修改2: 添加音频编码设置
+        '-c:a', 'aac',  # 使用 AAC 编码 (MP4标准音频)
+        '-b:a', '128k',  # 音频码率 (静音其实占用很小，但指定一下比较规范)
+
+        # --- 输出控制 ---
+        # <<< 修改3: 确保音频长度被截断
+        # -t 已经全局指定了时长，它会同时切断视频流和静音音频流
+        '-t', str(duration),
+        '-r', str(fps),
+
+        # -shortest 是个双保险，确保以最短的流（通常是受 -t 控制的那个）为准结束
+        '-shortest',
+
         output_path
     ]
 

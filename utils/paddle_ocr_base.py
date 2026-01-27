@@ -293,18 +293,7 @@ if __name__ == "__main__":
     # 模拟路径 (请确保这些文件存在，或修改为你的真实路径进行测试)
     # 故意包含一个不存在的图片来测试健壮性
     test_images = [
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
-        r"C:\Users\zxh\Desktop\temp\a2.png",
+        r"C:\Users\zxh\Desktop\temp\申诉截图3.png"
 
     ]
     # 扫描W:\project\python_project\auto_video\videos\material\7590376286820814107\frame下面所有的png文件
@@ -321,7 +310,7 @@ if __name__ == "__main__":
     # # 这一步绝对不会报错，只会返回 JSON
     for i in range(5):
         print(f"\n--- OCR Attempt {i + 1} ---")
-        result_json = run_subtitle_ocr(image_list, crop_ratio=0.5)
+        result_json = run_subtitle_ocr(test_images, crop_ratio=0.5)
         print(result_json)
         # 获取所有的box，保存到box_list
         box_list = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]

@@ -1196,7 +1196,7 @@ def gen_video_script_llm(task_info, video_info_dict):
 
             # 50%调用playwright，50%调用managed
             random_value = random.random()
-            if random_value < 0.1:
+            if random_value < 0.01:
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
                 gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
             else:
