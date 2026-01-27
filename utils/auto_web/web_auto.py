@@ -495,7 +495,7 @@ def _submit_prompt(page: Page, prompt: str):
 
     # 等待按钮变更为可用状态 (to_be_enabled 会自动等待附件上传完成，即 aria-disabled 变为 false)
     # 考虑到附件上传可能需要时间，建议保持较长的 timeout (如 60秒)
-    expect(run_button).to_be_enabled(timeout=60000)
+    expect(run_button).to_be_enabled(timeout=300000)
 
     _remove_google_grounding(page)
 

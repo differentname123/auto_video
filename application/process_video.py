@@ -941,6 +941,24 @@ def recover_task():
         }
     }
 
+    """
+    {
+  create_time: {
+    $gt: ISODate("2023-01-18T20:44:03.015Z")
+  },
+  failed_count: {
+    $gt: 5
+  },
+  failure_details: {
+    $not: {
+      $regex: /禁止|Content blocked/
+    }
+  }
+}
+
+    
+    """
+
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print(f"找到 {len(all_task)} 个需要恢复的任务。")
     for task_info in all_task:
@@ -975,9 +993,9 @@ if __name__ == '__main__':
     query_2 = {
   '_id': ObjectId("69768e91bfaf783377cf36b1")
 }
-    # recover_task()
-    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    print()
-    for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=False)
-        break
+    recover_task()
+    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # print()
+    # for task_info in all_task:
+    #     process_single_task(task_info, manager, gen_video=False)
+    #     break
