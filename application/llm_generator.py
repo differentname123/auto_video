@@ -596,7 +596,14 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
         try:
             print(f"正在生成逻辑性场景划分 (尝试 {attempt}/{max_retries}) {log_pre}")
             start_time = time.time()
-            gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path, model_name="gemini-2.5-pro")
+
+            random_value = random.random()
+            if random_value < 0.2:
+                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
+                                                                         model_name="gemini-3-pro-preview")
+            else:
+                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
+                                                                         model_name="gemini-2.5-pro")
             cost_time_info['llm_generate_time'] = time.time() - start_time
 
             logical_scene_info = string_to_object(raw)
@@ -1189,7 +1196,7 @@ def gen_video_script_llm(task_info, video_info_dict):
 
             # 50%调用playwright，50%调用managed
             random_value = random.random()
-            if random_value < 0.5:
+            if random_value < 0.1:
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
                 gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
             else:
