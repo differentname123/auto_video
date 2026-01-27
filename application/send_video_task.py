@@ -1070,7 +1070,12 @@ def send_good_plan(manager):
     success_count = 0
     # 进行最终的投稿
     # 先按照 final_score 降序排序
-    final_video_list = sorted(final_video_list, key=lambda x: x.get('final_score', 0), reverse=True)
+    final_video_list = sorted(
+        final_video_list,
+        key=lambda x: (x.get('final_score', 0) // 200, random.random()),
+        reverse=True
+    )
+
     for video_info in final_video_list:
         send_flag = upload_video(manager, video_info, user_detail_upload_info)
         if send_flag:

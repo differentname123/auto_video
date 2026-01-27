@@ -2135,10 +2135,10 @@ def redub_video_with_ffmpeg(video_path: str,
             ]
 
             encoding_cmd = [
+                "-t", str(new_audio_duration),  # <--- 新增这行：强制限制输出时长为音频时长
                 "-c:v", "libx264", "-preset", "veryfast",
                 "-c:a", "aac", "-b:a", "320k", "-ar", "48000", "-ac", "2", temp_output_path
             ]
-
             cmd = base_cmd + map_args + encoding_cmd
 
             try:

@@ -419,7 +419,7 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
             del filter_all_video_info[vid]
 
     sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags)
-    top_n = 100
+    top_n = 150
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
     good_video_info = {}
     min_match_score = 1
@@ -431,8 +431,8 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     final_good_video_list = good_video_info.copy()
 
     # 如果good_video_info超过50就随机选择50
-    if len(final_good_video_list) > 50:
-        selected_keys = random.sample(list(final_good_video_list.keys()), 50)
+    if len(final_good_video_list) > 100:
+        selected_keys = random.sample(list(final_good_video_list.keys()), 100)
         final_good_video_list = {key: final_good_video_list[key] for key in selected_keys}
 
     print(f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
