@@ -342,19 +342,74 @@ def crop_video(input_path, output_path, bbox, crf=23):
         print(e.stderr, file=sys.stderr)
 
 
-def remove_static_background_video(video_path, area_threshold_ratio=0.9, **kwargs):
+def remove_static_background_video(video_path, area_threshold_ratio=0.9, bbox=None, **kwargs):
     """
     分析视频中的运动区域，如果运动区域显著小于整个画面，则进行裁剪。
+    如果指定了 bbox，则直接根据 bbox 进行裁剪（支持归一化坐标）。
 
     :param video_path: 待处理的视频文件路径
     :param area_threshold_ratio: 面积阈值比例。当运动区域面积小于原面积的该比例时，触发裁剪。
                                  例如, 0.8 表示小于80%。
+    :param bbox: (可选) 手动指定裁剪框 (x, y, w, h)。
+                 如果是归一化坐标(0-1之间)，会自动还原为像素坐标。
     :param kwargs: 传递给 find_motion_bbox 的其他参数，如 start_frame, num_samples 等。
     :return: 元组 (was_cropped, final_path)。
              was_cropped: 布尔值，True表示已裁剪，False表示未裁剪。
              final_path: 最终视频文件的路径（可能是裁剪后的新路径，也可能是原始路径）。
     """
     print(f"\n--- 开始裁剪静态区域处理视频: {video_path} ---")
+
+    # --- 新增逻辑：如果提供了 bbox，直接还原并裁剪 ---
+    if bbox is not None:
+        # 获取视频原始尺寸用于还原
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            print("无法打开视频以获取尺寸。")
+            return (False, video_path)
+        original_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        original_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+
+        try:
+            # 【修复点】判断 bbox 类型，正确提取数值并转为 float
+            if isinstance(bbox, dict):
+                bx = float(bbox.get('x', 0))
+                by = float(bbox.get('y', 0))
+                bw = float(bbox.get('w', 0))
+                bh = float(bbox.get('h', 0))
+            else:
+                # 假设是列表或元组 (x, y, w, h)
+                bx, by, bw, bh = [float(v) for v in bbox]
+        except ValueError as e:
+            print(f"bbox 数据格式错误，无法转换为数字: {bbox}, 错误: {e}")
+            return (False, video_path)
+
+
+        # 判断是否需要还原归一化坐标
+        # 简单判断：如果所有值都在 0.0 到 1.0 之间（且宽高不全为0），则视为归一化坐标
+        if all(0.0 <= v <= 1.0 for v in [bx, by, bw, bh]) and (bw > 0 or bh > 0):
+            print(f"检测到归一化 bbox {bbox}，正在还原...")
+            x = int(bx * original_w)
+            y = int(by * original_h)
+            w = int(bw * original_w)
+            h = int(bh * original_h)
+            # 确保不越界
+            w = min(w, original_w - x)
+            h = min(h, original_h - y)
+            final_bbox = (x, y, w, h)
+            print(f"还原后的 bbox: {final_bbox}")
+        else:
+            final_bbox = (int(bx), int(by), int(bw), int(bh))
+            print(f"使用指定 bbox: {final_bbox}")
+
+        # 构造输出文件名，例如 a.mp4 -> a_crop.mp4
+        base, ext = os.path.splitext(video_path)
+        output_path = f"{base}_crop{ext}"
+
+        # 直接执行裁剪
+        crop_video(video_path, output_path, final_bbox)
+        return (True, output_path)
+    # -----------------------------------------------
 
     # 1. 查找运动边界框
     analysis_result = find_motion_bbox(video_path, **kwargs)

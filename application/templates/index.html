@@ -293,7 +293,7 @@
         <button type="button" class="btn btn-mini" style="background:transparent; border:1px solid #666;"
                 onclick="WatermarkManager.close()">取消
         </button>
-        <span style="font-size: 0.9rem;">框选遮挡区域 (支持多个)</span>
+        <span style="font-size: 0.9rem;" id="wm-modal-title">框选遮挡区域</span>
         <button type="button" class="btn btn-primary btn-mini" style="width:auto; margin-top:0;"
                 onclick="WatermarkManager.save()">保存
         </button>
@@ -391,10 +391,18 @@
         </div>
 
         <div class="dynamic-section" data-type="watermark">
-            <div class="label-wrap"><span class="option-label" style="color: #ff4d4f; font-weight: bold;">水印/字幕遮挡 (画框) <span style="font-size: 10px; border: 1px solid currentColor; padding: 0 3px; border-radius: 3px; vertical-align: text-top;">NEW</span></span><i
+            <div class="label-wrap"><span class="option-label">水印/字幕遮挡 (画框)</span><i
                     class="info-icon">?</i><span class="tooltip-text">选择时间段并框选需要模糊处理的区域。时间段为0到0的话就是整个视频都生效.还不懂的话,顶部的使用指南里面有示例</span></div>
             <div class="dynamic-list-container"></div>
             <button type="button" class="btn-mini btn-add-row" data-action="add-watermark"><span>+</span> 添加水印遮挡
+            </button>
+        </div>
+
+        <div class="dynamic-section" data-type="retention">
+            <div class="label-wrap"><span class="option-label" style="color: #FFD400; font-weight: bold;">视频保留区域 (画框) <span style="font-size: 10px; border: 1px solid currentColor; padding: 0 3px; border-radius: 3px; vertical-align: text-top;">NEW</span></span><i
+                    class="info-icon">?</i><span class="tooltip-text">在画面中画一个框，框选的区域将被保留，其余部分将被裁切。只允许画一个框。(教程有示例)</span></div>
+            <div class="dynamic-list-container"></div>
+            <button type="button" class="btn-mini btn-add-row" data-action="add-retention"><span>+</span> 设置保留区域
             </button>
         </div>
 
@@ -441,44 +449,60 @@
 
     const WatermarkManager = {
         modal: document.getElementById('watermark-modal'),
+        title: document.getElementById('wm-modal-title'),
         loading: document.getElementById('wm-loading'),
+        wrapper: document.getElementById('wm-canvas-wrapper'), // 绑定事件的容器，区域更大
         container: document.getElementById('wm-canvas-container'),
         img: document.getElementById('wm-bg-img'),
         layer: document.getElementById('wm-draw-layer'),
         activeRow: null,
+        currentType: 'watermark', // 'watermark' or 'retention'
         startX: 0, startY: 0,
         isDrawing: false,
         currentBox: null,
         isMoving: false,
         movingBox: null,
         moveOffsetX: 0, moveOffsetY: 0,
+        _drawingHandler: null,
+        _endHandler: null,
 
         init() {
-            this.layer.addEventListener('mousedown', this.startDraw.bind(this));
-            this.layer.addEventListener('touchstart', (e) => {
-                if (e.target.classList.contains('box-close') || e.target.classList.contains('draw-box')) return;
+            // 将开始画框的事件绑定到更大的 wrapper 上，实现“从外部开始画”
+            this.wrapper.addEventListener('mousedown', (e) => this.startDraw(e));
+            this.wrapper.addEventListener('touchstart', (e) => {
+                if (e.target.closest('.box-close') || e.target.closest('.draw-box')) return;
                 if (e.touches.length === 1) {
-                    e.preventDefault();
+                    // e.preventDefault(); // 不阻止默认事件，以免影响页面滚动，但画框时可以接管
                     this.startDraw(e.touches[0]);
                 }
             }, {passive: false});
 
-            this.layer.addEventListener('mousemove', this.drawing.bind(this));
-            this.layer.addEventListener('touchmove', (e) => {
-                if (e.touches.length === 1) { e.preventDefault(); this.drawing(e.touches[0]); }
-            }, {passive: false});
-
-            window.addEventListener('mouseup', this.endDraw.bind(this));
-            window.addEventListener('touchend', this.endDraw.bind(this));
+            // 预定义全局事件处理器，用于在拖拽过程中绑定
+            this._drawingHandler = this.drawing.bind(this);
+            this._endHandler = this.endDraw.bind(this);
         },
 
         async open(rowElement) {
             const card = rowElement.closest('.video-item-card');
+            const section = rowElement.closest('.dynamic-section');
+            this.currentType = section.dataset.type;
+
             const url = card.querySelector('.video-url-input').value.trim();
             if (!url) return alert("视频链接为空，无法加载画面");
 
-            const startTime = getCompositeTime(rowElement.querySelector('.start-group')) || "00:00:00";
-            const endTime = getCompositeTime(rowElement.querySelector('.end-group')) || "00:00:00";
+            let startTime = "00:00:00";
+            let endTime = "00:00:00";
+
+            // 根据类型设置标题和截图时间
+            if (this.currentType === 'retention') {
+                this.title.innerText = "框选保留区域 (仅允许一个, 支持从图片外拖入)";
+                // start/end 默认 00:00
+            } else {
+                this.title.innerText = "框选遮挡区域 (支持多个, 支持从图片外拖入)";
+                startTime = getCompositeTime(rowElement.querySelector('.start-group')) || "00:00:00";
+                endTime = getCompositeTime(rowElement.querySelector('.end-group')) || "00:00:00";
+            }
+
             this.activeRow = rowElement;
             this.modal.classList.add('active');
             this.container.classList.add('hidden');
@@ -540,7 +564,7 @@
 
         bindBoxEvents(box) {
             const startMoveHandler = (e) => {
-                e.stopPropagation();
+                e.stopPropagation(); // 阻止冒泡到 wrapper，防止触发新画框
                 const evt = e.touches ? e.touches[0] : e;
                 this.isMoving = true;
                 this.movingBox = box;
@@ -548,30 +572,62 @@
                 this.moveOffsetX = evt.clientX - rect.left;
                 this.moveOffsetY = evt.clientY - rect.top;
                 box.style.cursor = 'grabbing';
+
+                // 移动时也绑定全局事件
+                window.addEventListener('mousemove', this._drawingHandler);
+                window.addEventListener('touchmove', this._drawingHandler, {passive: false});
+                window.addEventListener('mouseup', this._endHandler);
+                window.addEventListener('touchend', this._endHandler);
             };
             box.addEventListener('mousedown', startMoveHandler);
             box.addEventListener('touchstart', startMoveHandler, {passive: false});
         },
 
         startDraw(e) {
-            if (e.target.classList.contains('box-close') || this.isMoving) return;
+            if (this.isMoving) return;
+            // 如果点击的是已有框或关闭按钮，不触发画新框 (其实 wrapper click 很难点到这里，因为 propagation stopped)
+            if (e.target.closest('.box-close') || e.target.closest('.draw-box')) return;
+
+            // 针对保留区域：如果已经存在框，则清除旧的，确保只保留一个
+            if (this.currentType === 'retention' && this.layer.children.length > 0) {
+                 this.layer.innerHTML = '';
+            }
+
             const rect = this.layer.getBoundingClientRect();
-            this.startX = (e.clientX || e.pageX) - rect.left;
-            this.startY = (e.clientY || e.pageY) - rect.top;
+            // 计算相对于图片的坐标，即使点击在图片外，也计算出一个相对值
+            let rawX = (e.clientX || e.pageX) - rect.left;
+            let rawY = (e.clientY || e.pageY) - rect.top;
+
+            // 核心修改：强制吸附到图片边缘。
+            // 如果点击左边外部，startX 变为 0；点击右边外部，startX 变为 width
+            this.startX = Math.max(0, Math.min(rawX, rect.width));
+            this.startY = Math.max(0, Math.min(rawY, rect.height));
 
             this.currentBox = document.createElement('div');
             this.currentBox.className = 'draw-box';
             this.currentBox.style.left = this.startX + 'px';
             this.currentBox.style.top = this.startY + 'px';
+            this.currentBox.style.width = '0px';
+            this.currentBox.style.height = '0px';
             this.layer.appendChild(this.currentBox);
             this.isDrawing = true;
+
+            // 绑定全局移动事件，允许鼠标拖出 wrapper 区域
+            window.addEventListener('mousemove', this._drawingHandler);
+            window.addEventListener('touchmove', this._drawingHandler, {passive: false});
+            window.addEventListener('mouseup', this._endHandler);
+            window.addEventListener('touchend', this._endHandler);
         },
 
         drawing(e) {
+            if (!this.isDrawing && !this.isMoving) return;
+
             const evt = e.touches ? e.touches[0] : e;
             const rect = this.layer.getBoundingClientRect();
             let rawX = (evt.clientX || evt.pageX) - rect.left;
             let rawY = (evt.clientY || evt.pageY) - rect.top;
+
+            // 同样应用强制吸附逻辑，允许用户拖出图片外，但框只在图片内渲染
             const currentX = Math.max(0, Math.min(rawX, rect.width));
             const currentY = Math.max(0, Math.min(rawY, rect.height));
 
@@ -580,10 +636,13 @@
                 let newTop = currentY - this.moveOffsetY;
                 const boxW = this.movingBox.offsetWidth;
                 const boxH = this.movingBox.offsetHeight;
+
+                // 移动时的边界检查
                 if (newLeft < 0) newLeft = 0;
                 if (newTop < 0) newTop = 0;
                 if (newLeft + boxW > rect.width) newLeft = rect.width - boxW;
                 if (newTop + boxH > rect.height) newTop = rect.height - boxH;
+
                 this.movingBox.style.left = newLeft + 'px';
                 this.movingBox.style.top = newTop + 'px';
                 return;
@@ -602,6 +661,12 @@
         },
 
         endDraw() {
+            // 解绑全局事件
+            window.removeEventListener('mousemove', this._drawingHandler);
+            window.removeEventListener('touchmove', this._drawingHandler);
+            window.removeEventListener('mouseup', this._endHandler);
+            window.removeEventListener('touchend', this._endHandler);
+
             if (this.isMoving) {
                 if (this.movingBox) this.movingBox.style.cursor = 'move';
                 this.isMoving = false;
@@ -611,7 +676,8 @@
             if (!this.isDrawing) return;
             this.isDrawing = false;
             if (this.currentBox) {
-                if (this.currentBox.offsetWidth < 10 || this.currentBox.offsetHeight < 10) {
+                // 如果框太小，视为误操作删除
+                if (this.currentBox.offsetWidth < 5 || this.currentBox.offsetHeight < 5) {
                     this.currentBox.remove();
                 } else {
                     this.bindBoxEvents(this.currentBox);
@@ -652,7 +718,13 @@
 
             this.activeRow.querySelector('.watermark-data').value = JSON.stringify(boxes);
             const btn = this.activeRow.querySelector('.btn-draw-trigger');
-            btn.innerText = `🎨 点击画框 (${boxes.length})`;
+
+            if (this.currentType === 'retention') {
+                btn.innerText = boxes.length > 0 ? "✅ 已设置区域" : "🎨 设置保留区域";
+            } else {
+                btn.innerText = `🎨 点击画框 (${boxes.length})`;
+            }
+
             if (boxes.length > 0) {
                 btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
             } else {
@@ -765,14 +837,20 @@
     }
 
     function addDynamicRow(container, type, initialVal = null) {
-        if (type === 'watermark') {
+        if (type === 'watermark' || type === 'retention') {
             const card = container.closest('.video-item-card');
             const urlVal = card.querySelector('.video-url-input').value.trim();
             if (!urlVal && !initialVal) {
-                alert("请先填写视频链接后再添加水印时间段");
+                alert("请先填写视频链接后再操作");
                 card.querySelector('.video-url-input').focus();
                 return null;
             }
+        }
+
+        // 针对 retention 类型，限制只能有一行
+        if (type === 'retention' && container.children.length > 0) {
+            alert("保留区域只能设置一个（全局生效）");
+            return null;
         }
 
         const row = document.createElement('div');
@@ -780,13 +858,24 @@
         if (type === 'segment') row.classList.add('time-segment-row');
         else if (type === 'point') row.classList.add('split-point-row');
         else if (type === 'watermark') row.classList.add('watermark-row');
+        else if (type === 'retention') row.classList.add('retention-row');
 
-        if (type === 'watermark') {
+        if (type === 'watermark' || type === 'retention') {
             const tpl = UI.tplWatermark.content.cloneNode(true);
             const g1 = UI.tplTime.content.cloneNode(true).firstElementChild;
             const g2 = UI.tplTime.content.cloneNode(true).firstElementChild;
             tpl.querySelector('.start-group').appendChild(g1);
             tpl.querySelector('.end-group').appendChild(g2);
+
+            // 针对 retention 隐藏时间输入框，并修改按钮文案
+            if (type === 'retention') {
+                tpl.querySelector('.start-group').style.display = 'none';
+                tpl.querySelector('.end-group').style.display = 'none';
+                tpl.querySelector('.range-sep').style.display = 'none';
+                const btn = tpl.querySelector('.btn-draw-trigger');
+                btn.innerText = "🎨 设置保留区域";
+            }
+
             row.appendChild(tpl);
         } else {
             const group1 = UI.tplTime.content.cloneNode(true).firstElementChild;
@@ -828,6 +917,14 @@
                 if((initialVal.boxes || []).length > 0) {
                     btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
                 }
+            } else if (type === 'retention') {
+                // 回显保留区域
+                row.querySelector('.watermark-data').value = JSON.stringify(initialVal.boxes || []);
+                const btn = row.querySelector('.btn-draw-trigger');
+                if((initialVal.boxes || []).length > 0) {
+                    btn.innerText = "✅ 已设置区域";
+                    btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
+                }
             }
         }
         return row;
@@ -852,7 +949,7 @@
             target.closest('.dynamic-row').remove();
         }
         else if (target.matches('.btn-draw-trigger')) {
-            WatermarkManager.open(target.closest('.watermark-row'));
+            WatermarkManager.open(target.closest('.dynamic-row'));
         }
     }
 
@@ -1030,6 +1127,18 @@
             });
             if (err) break;
 
+            // 收集 retention_area 数据
+            let retentionArea = null;
+            const retentionRow = card.querySelector('.retention-row');
+            if (retentionRow) {
+                const dataInput = retentionRow.querySelector('.watermark-data');
+                const boxStr = dataInput.value;
+                const boxes = boxStr ? JSON.parse(boxStr) : [];
+                if (boxes.length > 0) {
+                    retentionArea = { boxes: boxes }; // 只有一个
+                }
+            }
+
             // 获取 Hidden Input 的值
             const realtime = card.querySelector('.select-realtime').value;
             const text = card.querySelector('.select-text').value;
@@ -1051,11 +1160,12 @@
                 is_needs_stickers: emoji === 'yes',
                 max_scenes: parseInt(maxScenes, 10),
                 has_ad_or_face: adFace,
-                scene_order_fixed: orderFixed === 'auto' ? 'auto' : (orderFixed === 'yes'), // 简单处理，保持原来逻辑
+                scene_order_fixed: orderFixed === 'auto' ? 'auto' : (orderFixed === 'yes'),
                 split_guidance: card.querySelector('.textarea-split-guidance').value.trim(),
                 remove_time_segments: removeSegments,
                 split_time_points: splitPoints,
-                watermark_list: watermarkList
+                watermark_list: watermarkList,
+                retention_area: retentionArea
             });
         }
 
@@ -1148,6 +1258,12 @@
                         if (JSON.stringify(db.watermark_list) !== JSON.stringify(curr.watermark_list)) {
                             rebuildWatermarkRows(card, db.watermark_list); hasChanges = true;
                         }
+                        // 保留区域回显
+                        const dbRetention = db.retention_area ? { boxes: db.retention_area.boxes } : null;
+                        const currRetention = curr.retention_area;
+                        if (JSON.stringify(dbRetention) !== JSON.stringify(currRetention)) {
+                            rebuildRetentionRow(card, dbRetention); hasChanges = true;
+                        }
                     }
                 });
 
@@ -1192,6 +1308,15 @@
             addDynamicRow(container, 'watermark', { start: item.start_time, end: item.end_time, boxes: item.boxes });
         });
         appendSyncTip(container, dbList.length);
+    }
+
+    function rebuildRetentionRow(card, dbData) {
+        if (!dbData || !dbData.boxes || !dbData.boxes.length) return;
+        const container = card.querySelector(`.dynamic-section[data-type="retention"] .dynamic-list-container`);
+        // 先清空当前的（如果存在），因为保留区域只能有一个
+        container.innerHTML = '';
+        addDynamicRow(container, 'retention', { boxes: dbData.boxes });
+        appendSyncTip(container, 1);
     }
 
     function appendSyncTip(container, count) {

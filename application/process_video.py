@@ -276,9 +276,13 @@ def process_origin_video(video_id, video_info):
             'target_fps': 30
             }
         reduce_and_replace_video(low_origin_video_path, **params)
+        retention_area_boxes = video_info.get('extra_info', {}).get('retention_area', {}).get('boxes', [])
+        bbox = None
+        if retention_area_boxes:
+            bbox = retention_area_boxes[0]
 
         # 第二步进行静态背景去除
-        crop_result, crop_path = remove_static_background_video(low_origin_video_path)
+        crop_result, crop_path = remove_static_background_video(low_origin_video_path, bbox=bbox)
         shutil.copy2(crop_path, static_cut_video_path)
         file_changed = True
 
@@ -991,11 +995,11 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  '_id': ObjectId("69768e91bfaf783377cf36b1")
+  '_id': ObjectId("697a35c6bfaf783377cf3abc")
 }
-    recover_task()
-    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # recover_task()
+    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     # print()
-    # for task_info in all_task:
-    #     process_single_task(task_info, manager, gen_video=False)
-    #     break
+    for task_info in all_task:
+        process_single_task(task_info, manager, gen_video=False)
+        break

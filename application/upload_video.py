@@ -819,7 +819,7 @@ def gen_all_files_to_cleanup(task_info):
     :return: 需要清理的文件路径列表 clean_files
     """
     # 1. 初始化排除列表和目录列表
-    exclude_file_list = ['merged_timestamps.json']
+    exclude_file_list = ['merged_timestamps.json', 'subtitle_box.json']
     file_path_list = []
 
     tasks_to_process = query_need_process_tasks()
