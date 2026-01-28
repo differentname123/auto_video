@@ -15,7 +15,8 @@ import time
 import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
-    DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content
+    DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content, \
+    BLOCK_VIDEO_ID_FILE
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
     gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
@@ -92,6 +93,9 @@ def query_all_material_videos(manager, is_need_refresh):
     blocked_task_list = manager.find_by_custom_query(manager.tasks_collection, query_4)
     for task_info in blocked_task_list:
         block_video_id_list.extend(task_info.get('video_id_list', []))
+    # 对block_video_id_list去重
+    block_video_id_list = list(set(block_video_id_list))
+    save_json(BLOCK_VIDEO_ID_FILE, block_video_id_list)  # 更新黑名单文件
 
     total_block_ids = len(block_video_id_list)  # [新增] 记录黑名单ID总数
     removed_count = 0  # [新增] 记录实际移除的数量
@@ -453,6 +457,7 @@ def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=5):
         return False
     return True
 
+
 def update_exist_dig_data(exist_video_plan_info, good_video_list):
     """
     根据good_video_list更新exist_video_plan_info已有话题的得分
@@ -463,6 +468,12 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
     hot_topic_score_map = {}
 
     video_score_info = {}
+    block_video_id_list = read_json(BLOCK_VIDEO_ID_FILE)
+
+    # 【新增】打印黑名单长度，并转为set提高查找速度
+    print(f"黑名单长度: {len(block_video_id_list)}")
+    block_video_id_set = set(block_video_id_list)
+    removed_plan_count = 0
 
     for video_info in good_video_list:
         upload_params = video_info.get('upload_params', {})
@@ -482,6 +493,27 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
         video_id_avg_score_map[video_id] = avg_score
 
     for hot_topic, video_info_list in exist_video_plan_info.items():
+        # 【新增】黑名单过滤逻辑
+        # 创建一个新的列表来存储未被剔除的plan
+        valid_plans = []
+        for plan in video_info_list:
+            video_id_list = plan.get('video_id_list', [])
+            # 检查是否有任何id在黑名单中
+            is_blocked = False
+            for vid in video_id_list:
+                if vid in block_video_id_set:
+                    is_blocked = True
+                    break
+
+            if is_blocked:
+                removed_plan_count += 1
+            else:
+                valid_plans.append(plan)
+
+        # 更新字典中的列表为过滤后的列表，并更新局部变量供后续逻辑使用
+        exist_video_plan_info[hot_topic] = valid_plans
+        video_info_list = valid_plans
+
         if hot_topic in hot_topic_score_map:
             final_score = hot_topic_score_map[hot_topic]
             for plan in video_info_list:
@@ -500,6 +532,10 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
 
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
                 plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+
+    # 【新增】打印剔除的plan个数
+    print(f"已经剔除的plan个数: {removed_plan_count}")
+
     return exist_video_plan_info, video_id_avg_score_map
 
 

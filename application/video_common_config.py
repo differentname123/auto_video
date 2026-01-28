@@ -451,6 +451,7 @@ STATISTIC_PLAY_COUNT_FILE = r'W:\project\python_project\auto_video\config\statis
 
 
 BLOCK_VIDEO_BVID_FILE = r'W:\project\python_project\auto_video\config\block_video_bvid_file.json'  # 用于存放被屏蔽的视频bvid列表
+BLOCK_VIDEO_ID_FILE = r'W:\project\python_project\auto_video\config\block_video_id_file.json'  # 用于存放被屏蔽的视频bvid列表
 
 
 ALL_MATERIAL_VIDEO_INFO_PATH = r'W:\project\python_project\auto_video\config\all_material_video_info.json'  # 用于存放所有素材视频的信息，方便进行快速查询
