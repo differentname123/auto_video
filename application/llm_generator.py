@@ -612,7 +612,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
                 error_info = f"逻辑性场景划分检查未通过: {check_info} {raw} {log_pre}"
                 raise ValueError(f"逻辑性场景划分检查未通过: {check_info} {raw}")
             start_time = time.time()
-            merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes*2)
+            merged_timestamps = get_scene(video_path, min_final_scenes=max_scenes)
             cost_time_info['get_scene_time'] = time.time() - start_time
 
             # 使用信号量控制并发，最多3个线程同时进入此代码块

@@ -570,6 +570,8 @@ def gen_standard_video_info_by_dig_data(plan_info):
             # 计算相差的小时数量
             hours_diff = (now_timestamp - dig_time) / 3600
             final_score = (100 - hours_diff) / 100 * final_score
+            if dig_type == "free_dig_new":
+                final_score += 500
             if final_score < 10:
                 continue
 

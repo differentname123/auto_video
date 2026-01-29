@@ -704,21 +704,52 @@
         save() {
             if (!this.activeRow) return;
             const boxes = [];
+            // 1. 获取容器的精确尺寸（包含小数）
             const rect = this.layer.getBoundingClientRect();
-            const cw = rect.width || 1; const ch = rect.height || 1;
+            const cw = rect.width || 1;
+            const ch = rect.height || 1;
 
             this.layer.querySelectorAll('.draw-box').forEach(el => {
+                // --- 核心修复开始：防止数据超过 1.0 ---
+
+                // 算出原始比例
+                let rawX = el.offsetLeft / cw;
+                let rawY = el.offsetTop / ch;
+                let rawW = el.offsetWidth / cw;
+                let rawH = el.offsetHeight / ch;
+
+                // 1. 强制将 x, y 限制在 0~1 之间
+                let x = Math.max(0, Math.min(1, rawX));
+                let y = Math.max(0, Math.min(1, rawY));
+
+                // 2. 强制将 w, h 限制在 0~1 之间
+                let w = Math.max(0, Math.min(1, rawW));
+                let h = Math.max(0, Math.min(1, rawH));
+
+                // 3. 二次修正：确保 (x + w) 不会因为精度误差超过 1
+                // 例如：如果 x=0.9, w=0.1001，相加就是 1.0001，这时候必须把 w 减小
+                if (x + w > 1) {
+                    w = 1 - x;
+                }
+                if (y + h > 1) {
+                    h = 1 - y;
+                }
+
+                // 4. 存入数据，保留4位小数
                 boxes.push({
-                    x: parseFloat((el.offsetLeft / cw).toFixed(4)),
-                    y: parseFloat((el.offsetTop / ch).toFixed(4)),
-                    w: parseFloat((el.offsetWidth / cw).toFixed(4)),
-                    h: parseFloat((el.offsetHeight / ch).toFixed(4))
+                    x: parseFloat(x.toFixed(4)),
+                    y: parseFloat(y.toFixed(4)),
+                    w: parseFloat(w.toFixed(4)),
+                    h: parseFloat(h.toFixed(4))
                 });
+                // --- 核心修复结束 ---
             });
 
+            // 将数据回填到隐藏输入框
             this.activeRow.querySelector('.watermark-data').value = JSON.stringify(boxes);
-            const btn = this.activeRow.querySelector('.btn-draw-trigger');
 
+            // 更新按钮状态样式
+            const btn = this.activeRow.querySelector('.btn-draw-trigger');
             if (this.currentType === 'retention') {
                 btn.innerText = boxes.length > 0 ? "✅ 已设置区域" : "🎨 设置保留区域";
             } else {
@@ -726,10 +757,14 @@
             }
 
             if (boxes.length > 0) {
-                btn.style.backgroundColor = '#f6ffed'; btn.style.borderColor = '#b7eb8f'; btn.style.color = '#389e0d';
+                btn.style.backgroundColor = '#f6ffed';
+                btn.style.borderColor = '#b7eb8f';
+                btn.style.color = '#389e0d';
             } else {
                 btn.style = '';
             }
+
+            // 关闭弹窗
             this.close();
         },
 

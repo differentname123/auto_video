@@ -181,7 +181,8 @@ def build_video_material_data(video_item: Dict, meta_data: Dict, video_id: str):
         'status': TaskStatus.PROCESSING,
         'error_info': None,
         'base_info': base_info,
-        'extra_info': video_item
+        'extra_info': video_item,
+        'metadata': [meta_data]
     }
 
 
