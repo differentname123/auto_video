@@ -149,15 +149,14 @@ def read_file_to_str(filepath: Union[str, Path],
 
 
 def is_valid_target_file_simple(path, min_size_bytes: int = 1) -> bool:
-    """
-    极简判断：文件存在且大小 >= min_size_bytes。
-    默认 min_size_bytes=1 （即大小必须大于 0 字节）。
-    """
     try:
+        if not path:
+            return False
         p = Path(path)
-        return p.exists() and p.stat().st_size >= int(min_size_bytes)
+        return p.is_file() and p.stat().st_size >= int(min_size_bytes)
     except Exception:
         return False
+
 
 
 def string_to_object(input_str: str):
@@ -538,7 +537,7 @@ def init_config():
         # "3546971140786786": 'ping',
         # "3690972028340306": 'xiu',
         "3690971298531782": 'zhong',
-        # "1661739834": 'junyuan',
+        "3546594393721601": 'qiuru',
         "3546764430805848": 'huazhu'
 
     # '3546909677455941': 'base'  # 如果需要恢复 base 账号，取消注释即可
