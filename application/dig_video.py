@@ -317,7 +317,7 @@ def gen_hot_video_llm(video_info, hot_video=None):
     if hot_video:
         PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
     else:
-        PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
+        PROMPT_FILE_PATH = './prompt/挖掘热门视频无热榜.txt'
     last_prompt = """# Action:
 请根据上述所有指令和数据，进行深度分析并输出最终结果：
 """
@@ -332,7 +332,7 @@ def gen_hot_video_llm(video_info, hot_video=None):
     video_content_plans = []
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"尝试第 {attempt} 次生成视频内容计划 素材长度为{len(video_info)}...")
+            print(f"尝试第 {attempt} 次生成视频内容计划 素材长度为{len(video_info)} {PROMPT_FILE_PATH}...")
             raw = ask_gemini(full_prompt, model_name=model_name)
 
             # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
@@ -625,7 +625,7 @@ def find_good_plan(manager):
                 creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
-                plan['dig_type'] = "free_dig"
+                plan['dig_type'] = "free_dig_new"
                 plan['timestamp'] = int(time.time())
                 plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
                 plan['creative_guidance'] = creative_guidance

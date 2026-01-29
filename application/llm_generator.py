@@ -1184,7 +1184,7 @@ def gen_video_script_llm(task_info, video_info_dict):
     task_info['script_prompt_path'] = prompt_path
     full_prompt = read_file_to_str(prompt_path)
 
-    full_prompt = f"{full_prompt}\n下面是相应的视频场景数据：\n{final_info_list}"
+    full_prompt = f"{full_prompt}\n尽量每个视频都有场景被采用到最终的方案\n尽量每个视频都有场景被采用到最终的方案\n下面是相应的视频场景数据：\n{final_info_list}"
     max_retries = 3
     log_pre = f"多素材视频生成脚本 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     retry_delay = 10

@@ -65,8 +65,6 @@ def query_need_process_tasks():
     return tasks_to_process
 
 
-
-
 @safe_process_limit(limit=2, name="cutoff_target_segment")
 def cutoff_target_segment(video_path, remove_time_segments, output_path):
     """
@@ -77,7 +75,8 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
     :return:
     """
     start_time = time.time()
-    print(f"开始剔除视频 {video_path} 的时间段: {remove_time_segments}，输出路径: {output_path} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"开始剔除视频 {video_path} 的时间段: {remove_time_segments}，输出路径: {output_path} 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     all_timestamp_list = []
     for remove_time_segment in remove_time_segments:
         # 简单校验格式，防止 crash
@@ -138,7 +137,8 @@ def cutoff_target_segment(video_path, remove_time_segments, output_path):
 
     # 使用ffmpeg命令行工具进行视频剪辑
     clip_and_merge_segments(video_path, remaining_segments, output_path)
-    print(f"完成剔除视频 {video_path} 的时间段，输出路径: {output_path} 耗时 {time.time() - start_time:.2f}s  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"完成剔除视频 {video_path} 的时间段，输出路径: {output_path} 耗时 {time.time() - start_time:.2f}s  当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     return fixed_remove_time_segments
 
 
@@ -195,6 +195,7 @@ def generate_blur_segments(raw_data: list, video_w: int, video_h: int, duration)
 
     return formatted_segments
 
+
 def gen_blur_video_path(video_path, output_path, watermark_list):
     """
     生成模糊指定区域的视频
@@ -211,11 +212,11 @@ def gen_blur_video_path(video_path, output_path, watermark_list):
     blur_configs = generate_blur_segments(watermark_list, width, height, duration)
     dynamic_video_area_blur(video_path, output_path, blur_configs)
     video_size = os.path.getsize(video_path)
-    print(f"模糊视频生成完成: {output_path}，耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"模糊视频生成完成: {output_path}，耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     if not is_valid_target_file_simple(output_path, video_size * 0.1):
         raise Exception(f"模糊视频生成失败: {output_path}")
-
 
 
 @safe_process_limit(limit=1, name="process_origin_video")
@@ -233,7 +234,6 @@ def process_origin_video(video_id, video_info):
     static_cut_video_path = video_path_info['static_cut_video_path']
     low_resolution_video_path = video_path_info['low_resolution_video_path']
 
-
     if not is_valid_target_file_simple(origin_video_path):
         raise FileNotFoundError(f"原始视频文件不存在: {origin_video_path}")
 
@@ -249,7 +249,8 @@ def process_origin_video(video_id, video_info):
     # 如果文件不存在，或者强制要求重剪，则执行
     if not is_valid_target_file_simple(origin_video_delete_part_path) or video_info.get('need_recut', True):
         remove_time_segments = video_info.get('extra_info', {}).get('remove_time_segments', [])
-        fixed_remove_time_segments = cutoff_target_segment(origin_video_path_blur, remove_time_segments, origin_video_delete_part_path)
+        fixed_remove_time_segments = cutoff_target_segment(origin_video_path_blur, remove_time_segments,
+                                                           origin_video_delete_part_path)
         video_info['extra_info']['fixed_remove_time_segments'] = fixed_remove_time_segments
         video_info['need_recut'] = False
         split_time_points = video_info.get('extra_info', {}).get('split_time_points', [])
@@ -258,13 +259,11 @@ def process_origin_video(video_id, video_info):
         # 标记变动，后续步骤将强制执行
         file_changed = True
 
-
     # 2. 生成 low_origin_video
     # 如果文件不存在，或者上一步发生了变动(file_changed为True)，则执行
     if not is_valid_target_file_simple(low_origin_video_path) or file_changed:
         shutil.copy2(origin_video_delete_part_path, low_origin_video_path)
         file_changed = True
-
 
     # 3. 生成 static_cut_video
     # 如果文件不存在，或者上一步发生了变动，则执行
@@ -274,9 +273,12 @@ def process_origin_video(video_id, video_info):
             'crf': 23,
             'target_width': 2560,
             'target_fps': 30
-            }
+        }
         reduce_and_replace_video(low_origin_video_path, **params)
-        retention_area_boxes = video_info.get('extra_info', {}).get('retention_area', {}).get('boxes', [])
+        retention_area_boxes = (
+                                       (video_info.get('extra_info') or {})
+                                       .get('retention_area') or {}
+                               ).get('boxes') or []
         bbox = None
         if retention_area_boxes:
             bbox = retention_area_boxes[0]
@@ -314,9 +316,10 @@ def gen_extra_info(video_info_dict, manager, gen_video):
         # 生成逻辑性的场景划分
         logical_scene_info = video_info.get('logical_scene_info')
         video_path = all_path_info['low_resolution_video_path']
-        logical_cost_time_info ={}
+        logical_cost_time_info = {}
         if not logical_scene_info:
-            error_info, logical_scene_info, logical_cost_time_info = gen_logical_scene_llm(video_path, video_info, all_path_info)
+            error_info, logical_scene_info, logical_cost_time_info = gen_logical_scene_llm(video_path, video_info,
+                                                                                           all_path_info)
             if not error_info:
                 video_info['logical_scene_info'] = logical_scene_info
             else:
@@ -330,7 +333,8 @@ def gen_extra_info(video_info_dict, manager, gen_video):
         cost_time_info[video_id]['logical_scene'] = logical_cost_time_info
         if check_failure_details(failure_details):
             return failure_details, cost_time_info
-        print(f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {logical_cost_time_info['total_time']:.2f}s")
+        print(
+            f"视频 {video_id} logical_scene_info生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {logical_cost_time_info['total_time']:.2f}s")
 
         # ---------------- 阶段2: 情绪性花字 ----------------
         t_start = time.time()
@@ -354,7 +358,8 @@ def gen_extra_info(video_info_dict, manager, gen_video):
         if check_failure_details(failure_details):
             return failure_details, cost_time_info
         failure_details = {}
-        print(f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['overlays_text']}")
+        print(
+            f"视频 {video_id} overlays_text_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['overlays_text']}")
 
         # ---------------- 阶段3: ASR识别 ----------------
         t_start = time.time()
@@ -378,7 +383,8 @@ def gen_extra_info(video_info_dict, manager, gen_video):
 
         if check_failure_details(failure_details):
             return failure_details, cost_time_info
-        print(f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['owner_asr']:.2f}s")
+        print(
+            f"视频 {video_id} owner_asr_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['owner_asr']:.2f}s")
 
         # ---------------- 阶段4: 互动信息 ----------------
         t_start = time.time()
@@ -400,11 +406,14 @@ def gen_extra_info(video_info_dict, manager, gen_video):
         cost_time_info[video_id]['hudong_info'] = time.time() - t_start
         if check_failure_details(failure_details):
             return failure_details, cost_time_info
-        print(f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['hudong_info']:.2f}s")
+        print(
+            f"视频 {video_id} hudong_info 生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时{cost_time_info[video_id]['hudong_info']:.2f}s")
 
         # ---------------- 最后: 打印各阶段耗时 ----------------
-        print(f"📊 视频 {video_id} 总耗时: {time.time() - start_time:.2f}s 各阶段处理耗时统计: [{cost_time_info[video_id]}] ")
-    print(f"🎉 {video_info_dict.keys()} 所有视频额外信息生成完成。总耗时: {time.time() - all_start_time:.2f}s {cost_time_info}")
+        print(
+            f"📊 视频 {video_id} 总耗时: {time.time() - start_time:.2f}s 各阶段处理耗时统计: [{cost_time_info[video_id]}] ")
+    print(
+        f"🎉 {video_info_dict.keys()} 所有视频额外信息生成完成。总耗时: {time.time() - all_start_time:.2f}s {cost_time_info}")
     final_cost_time_info = {}
     final_cost_time_info['extra_info'] = cost_time_info
     return failure_details, final_cost_time_info
@@ -506,6 +515,7 @@ def prepare_basic_video_info(video_info_dict):
                 try:
                     is_duplicate = check_duplicate_video(video_info.get('metadata')[0])
                 except Exception as e:
+                    traceback.print_exc()
                     print(f"{log_pre} 警告: 视频 {video_id} 检测重复时发生异常: {str(e)}，默认设置为非重复。")
                     is_duplicate = False
                 video_info['is_duplicate'] = is_duplicate
@@ -567,6 +577,7 @@ def gen_derive_videos(video_info_dict):
     cost_time_info['生成派生视频'] = time.time() - start_time
     return failure_details, cost_time_info
 
+
 def gen_video_script(task_info, video_info_dict, manager):
     """
     生成多素材的方案
@@ -594,6 +605,7 @@ def gen_video_script(task_info, video_info_dict, manager):
         manager.upsert_tasks([task_info])
     cost_time_info['生成视频脚本'] = time.time() - start_time
     return failure_details, cost_time_info
+
 
 def gen_upload_info(task_info, video_info_dict, manager):
     """
@@ -630,7 +642,8 @@ def process_single_task(task_info, manager, gen_video=False):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
-    print(f"🚀 视频开始视频处理任务{task_info.get('userName', 'N/A')} {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(
+        f"🚀 视频开始视频处理任务{task_info.get('userName', 'N/A')} {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
     all_cost_time_info = {}
     start_time = time.time()
@@ -641,17 +654,12 @@ def process_single_task(task_info, manager, gen_video=False):
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
 
-
-
     # 确保基础数据存在，比如视频文件，评论等
     failure_details, video_info_dict, cost_time_info = prepare_basic_video_info(video_info_dict)
     update_video_info(video_info_dict, manager, failure_details, error_key='prepare_basic_video_error')
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-
-
-
 
     # 生成后续需要处理的派生视频，删除指定片段主要是静态去除以及降低分辨率后的视频
     failure_details, cost_time_info = gen_derive_videos(video_info_dict)
@@ -660,28 +668,21 @@ def process_single_task(task_info, manager, gen_video=False):
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
 
-
-
-
     # 为每一个视频生成需要的大模型信息 场景切分 asr识别， 图片文字等
     failure_details, cost_time_info = gen_extra_info(video_info_dict, manager, gen_video)
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
-
-
-
+    print(
+        f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     # 生成新的视频脚本方案
     failure_details, cost_time_info = gen_video_script(task_info, video_info_dict, manager)
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
-    print(f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
-
-
-
+    print(
+        f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     # 生成投稿所需的信息
     failure_details, cost_time_info = gen_upload_info(task_info, video_info_dict, manager)
@@ -690,7 +691,8 @@ def process_single_task(task_info, manager, gen_video=False):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
     manager.upsert_tasks([task_info])
-    print(f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+    print(
+        f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     if gen_video:
         # 根据方案生成最终视频
@@ -701,9 +703,11 @@ def process_single_task(task_info, manager, gen_video=False):
         task_info['status'] = TaskStatus.TO_UPLOADED
         manager.upsert_tasks([task_info])
         update_video_info(video_info_dict, manager, failure_details, error_key='gen_video_error')
-        print(f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
+        print(
+            f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
-    print(f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
+    print(
+        f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
 
     return failure_details, video_info_dict, chosen_script
 
@@ -752,7 +756,8 @@ def _task_process_worker(task_queue, running_task_ids):
                     task_info['failed_count'] = current_failed_count
 
                     if current_failed_count < 3:
-                        print(f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        print(
+                            f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
                         task_info['failure_details'] = str(failure_details)
                         manager.upsert_tasks([task_info])
@@ -762,10 +767,12 @@ def _task_process_worker(task_queue, running_task_ids):
                         task_queue.put(task_info)
                         continue
                     else:
-                        print(f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        print(
+                            f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                         task_info['status'] = TaskStatus.FAILED
                 else:
-                    print(f"任务成功 {task_info.get('userName')}{task_info.get('video_id_list')} 成功完成。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(
+                        f"任务成功 {task_info.get('userName')}{task_info.get('video_id_list')} 成功完成。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                     pass
                 task_info['failure_details'] = str(failure_details)
                 manager.upsert_tasks([task_info])
@@ -778,6 +785,7 @@ def _task_process_worker(task_queue, running_task_ids):
             print(f"Worker 进程发生未捕获异常: {outer_e}")
             time.sleep(1)
 
+
 def check_task_queue(running_task_ids, task_info, check_time=True):
     """
 
@@ -789,13 +797,15 @@ def check_task_queue(running_task_ids, task_info, check_time=True):
     # 如果在10分钟以内，那就false
     if check_time:
         if update_time and (time.time() - update_time.timestamp()) < 600:
-            print(f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 更新时间过近，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 更新时间过近，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
             return False
     video_id_list = task_info.get('video_id_list', [])
     # 只要有一个视频id在运行中，就返回false
     for video_id in video_id_list:
         if video_id in running_task_ids:
-            print(f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 中的视频 {video_id} 正在处理中，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"⚠️ [生产者] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} 中的视频 {video_id} 正在处理中，跳过入队。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
             return False
     return True
@@ -880,7 +890,7 @@ def _task_producer_worker(task_queue, running_task_ids):
     生产者工作进程，循环调用维护函数，并实现动态休眠。
     """
     IDLE_SLEEP_TIME = 1800  # 长时间休眠（30分钟）
-    BUSY_SLEEP_TIME = 300   # 短时间休眠（5分钟）
+    BUSY_SLEEP_TIME = 300  # 短时间休眠（5分钟）
 
     while True:
         try:
@@ -900,6 +910,7 @@ def _task_producer_worker(task_queue, running_task_ids):
             print(f"生产者异常: {e}")
             # 发生异常时，也进行长休眠，避免因持续异常而耗尽资源
             time.sleep(IDLE_SLEEP_TIME)
+
 
 def update_narration_key(data_list):
     """
@@ -929,6 +940,7 @@ def update_narration_key(data_list):
         print(f"处理数据时发生错误: {e}")
         # 发生异常，直接返回传入的原始列表
         return data_list
+
 
 def recover_task():
     query_2 = {
@@ -971,6 +983,7 @@ def recover_task():
         # break
     manager.upsert_tasks(all_task)
 
+
 if __name__ == '__main__':
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
@@ -995,11 +1008,11 @@ if __name__ == '__main__':
     }
 
     query_2 = {
-  '_id': ObjectId("697a35c6bfaf783377cf3abc")
-}
-    # recover_task()
-    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    # print()
-    for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=False)
-        break
+        '_id': ObjectId("697a35c6bfaf783377cf3abc")
+    }
+    recover_task()
+    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # # print()
+    # for task_info in all_task:
+    #     process_single_task(task_info, manager, gen_video=False)
+    #     break

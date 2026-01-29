@@ -21,7 +21,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
+from PIL import Image
 from application.llm_generator import get_best_valid_text, fix_owner_asr_by_subtitle
 from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_PATH, build_video_paths, ERROR_STATUS, \
     check_failure_details, correct_owner_timestamps, build_task_video_paths, correct_consecutive_owner_timestamps
@@ -1321,14 +1321,70 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
         print(f"\n操作结束: 成功删除 {success_count} 个，失败 {fail_count} 个。")
 
 
+def crop_and_save_images(image_paths, output_dir, box_info):
+    """
+    根据框信息裁剪图片并保存到指定目录。
+
+    :param image_paths: 图片路径列表，例如 ['1.jpg', '2.png']
+    :param output_dir: 保存裁剪后图片的目录
+    :param box_info: 框坐标列表 [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
+    """
+    # 如果输出目录不存在，则创建
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # 从四点坐标中提取矩形的左上角和右下角
+    # 假设 box_info 格式为: [[左上], [右上], [右下], [左下]]
+    x_coords = [point[0] for point in box_info]
+    y_coords = [point[1] for point in box_info]
+
+    left = min(x_coords)
+    top = min(y_coords)
+    right = max(x_coords)
+    bottom = max(y_coords)
+
+    crop_box = (left, top, right, bottom)
+
+    for img_path in image_paths:
+        try:
+            with Image.open(img_path) as img:
+                # 执行裁剪
+                cropped_img = img.crop(crop_box)
+
+                # 构建保存路径
+                file_name = os.path.basename(img_path)
+                save_path = os.path.join(output_dir, f"cropped_{file_name}")
+
+                # 保存图片
+                cropped_img.save(save_path)
+                print(f"成功处理并保存: {save_path}")
+        except Exception as e:
+            print(f"处理图片 {img_path} 时出错: {e}")
 
 if __name__ == "__main__":
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    video_path = r"W:\project\python_project\auto_video\videos\material\7598194159421377828\7598194159421377828_origin.mp4"
-    output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    output_path = os.path.join(output_dir, 'clip_video.mp4')
-    clip_video_ms(video_path, 0, 5000, output_path)
+    video_path = r"W:\project\python_project\auto_video\videos\material\7597599415717615476\7597599415717615476_origin.mp4"
+    # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+    # output_path = os.path.join(output_dir, 'clip_video.mp4')
+    # clip_video_ms(video_path, 0, 5000, output_path)
+
+    box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
+    # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
+    # detected_box = find_overall_subtitle_box_target_number(
+    #     video_path, merged_timerange_list, output_dir=box_dir, video_duration_ms=78000
+    # )
+    # print(detected_box)
+
+    # 获取box_dir下面的所有jpg列表
+    image_paths = []
+    for file_name in os.listdir(box_dir):
+        if file_name.lower().endswith('.jpg'):
+            image_paths.append(os.path.join(box_dir, file_name))
+
+    box = [[208, 963], [1712, 963], [1712, 1042], [208, 1042]]
+    crop_and_save_images(image_paths, os.path.join(box_dir, 'cropped_images'), box)
+
 
 
     # video_info_list = manager.find_materials_by_ids(['7598869943144172846'])
