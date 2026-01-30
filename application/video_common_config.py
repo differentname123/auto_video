@@ -458,6 +458,9 @@ ALL_MATERIAL_VIDEO_INFO_PATH = r'W:\project\python_project\auto_video\config\all
 
 DIG_HOT_VIDEO_PLAN_FILE = r'W:\project\python_project\auto_video\config\dig_hot_video_plan.json'  # 用于存放挖热点视频的计划信息
 
+DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE = r'W:\project\python_project\auto_video\config\dig_hot_video_plan_archive.json'  # 用于存放挖热点视频的计划信息
+
+
 SNAPSHOT_CACHE_DIR = r'W:\project\python_project\auto_video\videos\snapshot_cache'
 
 

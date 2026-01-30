@@ -16,7 +16,7 @@ import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
     DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content, \
-    BLOCK_VIDEO_ID_FILE
+    BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
     gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
@@ -538,6 +538,78 @@ def update_exist_dig_data(exist_video_plan_info, good_video_list):
     return exist_video_plan_info, video_id_avg_score_map
 
 
+def archive_outdated_plans(exist_info, archive_info, days=7):
+    """
+    功能：
+    1. 将 exist_info 中超过 days 天的数据移入 archive_info。
+    2. 自动清理 exist_info 中为空的主题（Key），防止空列表堆积。
+    3. 打印高信息量日志：归档数、剩余数、清理掉的空主题数。
+    """
+    current_time = int(time.time())
+    expire_threshold = current_time - (days * 24 * 3600)
+
+    # 统计计数器
+    stat_archived_count = 0  # 归档条数
+    stat_remaining_count = 0  # 剩余条数
+    stat_cleaned_topics = 0  # 被删除的空主题数（原本空的 + 归档后空的）
+
+    start_cpu_time = time.time()
+
+    # 获取所有主题的列表，防止在遍历字典时修改字典大小报错
+    all_topics = list(exist_info.keys())
+    initial_topic_count = len(all_topics)
+
+    for topic in all_topics:
+        plans = exist_info.get(topic, [])
+        active_plans = []  # 留下的（7天内）
+        expired_plans = []  # 要走的（7天前）
+
+        # 分拣数据
+        for plan in plans:
+            # 获取时间戳，如果没有时间戳，默认视为当前时间（不归档）
+            plan_ts = plan.get('timestamp', current_time)
+
+            if plan_ts < expire_threshold:
+                expired_plans.append(plan)
+            else:
+                active_plans.append(plan)
+
+        # --- 1. 处理归档数据 ---
+        if expired_plans:
+            stat_archived_count += len(expired_plans)
+
+            if topic not in archive_info:
+                archive_info[topic] = []
+            archive_info[topic].extend(expired_plans)
+
+        # --- 2. 处理剩余数据 & 清理空Key ---
+        if active_plans:
+            # 如果还有活着的方案，更新回去
+            exist_info[topic] = active_plans
+            stat_remaining_count += len(active_plans)
+        else:
+            # 【关键】如果列表为空（无论是原本空还是归档后空），直接删除该 Key
+            del exist_info[topic]
+            stat_cleaned_topics += 1
+
+    # --- 高信息量日志输出 ---
+    cost_time = time.time() - start_cpu_time
+    current_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+
+    # 只要有变动（归档了数据 OR 清理了空主题）就打印详细日志
+    if stat_archived_count > 0 or stat_cleaned_topics > 0:
+        print(f"【归档清理报告】{current_time_str} | "
+              f"归档方案: {stat_archived_count}条 | "
+              f"清理空主题: {stat_cleaned_topics}个 | "
+              f"当前剩余: {stat_remaining_count}条 (共{len(exist_info)}个主题) | "
+              f"耗时: {cost_time:.4f}s")
+    else:
+        # 如果没有任何变动，打印简报
+        print(f"【归档扫描】{current_time_str} | 无过期数据且无空主题 | "
+              f"当前保持: {stat_remaining_count}条 (共{len(exist_info)}个主题)")
+
+    return exist_info, archive_info
+
 def find_good_plan(manager):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
@@ -548,6 +620,22 @@ def find_good_plan(manager):
     # 判断是否有新的话题，有的化就需要重新拉取数据
     is_need_refresh = False
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+    archive_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE)
+
+    # =============== 插入点开始 ===============
+    # 执行归档：这一步会把 exist_video_plan_info 里旧的移走，剩下新的
+    exist_video_plan_info, archive_video_plan_info = archive_outdated_plans(
+        exist_video_plan_info,
+        archive_video_plan_info,
+        days=7
+    )
+
+    # 务必在这里保存一次，确保归档操作被持久化
+    # 这样后续逻辑拿到的 exist_video_plan_info 就是干净的 7 天内数据
+    save_json(DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, archive_video_plan_info)
+    save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+
+
     exist_video_plan_info, video_id_avg_score_map = update_exist_dig_data(exist_video_plan_info, good_video_list)
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
