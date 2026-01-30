@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import os
+import re
 import time
 import traceback
 import multiprocessing
@@ -25,8 +26,22 @@ _configure_third_party_paths()
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 from third_party.TikTokDownloader.douyin_downloader import get_meta_info, download_douyin_video_sync
-
+from flask_compress import Compress  # [新增] 导入压缩模块
 app = Flask(__name__)
+Compress(app)  # [新增] 开启全局压缩
+
+@app.after_request
+def compress_html(response):
+    # 仅处理 HTML 响应
+    if response.content_type == 'text/html; charset=utf-8':
+        response.direct_passthrough = False
+        data = response.get_data(as_text=True)
+        # 正则替换：去除标签之间的空格和换行
+        minified = re.sub(r'>\s+<', '><', data)
+        # 去除注释 (可选)
+        # minified = re.sub(r'', '', minified, flags=re.DOTALL)
+        response.set_data(minified)
+    return response
 
 # =============================================================================
 # 0. 全局多进程共享对象 (新增部分)
