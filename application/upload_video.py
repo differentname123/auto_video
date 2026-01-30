@@ -597,7 +597,7 @@ def print_simple_stats(statistic_data):
 
     print(separator)
 
-def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_tasks_list, tobe_upload_video_info):
+def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_tasks_list, tobe_upload_video_info, allowed_user_name_list):
     """
     没一轮投稿后进行的统计，理论上要统计每个账号的信息 包括 今日投稿数量today_upload_count 平台实际数量platform_upload_count 已准备好的数据tobe_upload_count 今日待上传数量today_process 明天待上传数量tomorrow_process 最近上传时间latest_upload_time
     :return:
@@ -642,6 +642,9 @@ def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_
 
     save_json(USER_STATISTIC_INFO_PATH, user_statistic_info)
     # 规范的打印出来这个统计信息
+
+    # 只保留allowed_user_name_list中的用户
+    user_statistic_info = {k: v for k, v in user_statistic_info.items() if k in allowed_user_name_list}
 
     print_simple_stats(user_statistic_info)
     return user_statistic_info
@@ -948,6 +951,7 @@ def auto_upload(manager):
     already_upload_users = []
     current_time = datetime.now()
     config_map = build_user_config()
+    allowed_user_name_list = list(config_map.keys())
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     stop_flag = user_config.get('stop_flag', False)
     if stop_flag:
@@ -1041,7 +1045,7 @@ def auto_upload(manager):
     need_process_tasks = query_need_process_tasks()
 
     # 注意：tobe_upload_video_info 在 process_idle_tasks 中可能被修改，这里使用修改后的值，逻辑正确
-    gen_all_statistic_info(already_upload_users, user_upload_info, filter_task_list, tobe_upload_video_info)
+    gen_all_statistic_info(already_upload_users, user_upload_info, filter_task_list, tobe_upload_video_info, allowed_user_name_list)
     concurrent.futures.wait(futures, timeout=None)
     return len(sort_not_existing_video_tasks)
 

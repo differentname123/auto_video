@@ -811,6 +811,8 @@ def statistic_good_video(tasks):
     for task_info in unique_final_good_task_list:
         upload_info_list = task_info.get('upload_info', [])
         video_type, tags_info = gen_true_type_and_tags(upload_info_list)
+        user_name = task_info.get('userName', 'dahao')
+        video_type = get_user_type(user_name)
         task_info['video_type'] = video_type
         choose_reason = task_info.get('choose_reason', [])
         choose_reason_len = len(choose_reason)
