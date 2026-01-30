@@ -16,7 +16,7 @@ import os
 import shutil
 import time
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from bson import ObjectId
 
@@ -941,11 +941,11 @@ def update_narration_key(data_list):
         # 发生异常，直接返回传入的原始列表
         return data_list
 
-
 def recover_task():
     query_2 = {
         "create_time": {
-            "$gt": datetime(2023, 1, 18, 20, 44, 3, 15000, tzinfo=timezone.utc)
+            # 当前时间减去 12 小时
+            "$gt": datetime.now() - timedelta(hours=8)
         },
         "failed_count": {
             "$gt": 5
@@ -1010,9 +1010,9 @@ if __name__ == '__main__':
     query_2 = {
         '_id': ObjectId("697b6207bfaf783377cf3bf9")
     }
-    # recover_task()
-    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    recover_task()
+    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     # print()
-    for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=False)
-        break
+    # for task_info in all_task:
+    #     process_single_task(task_info, manager, gen_video=False)
+    #     break
