@@ -48,6 +48,7 @@ def query_all_material_videos(manager, is_need_refresh):
 
 
     query = {}
+    local_material_video_info = {}
 
     all_material_list = manager.find_by_custom_query(manager.materials_collection, query)
     raw_db_count = len(all_material_list)  # [新增] 记录数据库原始查询数量
