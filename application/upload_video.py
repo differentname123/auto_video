@@ -414,7 +414,7 @@ def build_user_config():
         config_map[name] = (sessdata, bili_jct, total_cookie)
     return config_map
 
-def statistic_tasks_with_video(tasks_to_upload_list):
+def statistic_tasks_with_video(tasks_to_upload_list, allowed_user_name_list):
     """
     统计已有的视频的任务，并且排序
     :param tasks_to_upload:
@@ -429,6 +429,9 @@ def statistic_tasks_with_video(tasks_to_upload_list):
         task_path_info = build_task_video_paths(task_info)
         final_output_path = task_path_info['final_output_path']
         user_name = task_info.get('userName')
+        if user_name not in allowed_user_name_list:
+            continue
+
         if is_valid_target_file_simple(final_output_path):
             existing_video_tasks.append(task_info)
             if user_name not in tobe_upload_video_info:
@@ -981,7 +984,7 @@ def auto_upload(manager):
         filter_task_list.append(task)
 
     print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
-    existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload)
+    existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload, allowed_user_name_list)
 
     futures: List[concurrent.futures.Future] = []
 
