@@ -945,7 +945,7 @@ def recover_task():
     query_2 = {
         "create_time": {
             # 当前时间减去 12 小时
-            "$gt": datetime.now() - timedelta(hours=8)
+            "$gt": datetime.now() - timedelta(hours=12)
         },
         "failed_count": {
             "$gt": 5
@@ -1010,9 +1010,10 @@ if __name__ == '__main__':
     query_2 = {
         '_id': ObjectId("697e1ba3bfaf783377cf3f44")
     }
-    # recover_task()
-    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    print()
-    for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
-        break
+    recover_task()
+    #
+    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # print()
+    # for task_info in all_task:
+    #     process_single_task(task_info, manager, gen_video=True)
+    #     break
