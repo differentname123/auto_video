@@ -66,7 +66,10 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                 npm_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'npm')
                 gemini_executable = os.path.join(npm_path, 'gemini.cmd' if os.name == 'nt' else 'gemini')
                 command = [gemini_executable, '-m', model_name, '-o', 'json']
-
+                env = os.environ.copy()
+                env["GOOGLE_CLOUD_PROJECT"] = "jovial-analyst-480104-m9"
+                # 兼容老版本
+                env["GOOGLE_CLOUD_PROJECT_ID"] = "jovial-analyst-480104-m9"
                 result = subprocess.run(
                     command,
                     input=prompt,
@@ -74,7 +77,9 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                     text=True,
                     check=True,
                     encoding='utf-8',
-                    cwd=temp_dir  # 指定空临时目录作为 CWD
+                    cwd=temp_dir,
+                    # env=env  # ←←← 就是这一行
+
                 )
 
                 response_data = json.loads(result.stdout)
