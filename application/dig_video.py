@@ -686,24 +686,24 @@ def find_good_plan(manager):
         save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
         print(f"完成视频方案挖掘，当前热门视频主题: {hot_video}，新挖掘数量: {len(exist_video_plan_info[hot_video]) - exist_count}，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
 
-    free_dig_info_path = r'W:\project\python_project\auto_video\config\free_dig_info.json'
-    free_dig_info = read_json(free_dig_info_path)
+    # free_dig_info_path = r'W:\project\python_project\auto_video\config\free_dig_info.json'
+    # free_dig_info = read_json(free_dig_info_path)
     # 进行自由挖掘
     for target_video_type, target_tags in good_tags_info.items():
-        if target_video_type == 'sport':
+        if target_video_type != 'game':
             continue
         final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=True, top_n=150)
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
         timestamp = int(time.time())
-        if len(video_content_plans) > 0:
-            free_dig_info[f"{timestamp}"] = {
-                'video_content_plans':video_content_plans,
-                'full_prompt': full_prompt,
-
-            }
-            save_json(free_dig_info_path, free_dig_info)
+        # if len(video_content_plans) > 0:
+        #     free_dig_info[f"{timestamp}"] = {
+        #         'video_content_plans':video_content_plans,
+        #         'full_prompt': full_prompt,
+        #
+        #     }
+        #     save_json(free_dig_info_path, free_dig_info)
         for plan_info in video_content_plans:
             hot_video = plan_info.get('video_theme', '有趣的视频')
             if hot_video not in exist_video_plan_info:

@@ -847,6 +847,9 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         hot_topic_count += 1
 
     for user_name, detail_info in user_detail_upload_info.items():
+        if user_name in ['qiuru', 'dan', 'nana'] and final_score < 1000:
+            continue
+
         need_count = detail_info.get('need_count', 0)
         if user_name in simple_need_process_users and need_count < 1:
             detail_match_info[user_name] = "简化用户且需求量不足"
@@ -902,6 +905,50 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
     return matched_user, detail_match_info
 
 
+def get_final_users(manager, video_info, user_detail_upload_info, all_video_info):
+    priority_user = ['lin', 'danzhu']
+
+    can_use_count = get_available_count(manager, video_info)
+    match_user_list, detail_match_info = match_user(user_detail_upload_info, video_info, all_video_info)
+
+    video_info['match_user_list'] = match_user_list
+    video_info['detail_match_info'] = detail_match_info
+
+    # 计算最终需要选取的数量
+    sample_size = min(len(match_user_list), can_use_count)
+    sample_size = min(sample_size, 1)  # 注意：你这里限制了最多只选 1 个
+
+    final_list = []
+
+    if sample_size > 0:
+        # --- 核心修改逻辑开始 ---
+
+        # 1. 将匹配到的用户分为两组：优先用户 和 普通用户
+        # 使用 set 提高查找效率（如果列表很短，直接用 list 也可以）
+        priority_set = set(priority_user)
+
+        candidates_priority = [u for u in match_user_list if u in priority_set]
+        candidates_normal = [u for u in match_user_list if u not in priority_set]
+
+        # 2. 第一步：优先从 candidates_priority 中选取
+        # 我们需要选取的优先用户数量，受限于“现有优先用户数”和“总目标数量”
+        count_from_priority = min(len(candidates_priority), sample_size)
+        if count_from_priority > 0:
+            final_list.extend(random.sample(candidates_priority, count_from_priority))
+
+        # 3. 第二步：计算剩余还需要多少名额
+        remaining_slots = sample_size - len(final_list)
+
+        # 4. 如果还有剩余名额，从 candidates_normal 中补齐
+        if remaining_slots > 0:
+            # 同样防止 sample 数量超过列表长度（理论上前面 min 处理过，这里双重保险）
+            count_from_normal = min(len(candidates_normal), remaining_slots)
+            final_list.extend(random.sample(candidates_normal, count_from_normal))
+
+        # --- 核心修改逻辑结束 ---
+
+    return final_list
+
 
 def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info):
     """
@@ -921,16 +968,7 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
     #     video_info['reason'] = "视频全部使用过，跳过"
     #     return []
 
-    can_use_count = get_available_count(manager, video_info)
-    match_user_list, detail_match_info = match_user(user_detail_upload_info, video_info, all_video_info)
-    video_info['match_user_list'] = match_user_list
-    video_info['detail_match_info'] = detail_match_info
-
-    sample_size = min(len(match_user_list), can_use_count)
-    sample_size = min(sample_size, 1)
-
-    # 3. 随机选择不重复的元素
-    final_list = random.sample(match_user_list, sample_size) if sample_size > 0 else []
+    final_list = get_final_users(manager, video_info, user_detail_upload_info, all_video_info)
     return final_list
 
 
@@ -1050,7 +1088,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['ruru', 'hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu']
+    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
