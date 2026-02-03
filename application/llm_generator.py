@@ -300,7 +300,7 @@ def gen_precise_scene_timestamp_by_subtitle(video_path, timestamp):
         # 1. 保存关键帧 (涉及IO，易报错)
         image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
-        result_json = run_subtitle_ocr(image_path_list)
+        result_json = run_subtitle_ocr(image_path_list, only_best=False)
 
         # 提取所有原始框用于计算范围
         detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in
@@ -1534,7 +1534,7 @@ def gen_precise_owner_timestamp_by_subtitle(video_path, timestamp, target_text):
         # 1. 保存关键帧 (涉及IO，易报错)
         image_path_list = save_frames_around_timestamp_ffmpeg(video_path, timestamp / 1000, 30, output_dir, time_duration_s=1)
 
-        result_json = run_subtitle_ocr(image_path_list)
+        result_json = run_subtitle_ocr(image_path_list, only_best=False)
 
         # 提取所有原始框用于计算范围
         detected_boxes = [sub.get("box", []) for item in result_json.get("data", []) for sub in

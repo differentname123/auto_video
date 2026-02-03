@@ -59,10 +59,12 @@ def _select_best_subtitle_strict(
         rect_ang_thresh: float = 10.0,
         rect_ratio_thresh: float = 0.8,
         aspect_ratio_thresh: float = 2.0,
-        width_ratio_thresh: float = 0.1
+        width_ratio_thresh: float = 0.1,
+        only_best: bool = True  # <--- [新增参数] 控制是否只返回最优的一个
 ):
     """
     严格筛选逻辑（纯函数，无状态）
+    :param only_best: True则经过打分后只返回一个dict，False则返回所有通过筛选的list
     """
     if not raw_ocr_lines:
         return None
@@ -121,10 +123,16 @@ def _select_best_subtitle_strict(
     if not filtered:
         return None
 
+    # --- [修改逻辑开始] ---
+    # 如果不需要找最好的，直接返回所有筛选后的结果
+    if not only_best:
+        return filtered
+
+    # 如果只需要最好的，保留原有逻辑
     if len(filtered) == 1:
         return filtered[0]
 
-    # 3. 打分排序
+    # 3. 打分排序 (仅在 only_best=True 时执行)
     Y_WEIGHT = 1.0
     X_WEIGHT = 10.0
 
@@ -138,10 +146,12 @@ def _select_best_subtitle_strict(
 
     best = max(filtered, key=calculate_score)
     return best
+    # --- [修改逻辑结束] ---
+
 
 @safe_process_limit(limit=4, name="run_subtitle_ocr")
 def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: float = 0.5,
-                     confidence: float = 0.8) -> dict:
+                     confidence: float = 0.8, only_best=True) -> dict:
     """
     对外的主函数：无状态、每次运行初始化、运行完清理。
     """
@@ -209,7 +219,6 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
                 result_raw, _ = engine(img_numpy)
                 ocr_result = result_raw if result_raw else []
             except Exception as e_inf:
-                # 如果推理过程中崩了，尝试本地简单重建一次（可选，防止单张图卡死整个批次）
                 print(f"Inference error on {os.path.basename(img_path)}: {e_inf}")
                 item_result["error_msg"] = f"Inference Error: {e_inf}"
                 ocr_result = []
@@ -222,8 +231,8 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
                     if line and len(line) == 3 and line[2] > confidence
                 ]
 
-                # 几何筛选
-                best_sub = _select_best_subtitle_strict(
+                # 几何筛选 (调用时传入 only_best=False 以获取所有候选框)
+                filtered_subs = _select_best_subtitle_strict(
                     high_conf_lines,
                     crop_h,
                     crop_w,
@@ -231,23 +240,33 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
                     rect_ang_thresh=10.0,
                     rect_ratio_thresh=0.8,
                     aspect_ratio_thresh=1,
-                    width_ratio_thresh=0.1
+                    width_ratio_thresh=0.1,
+                    only_best=only_best  # <--- [修改点] 设为False，获取所有符合条件的字幕框
                 )
 
-                if best_sub:
-                    text = best_sub["text"]
-                    box = best_sub["box"]
-                    score = best_sub["score"]
+                # --- [后续适配逻辑] ---
+                if filtered_subs:
+                    # 兼容性处理：如果返回的是单个dict(以防万一)，转为list
+                    if isinstance(filtered_subs, dict):
+                        candidates = [filtered_subs]
+                    else:
+                        candidates = filtered_subs
 
-                    # 坐标还原
-                    final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
+                    # 遍历所有候选框进行坐标还原和存储
+                    for sub in candidates:
+                        text = sub["text"]
+                        box = sub["box"]
+                        score = sub["score"]
 
-                    item_result["subtitles"].append({
-                        "text": text,
-                        "box": final_box,
-                        "score": float(score)
-                    })
-                    all_recognized_texts.append(text)
+                        # 坐标还原 (加上crop的偏移量)
+                        final_box = [[int(p[0]), int(p[1] + y_offset)] for p in box]
+
+                        item_result["subtitles"].append({
+                            "text": text,
+                            "box": final_box,
+                            "score": float(score)
+                        })
+                        all_recognized_texts.append(text)
 
             item_result["status"] = "success"
             response["success_count"] += 1
@@ -261,17 +280,15 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
         response["data"].append(item_result)
 
     # --- 3. 资源清理 ---
-    # 显式删除引擎并强制GC，确保内存释放
     try:
         del engine
     except:
         pass
     gc.collect()
     if use_gpu:
-        # 如果是GPU模式，有时候需要清空CUDA缓存(依赖torch，这里假设rapidocr后端处理了，或者只靠gc)
         pass
 
-        # --- 4. 统计与返回 ---
+    # --- 4. 统计与返回 ---
     t_end = time.time()
     total_time = t_end - t_start
     response["perf_stats"] = {
