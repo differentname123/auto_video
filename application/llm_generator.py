@@ -1594,21 +1594,25 @@ def gen_precise_owner_timestamp_by_subtitle(video_path, timestamp, target_text):
         traceback.print_exc()
         return (timestamp, timestamp)
 
-def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path, max_delta_ms=1000):
+def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path, max_delta_ms=500, direction=None):
     """
     输入一个目标时间戳和原始的时间戳列表，计算出修正后的时间戳。
     该函数内部会自动清洗 merged_timestamps。
     target_ts: ms
+    direction: None (无要求), 'before' (要求 <= target_ts), 'after' (要求 >= target_ts)
     """
     # 1. 数据清洗：在函数内部处理，对调用方透明
     # 只保留有效的时间戳 (timestamp exists, count > 0)
     valid_camera_shots = [c for c in merged_timestamps if c and c[0] is not None and c[1] > 0]
 
     # 2. 筛选候选者
-    # 2. 筛选候选者
+    # 修改说明：增加了 direction 的判断逻辑
     candidates = [
         shot for shot in valid_camera_shots
         if abs(shot[0] - target_ts) <= max_delta_ms
+        and (direction is None or
+             (direction == 'before' and shot[0] <= target_ts) or
+             (direction == 'after' and shot[0] >= target_ts))
     ]
 
     # 3. 寻找最佳匹配 (Visual)
@@ -1658,6 +1662,7 @@ def align_owner_timestamp(target_ts, target_text,  merged_timestamps, video_path
 
     # 策略 B: 字幕对齐 (无候选 或 count < 2)
     else:
+        # 修改说明：提示信息中若因方向过滤导致无候选，此处逻辑依然适用
         reason = "无候选 Camera Shot" if not candidates else f"Camera Shot 置信度低 (count={best_shot}<2)"
 
         # 调用字幕对齐函数
@@ -1714,6 +1719,7 @@ def fix_owner_asr_by_subtitle(video_info):
         start_speaker = pair_start_info.get('speaker')
 
         if start_speaker == 'owner':
+            direction = 'after'
             # --- 场景 1: 前一个片段是 Owner，修正其【结束时间】 ---
             timestamp = pair_start_info.get('end', 0)
             final_text = pair_start_info.get('final_text', '').strip()
@@ -1724,7 +1730,7 @@ def fix_owner_asr_by_subtitle(video_info):
             target_text = parts[-1] if parts else final_text
 
             ts_range, strategy, info = align_owner_timestamp(
-                timestamp, target_text, merged_timestamps, video_path, max_delta_ms=1000
+                timestamp, target_text, merged_timestamps, video_path, max_delta_ms=500, direction=direction
             )
             new_ts = ts_range[1]  # 修正结束时间，所以取范围的第二个值
 
@@ -1737,6 +1743,7 @@ def fix_owner_asr_by_subtitle(video_info):
 
         else:
             # --- 场景 2: 后一个片段是 Owner，修正其【开始时间】 ---
+            direction = 'before'
             timestamp = pair_end_info.get('start', 0)
             final_text = pair_end_info.get('final_text', '')
             source_clip_id = pair_end_info.get('source_clip_id', '')
@@ -1746,7 +1753,7 @@ def fix_owner_asr_by_subtitle(video_info):
             target_text = parts[0] if parts else final_text
 
             ts_range, strategy, info = align_owner_timestamp(
-                timestamp, target_text, merged_timestamps, video_path, max_delta_ms=1000
+                timestamp, target_text, merged_timestamps, video_path, max_delta_ms=500, direction=direction
             )
             new_ts = ts_range[0]  # 修正开始时间，所以取范围的第一个值
 

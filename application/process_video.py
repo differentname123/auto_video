@@ -226,6 +226,7 @@ def process_origin_video(video_id, video_info):
     :param video_id:
     :return:
     """
+    print(f"开始处理视频 {video_id} 的原始视频 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     video_path_info = build_video_paths(video_id)
     origin_video_path = video_path_info['origin_video_path']
     origin_video_path_blur = video_path_info['origin_video_path_blur']
