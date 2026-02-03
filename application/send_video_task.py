@@ -906,8 +906,10 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
 
 
 def get_final_users(manager, video_info, user_detail_upload_info, all_video_info):
-    priority_user = ['lin', 'danzhu']
-
+    priority_user = ['lin', 'danzhu', 'dan']
+    final_score = video_info.get('final_score', 0)
+    if final_score < 1000:
+        priority_user = []
     can_use_count = get_available_count(manager, video_info)
     match_user_list, detail_match_info = match_user(user_detail_upload_info, video_info, all_video_info)
 
@@ -1088,7 +1090,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana']
+    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'dan']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
