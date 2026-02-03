@@ -598,7 +598,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             start_time = time.time()
 
             random_value = random.random()
-            if random_value < 0.6:
+            if random_value < 0.5:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
                                                                          model_name="gemini-3-pro-preview")
             else:
@@ -955,8 +955,13 @@ def gen_owner_asr_by_llm(video_path, video_info):
         print(f"尝试生成ASR信息... (第 {attempt}/{max_retries} 次) {log_pre}")
         raw_response = ""
         try:
-            gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
+            random_value = random.random()
+            if random_value < 0.2:
+                # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
+                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-3-pro-preview")
+            else:
+                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro")
 
             # 解析和校验
             owner_asr_info = string_to_object(raw_response)
