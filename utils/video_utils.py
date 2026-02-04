@@ -434,7 +434,7 @@ def remove_static_background_video(video_path, area_threshold_ratio=0.9, bbox=No
     print(f"运动区域面积占总面积的 {current_ratio:.2%}")
 
     # 条件：当前比例小于阈值，并且裁剪区域不等于整个视频（这是 find_motion_bbox 的回退情况）
-    if current_ratio < area_threshold_ratio and (w, h) != (original_w, original_h):
+    if current_ratio < area_threshold_ratio and (w, h) != (original_w, original_h) and current_ratio > 0.2:
         print(f"面积比例 ({current_ratio:.2%}) 小于阈值 ({area_threshold_ratio:.2%})，将执行裁剪。")
 
         # 构造输出文件名，例如 a.mp4 -> a_crop.mp4
