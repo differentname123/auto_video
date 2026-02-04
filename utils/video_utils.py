@@ -4138,3 +4138,27 @@ def create_snapshot_from_video(video_path, start_time, end_time, snapshot_path):
         return None, error_msg
 
 
+
+
+def extract_audio(input_video, output_audio=None):
+    """
+    从视频文件分离音频。
+    - input_video: 视频文件路径
+    - output_audio: 可选，输出音频路径（若不指定，默认使用输入文件名 + .m4a）
+    返回输出文件路径（成功）或抛出 subprocess.CalledProcessError（失败）。
+    """
+    if output_audio is None:
+        base = os.path.splitext(input_video)[0]
+        output_audio = base + '.m4a'
+
+    # 1) 优先尝试直接拷贝音轨（最快、无损）
+    cmd_copy = ['ffmpeg', '-y', '-i', input_video, '-vn', '-map', '0:a?', '-c', 'copy', output_audio]
+    try:
+        subprocess.run(cmd_copy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return output_audio
+    except subprocess.CalledProcessError:
+        # 2) 如果拷贝失败（例如扩展名/容器不匹配），回退到转码成 mp3
+        fallback = os.path.splitext(output_audio)[0] + '.mp3'
+        cmd_conv = ['ffmpeg', '-y', '-i', input_video, '-vn', '-map', '0:a?', '-q:a', '0', fallback]
+        subprocess.run(cmd_conv, check=True)  # 若失败，把错误抛出来
+        return fallback

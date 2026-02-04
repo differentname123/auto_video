@@ -36,7 +36,7 @@ from utils.paddle_ocr_base import run_subtitle_ocr
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
     add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark, \
-    save_frames_around_timestamp, save_frames_around_timestamp_ffmpeg, get_scene
+    save_frames_around_timestamp, save_frames_around_timestamp_ffmpeg, get_scene, extract_audio
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -1368,26 +1368,28 @@ def crop_and_save_images(image_paths, output_dir, box_info):
 if __name__ == "__main__":
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    video_path = r"W:\project\python_project\auto_video\videos\material\7597599415717615476\7597599415717615476_origin.mp4"
+    video_path = r"W:\project\python_project\auto_video\videos\material\7602199964915552936\7602199964915552936_low_resolution.mp4"
     # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
     # output_path = os.path.join(output_dir, 'clip_video.mp4')
     # clip_video_ms(video_path, 0, 5000, output_path)
 
-    box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
-    # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
-    # detected_box = find_overall_subtitle_box_target_number(
-    #     video_path, merged_timerange_list, output_dir=box_dir, video_duration_ms=78000
-    # )
-    # print(detected_box)
+    extract_audio(video_path)
 
-    # 获取box_dir下面的所有jpg列表
-    image_paths = []
-    for file_name in os.listdir(box_dir):
-        if file_name.lower().endswith('.jpg'):
-            image_paths.append(os.path.join(box_dir, file_name))
-
-    box = [[208, 963], [1712, 963], [1712, 1042], [208, 1042]]
-    crop_and_save_images(image_paths, os.path.join(box_dir, 'cropped_images'), box)
+    # box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
+    # # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
+    # # detected_box = find_overall_subtitle_box_target_number(
+    # #     video_path, merged_timerange_list, output_dir=box_dir, video_duration_ms=78000
+    # # )
+    # # print(detected_box)
+    #
+    # # 获取box_dir下面的所有jpg列表
+    # image_paths = []
+    # for file_name in os.listdir(box_dir):
+    #     if file_name.lower().endswith('.jpg'):
+    #         image_paths.append(os.path.join(box_dir, file_name))
+    #
+    # box = [[208, 963], [1712, 963], [1712, 1042], [208, 1042]]
+    # crop_and_save_images(image_paths, os.path.join(box_dir, 'cropped_images'), box)
 
 
 
