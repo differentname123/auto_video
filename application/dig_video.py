@@ -690,7 +690,12 @@ def find_good_plan(manager):
     # free_dig_info = read_json(free_dig_info_path)
     # 进行自由挖掘
     for target_video_type, target_tags in good_tags_info.items():
-        if target_video_type != 'game':
+        if target_video_type == 'sport' and random.random() < 0.8:
+            continue
+
+        # 2. 针对非保留类型：如果既不是 game 也不是 sport，全部跳过
+        # 注意：sport 如果通过了上面那一关，会走到这里，所以这里要放行 sport
+        if target_video_type not in ['game', 'sport']:
             continue
         final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=True, top_n=150)
         video_data = build_prompt_data(final_good_video_list, target_video_type)

@@ -78,7 +78,7 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                     check=True,
                     encoding='utf-8',
                     cwd=temp_dir,
-                    # env=env  # ←←← 就是这一行
+                    env=env  # ←←← 就是这一行
 
                 )
 

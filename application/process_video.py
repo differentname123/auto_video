@@ -1011,10 +1011,10 @@ if __name__ == '__main__':
     query_2 = {
         '_id': ObjectId("6981db70bfaf783377cf4407")
     }
-    # recover_task()
-
-    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    print()
-    for task_info in all_task:
-        process_single_task(task_info, manager, gen_video=True)
-        break
+    recover_task()
+    #
+    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    # print()
+    # for task_info in all_task:
+    #     process_single_task(task_info, manager, gen_video=True)
+    #     break
