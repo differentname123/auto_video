@@ -4148,17 +4148,23 @@ def extract_audio(input_video, output_audio=None):
     返回输出文件路径（成功）或抛出 subprocess.CalledProcessError（失败）。
     """
     if output_audio is None:
+        # 为了准确率，默认使用 .wav 格式
         base = os.path.splitext(input_video)[0]
-        output_audio = base + '.m4a'
+        output_audio = base + '_to_asr.wav'
+    cmd = [
+        'ffmpeg', '-y',
+        '-i', input_video,
+        '-vn',
+        '-ac', '1',
+        '-ar', '16000',
+        '-acodec', 'pcm_s16le',
+        output_audio
+    ]
 
-    # 1) 优先尝试直接拷贝音轨（最快、无损）
-    cmd_copy = ['ffmpeg', '-y', '-i', input_video, '-vn', '-map', '0:a?', '-c', 'copy', output_audio]
     try:
-        subprocess.run(cmd_copy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # 执行转换
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         return output_audio
-    except subprocess.CalledProcessError:
-        # 2) 如果拷贝失败（例如扩展名/容器不匹配），回退到转码成 mp3
-        fallback = os.path.splitext(output_audio)[0] + '.mp3'
-        cmd_conv = ['ffmpeg', '-y', '-i', input_video, '-vn', '-map', '0:a?', '-q:a', '0', fallback]
-        subprocess.run(cmd_conv, check=True)  # 若失败，把错误抛出来
-        return fallback
+    except subprocess.CalledProcessError as e:
+        print(f"音频提取失败: {e.stderr.decode()}")
+        raise e

@@ -503,7 +503,7 @@ def init_config():
         # '3546977184778261': 'yan',
         # '3546947566700892': 'su',
         '3546764430805071': 'ningtao',
-
+        '3493262924974100':'caizhu',
         '3546977048463920': 'jie',
         # '3546977369328324': 'qiqi',
         '3690990592329746': 'xue',
@@ -938,8 +938,7 @@ def delete_files_in_dir_except_target(keep_file_path):
         # traceback.print_exc()
 
 
-
-def safe_process_limit(limit, name, lock_dir="./process_locks"):
+def safe_process_limit(limit, name, lock_dir=r"W:\project\python_project\auto_video\application\process_locks"):
     """
     基于文件锁的稳定并发控制装饰器，带等待时间统计。
 
@@ -958,8 +957,13 @@ def safe_process_limit(limit, name, lock_dir="./process_locks"):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # 1. 记录开始排队的时间
+            # 1. [新增] 申请开始时打印信息
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] 准备执行函数 [{name}]，正在申请并发锁 (限制: {limit})...")
+
+            # 记录开始排队的时间
             start_wait_time = time.time()
+            # [新增] 记录上次打印锁占用情况的时间
+            last_report_time = 0
 
             acquired_lock = None
             slot_index = -1
@@ -987,15 +991,40 @@ def safe_process_limit(limit, name, lock_dir="./process_locks"):
                     # 成功获取锁，跳出死循环
                     break
 
+                # [新增] 没抢到锁，检查是否需要打印占用情况 (每隔 60 秒)
+                current_time = time.time()
+                if current_time - last_report_time >= 60:
+                    wait_sec = current_time - start_wait_time
+                    print(
+                        f"\n>>> [{time.strftime('%H:%M:%S')}] 函数 [{name}] 仍在排队，已等待 {wait_sec:.0f} 秒。当前锁占用详情：")
+
+                    # 遍历打印所有槽位的占用时长
+                    for i in range(limit):
+                        l_path = os.path.join(lock_dir, f"{name}_{i}.lock")
+                        if os.path.exists(l_path):
+                            try:
+                                # 获取文件最后修改时间作为锁开始占用的时间
+                                mtime = os.path.getmtime(l_path)
+                                occupied_duration = current_time - mtime
+                                print(f"   - 槽位 [{i}]: 文件已存在，已被占用约 {occupied_duration:.0f} 秒")
+                            except OSError:
+                                print(f"   - 槽位 [{i}]: (读取状态时文件消失)")
+                        else:
+                            print(f"   - 槽位 [{i}]: (文件不存在，可能刚被释放)")
+                    print("-" * 50 + "\n")
+
+                    # 更新上次报告时间
+                    last_report_time = current_time
+
                 # 如果所有槽位都满了，稍微睡一会再试
-                # 随机睡眠 0.05 ~ 0.15 秒，避免“惊群效应”（所有进程同时醒来抢）
+                # 随机睡眠 0.05 ~ 0.15 秒 (原代码逻辑为 random.uniform(1, 5)，此处保持原样)
                 time.sleep(random.uniform(1, 5))
 
             # 3. 计算等待时间
             end_wait_time = time.time()
             wait_duration = end_wait_time - start_wait_time
 
-            # 打印等待信息（如果等待时间 > 0.1秒，说明发生排队了，可以重点关注）
+            # 打印等待信息（如果等待时间 > 0.01秒，说明发生排队了，可以重点关注）
             if wait_duration > 0.01:
                 print(f"函数 [{name}] 槽位[{slot_index}] 获取成功。排队耗时: {wait_duration:.4f} 秒")
             else:
