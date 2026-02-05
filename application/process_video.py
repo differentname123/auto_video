@@ -195,7 +195,7 @@ def generate_blur_segments(raw_data: list, video_w: int, video_h: int, duration)
 
     return formatted_segments
 
-
+@safe_process_limit(limit=1, name="gen_blur_video_path")
 def gen_blur_video_path(video_path, output_path, watermark_list):
     """
     生成模糊指定区域的视频
@@ -219,7 +219,7 @@ def gen_blur_video_path(video_path, output_path, watermark_list):
         raise Exception(f"模糊视频生成失败: {output_path}")
 
 
-@safe_process_limit(limit=1, name="process_origin_video")
+@safe_process_limit(limit=2, name="process_origin_video")
 def process_origin_video(video_id, video_info):
     """
     处理原始视频生成后续需要处理的视频

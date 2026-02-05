@@ -494,7 +494,7 @@ def upload_worker(
         try:
             print(
                 f"🎉 后台投稿成功！AID={result['aid']}  BVID={result['bvid']} video_id_list={video_id_list} "
-                f"user={userName} 上传耗时 {time.time() - t_upload:.2f} 秒。 上传参数：{upload_params}")
+                f"user={userName} 上传耗时 {time.time() - t_upload:.2f} 秒。 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} 上传参数：{upload_params}")
             # 删除临时文件（上传成功后清理）
             for p in files_to_cleanup or []:
                 try:
