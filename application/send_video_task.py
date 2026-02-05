@@ -907,6 +907,7 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
 
 def get_final_users(manager, video_info, user_detail_upload_info, all_video_info):
     priority_user = ['lin', 'danzhu', 'dan']
+    priority_user = []
     final_score = video_info.get('final_score', 0)
     if final_score < 1000:
         priority_user = []
