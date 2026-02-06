@@ -311,7 +311,7 @@ if __name__ == "__main__":
         try:
             err, res = generate_gemini_content_managed(
                 prompt=prompt,
-                # model_name="gemini-2.5-pr1o",
+                model_name="gemini-2.5-flash",
                 # files=test_file
             )
 
