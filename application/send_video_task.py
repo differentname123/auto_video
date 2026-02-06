@@ -557,6 +557,9 @@ def gen_standard_video_info_by_dig_data(plan_info):
             if score < 95:
                 continue
             video_id_list = plan_info.get('video_id_list', [])
+            if len(video_id_list) != 2:
+                continue
+
             video_theme = plan_info.get('video_theme', '')
             video_type = plan_info.get('video_type', '')
             final_score = plan_info.get('final_score', 0)
