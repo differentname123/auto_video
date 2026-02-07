@@ -832,7 +832,7 @@ def clip_video_ms(
         return False, error_message
 
 
-def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
+def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn, preset='ultrafast'):
     """
     使用 filter_complex 将一小批 video_paths 合并为 output_path。
     probe_fn 是你现有的 probe_video_new，接受路径返回 (w,h,fps,sar)
@@ -948,7 +948,7 @@ def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn):
         "-map", "[outv]",
         "-map", "[outa]",
         "-r", f"{ref_fps:.2f}",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+        "-c:v", "libx264", "-preset", preset, "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-colorspace", "bt709",
         "-color_primaries", "bt709",
@@ -1000,7 +1000,7 @@ def _safe_remove(path, retries=5, delay=0.5):
 
 def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.mp4",
                         batch_size=20, temp_dir=None, probe_fn=None,
-                        cleanup_temp=True, cleanup_retries=5, cleanup_delay=0.5):
+                        cleanup_temp=True, cleanup_retries=5, cleanup_delay=0.5, preset="ultrafast"):
     """
     分批合并并保证临时文件被清理（若无法删除则抛出异常，避免遗漏）。
     cleanup_retries / cleanup_delay 控制删除重试策略。
@@ -1033,7 +1033,7 @@ def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.m
 
     try:
         if len(video_paths) <= batch_size:
-            _merge_chunk_ffmpeg(video_paths, output_path, probe_fn)
+            _merge_chunk_ffmpeg(video_paths, output_path, probe_fn, preset=preset)
             return
 
         chunks = list(_chunked(video_paths, batch_size))
@@ -1041,12 +1041,12 @@ def merge_videos_ffmpeg(video_paths, output_path="merged_video_original_volume.m
             tmp_out = _short_tempfile_name(tmpdir, prefix=f"batch{i}_")
             # 记录：即便用户指定 temp_dir，也会删除我们创建的这些临时文件
             temp_files.append(tmp_out)
-            _merge_chunk_ffmpeg(chunk, tmp_out, probe_fn)
+            _merge_chunk_ffmpeg(chunk, tmp_out, probe_fn, preset=preset)
 
         # 递归合并临时文件（如果数量超出 batch_size 会继续分批）
         merge_videos_ffmpeg(temp_files, output_path=output_path,
                             batch_size=batch_size, temp_dir=tmpdir, probe_fn=probe_fn,
-                            cleanup_temp=False, cleanup_retries=cleanup_retries, cleanup_delay=cleanup_delay)
+                            cleanup_temp=False, cleanup_retries=cleanup_retries, cleanup_delay=cleanup_delay, preset=preset)
 
     finally:
         # ---------- 强化的清理逻辑 ----------
@@ -1138,7 +1138,7 @@ def cover_video_area_blur_super_robust(
         top_left,
         bottom_right,
         time_ranges=None,
-        blur_strength: int = 15,
+        blur_strength: int = 50,
         crf: int = 23,
         preset: str = "ultrafast"
 ):
