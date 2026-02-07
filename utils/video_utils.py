@@ -2251,7 +2251,7 @@ def add_subtitles_to_video(
         output_path: str,
         font_size: int = 48,
         font_path='C:/Windows/Fonts/msyhbd.ttc',
-        font_color: str = 'white',
+        font_color: str = '#FFD700',
         box_color: str = 'black@0.5',
         bottom_margin: int = 50,
         fixed_rect=None
