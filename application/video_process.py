@@ -318,7 +318,30 @@ def add_image_to_video(video_info_dict):
     return failure_details
 
 
-def process_narration_clips(segment_list, data, min_duration=500):
+def is_mostly_overlapped(time_range, time_range_list, threshold=0.9):
+    start, end = time_range
+
+    # 非法区间直接返回 False
+    if start >= end:
+        return False
+
+    total_length = end - start
+
+    for s, e in time_range_list:
+        # 计算重叠区间
+        overlap_start = max(start, s)
+        overlap_end = min(end, e)
+
+        if overlap_start < overlap_end:
+            overlap_length = overlap_end - overlap_start
+            if overlap_length / total_length >= threshold:
+                return True
+
+    return False
+
+
+
+def process_narration_clips(segment_list, data, owner_asr_time_range, min_duration=500):
     """
     (主入口函数) 处理多个时间段的旁白数据。
 
@@ -375,6 +398,15 @@ def process_narration_clips(segment_list, data, min_duration=500):
         segment_result = process_single_range_logic(start, end, assigned_clips, min_duration)
         final_result.extend(segment_result)
 
+    for scene in final_result[:]:  # 遍历浅拷贝
+        text = scene.get('new_narration_script_list', '')
+        text = text.strip() if isinstance(text, str) else ''
+        if not text:
+            start = scene.get('narration_script_start', 0)
+            end = scene.get('narration_script_end', 0)
+            if is_mostly_overlapped((start, end), owner_asr_time_range):
+                print(f"删除与作者说话时间段高度重叠的空白片段: {scene}")
+                final_result.remove(scene)
     return final_result
 
 
@@ -499,6 +531,7 @@ def build_all_need_data_map(video_info_dict):
     """
     all_logical_scene_dict = {}
     all_owner_asr_info_dict = {}
+    all_owner_asr_info_dict_by_video = {}
     for video_id, video_info in video_info_dict.items():
         logical_scene_info = video_info.get('logical_scene_info')
         new_scene_info_list = logical_scene_info.get('new_scene_info', [])
@@ -517,7 +550,24 @@ def build_all_need_data_map(video_info_dict):
                 continue
             final_text = asr_info.get('final_text')
             all_owner_asr_info_dict[final_text] = asr_info
-    return all_logical_scene_dict, all_owner_asr_info_dict
+            if video_id not in all_owner_asr_info_dict_by_video:
+                all_owner_asr_info_dict_by_video[video_id] = []
+
+            fixed_start = asr_info.get('fixed_start', asr_info.get('start'))
+            fixed_end = asr_info.get('fixed_end', asr_info.get('end'))
+            all_owner_asr_info_dict_by_video[video_id].append([fixed_start, fixed_end])
+
+    owner_asr_time_range_info = {}
+
+    for video_id, asr_info_list in all_owner_asr_info_dict_by_video.items():
+        timerange_list = []
+        for asr_info in asr_info_list:
+            start = asr_info[0]
+            end = asr_info[1]
+            timerange_list.append((start, end))
+        merged_timerange_list = merge_intervals(timerange_list)
+        owner_asr_time_range_info[video_id] = merged_timerange_list
+    return all_logical_scene_dict, all_owner_asr_info_dict, owner_asr_time_range_info
 
 
 def process_video_with_owner_text(video_path, split_scene, output_dir, subtitle_box, voice_info):
@@ -611,7 +661,7 @@ def gen_transition_video(video_path, split_scene_list, transition_text, voice_in
     return transition_video_output_path
 
 
-def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info):
+def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info, owner_asr_time_range):
     """
     生成单个场景视频
     :return:
@@ -646,7 +696,7 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
             'narration_script_start': asr_info.get('fixed_start', asr_info.get('start')),
             'narration_script_end': asr_info.get('fixed_end', asr_info.get('end'))
         })
-    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, min_duration=500)
+    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, owner_asr_time_range, min_duration=500)
     count = 0
     for split_scene in split_scene_list:
         count += 1
@@ -887,7 +937,7 @@ def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_scrip
 
 
 def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_info_dict, all_logical_scene_dict,
-                         voice_info):
+                         voice_info, owner_asr_time_range):
     """
     处理单个场景的视频生成逻辑
     Returns:
@@ -956,7 +1006,8 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
         new_narration_detail_info,
         merged_segment_list,
         real_subtitle_box,
-        voice_info
+        voice_info,
+        owner_asr_time_range
     )
 
     return failure_details, final_scene_output_path
@@ -1092,7 +1143,7 @@ def gen_new_video(task_info, video_info_dict):
     upload_info_list = task_info.get('upload_info', {})
     final_video_script_info = merge_script_and_upload_info(video_script_info, upload_info_list)
 
-    all_logical_scene_dict, all_owner_asr_info_dict = build_all_need_data_map(video_info_dict)
+    all_logical_scene_dict, all_owner_asr_info_dict, owner_asr_time_range_info = build_all_need_data_map(video_info_dict)
     best_script = find_best_solution(final_video_script_info)
 
     if is_valid_target_file_simple(final_output_path):
@@ -1120,12 +1171,16 @@ def gen_new_video(task_info, video_info_dict):
     # 生成好了的每一个场景视频
     all_scene_video_file_list = []
     for new_script_scene in new_script_scenes:
+        scene_id = new_script_scene.get('scene_id')
+        video_id = scene_id.split('_')[0]
+        owner_asr_time_range = owner_asr_time_range_info.get(video_id, [])
         failure_details, final_scene_output_path = process_single_scene(
             new_script_scene,
             all_final_scene_dict,
             all_owner_asr_info_dict,
             all_logical_scene_dict,
-            voice_info
+            voice_info,
+            owner_asr_time_range
         )
         if check_failure_details(failure_details):
             return failure_details, best_script
@@ -1373,7 +1428,7 @@ if __name__ == "__main__":
     # output_path = os.path.join(output_dir, 'clip_video.mp4')
     # clip_video_ms(video_path, 0, 5000, output_path)
 
-    extract_audio(video_path)
+    # extract_audio(video_path)
 
     # box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
     # # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
@@ -1393,11 +1448,11 @@ if __name__ == "__main__":
 
 
 
-    # video_info_list = manager.find_materials_by_ids(['7598869943144172846'])
-    # for video_info in video_info_list:
-    #     video_id = video_info.get('video_id')
-    #     fix_owner_asr_by_subtitle(video_info)
-        # _process_single_video(video_id, video_info, is_need_narration=True)
+    video_info_list = manager.find_materials_by_ids(['7602198039888989481'])
+    for video_info in video_info_list:
+        video_id = video_info.get('video_id')
+        fix_owner_asr_by_subtitle(video_info)
+        _process_single_video(video_id, video_info, is_need_narration=True)
 
     # time_list = [11167, 12433, 11750]
     # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
