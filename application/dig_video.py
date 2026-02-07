@@ -28,7 +28,7 @@ NEED_REFRESH = False
 
 def query_all_material_videos(manager, is_need_refresh):
     """
-    查询所有的素材视频，已剔除黑名单素材
+    查询所有的素材视频，已剔除黑名单素材及使用次数过多的素材
     :return:
     """
     import time  # 确保引入time模块
@@ -46,7 +46,6 @@ def query_all_material_videos(manager, is_need_refresh):
                 f"all_need_plan_video_info.json 缓存文件存在且在一天之内，直接读取。当前数据量: {len(local_material_video_info)}, 耗时: {time.time() - start_time:.4f}s")  # [修改] 增加耗时和数据量打印
             return local_material_video_info
 
-
     query = {}
     local_material_video_info = {}
 
@@ -56,13 +55,18 @@ def query_all_material_videos(manager, is_need_refresh):
     all_task_list = manager.find_by_custom_query(manager.tasks_collection, {})
 
     all_video_type_map = {}
+    video_usage_count = {}  # [新增] 用于统计每个video_id的使用次数
+
     for task_info in all_task_list:
         task_user_name = task_info.get('userName', '')
         user_type = get_user_type(task_user_name)
         video_id_list = task_info.get('video_id_list', [])
+        bvid = task_info.get('bvid', '')
         for video_id in video_id_list:
             all_video_type_map[video_id] = user_type
-
+            if bvid:
+                video_usage_count[video_id] = video_usage_count.get(video_id, 0) + 1
+            video_usage_count[video_id] = video_usage_count.get(video_id, 0) + 1
 
     for video_info in all_material_list:
         video_id = video_info['video_id']
@@ -81,6 +85,20 @@ def query_all_material_videos(manager, is_need_refresh):
             local_material_video_info[video_id] = temp_dict
 
     count_before_filter = len(local_material_video_info)  # [新增] 记录过滤前的数据总量
+
+    # [新增] 过滤使用次数超过10次的素材
+    max_usage_num = 0
+    high_freq_removed_count = 0
+
+    if video_usage_count:
+        max_usage_num = max(video_usage_count.values())  # 获取最高次数
+
+    # 找出超过10次的ID并移除
+    for vid, count in video_usage_count.items():
+        if count > 10:
+            if vid in local_material_video_info:
+                del local_material_video_info[vid]
+                high_freq_removed_count += 1
 
     # 去除黑名单素材视频
     block_video_id_list = []
@@ -120,8 +138,10 @@ def query_all_material_videos(manager, is_need_refresh):
     print(f"[素材查询日志] 总体耗时: {cost_time:.4f} 秒")
     print(f"[素材查询日志] 数据库原始素材数: {raw_db_count}")
     print(f"[素材查询日志] 待过滤池总数(含本地/合并后): {count_before_filter}")
+    print(
+        f"[素材查询日志] 频率统计: 历史最高引用次数为 {max_usage_num} 次，本次过滤掉引用>10次的素材共 {high_freq_removed_count} 个")
     print(f"[素材查询日志] 黑名单任务数: {len(blocked_task_list)}, 涉及屏蔽视频ID数: {total_block_ids}")
-    print(f"[素材查询日志] 实际命中并剔除素材数: {removed_count}")
+    print(f"[素材查询日志] 实际命中黑名单并剔除素材数: {removed_count}")
     print(f"[素材查询日志] 最终可用素材数: {final_count}")
     print("=" * 50)
 
