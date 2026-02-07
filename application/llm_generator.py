@@ -1364,7 +1364,7 @@ def gen_draft_video_script_llm(final_info_list):
     try:
         creative_guidance = final_info_list.get('creative_guidance', '')
         material_usage_mode = final_info_list.get('material_usage_mode', 'free')
-        prompt_path = './prompt/挖掘热门视频无热榜0204_scend_id.txt'
+        prompt_path = './prompt/挖掘热门视频规定scene_id.txt'
         full_prompt = read_file_to_str(prompt_path)
         draft_final_info_list = convert_video_data(final_info_list)
 

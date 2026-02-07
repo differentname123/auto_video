@@ -254,8 +254,13 @@ def build_prompt_data(video_info, video_type=None):
             scene_summary = new_scene.get('scene_summary', '')
             scene_summary_list.append(scene_summary)
 
-        if video_type == 'game':
-            merged_scene_list = build_merged_scene_list_auto(new_scene_info, info.get('owner_asr_info', []), info.get('max_scenes', 0), is_need_narration=True)
+        # if video_type == 'game':
+        merged_scene_list = build_merged_scene_list_auto(new_scene_info, info.get('owner_asr_info', []), info.get('max_scenes', 0), is_need_narration=True)
+        scene_summary_list = []
+        for merged_scene in merged_scene_list:
+            scene_summary = merged_scene.get('scene_summary', [])
+            scene_summary_str = ','.join(scene_summary)
+            scene_summary_list.append(scene_summary_str)
 
         prompt_entry = {
             'video_id': vid,
