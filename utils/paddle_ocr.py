@@ -232,17 +232,89 @@ def gen_proper_box(video_path, video_duration, merged_timerange_list):
     return None
 
 
+def draw_subtitle_visualization(
+        saved_frame_paths: list,
+        ocr_result_json: dict,
+        good_boxes: list,
+        final_box: list
+):
+    """
+    辅助函数：在抽帧图片上绘制包围框以供调试观察。
+
+    :param saved_frame_paths: 图片路径列表
+    :param ocr_result_json: OCR 返回的原始 JSON 数据（包含每张图的 detected boxes）
+    :param good_boxes: 经过筛选后被认定为有效的字幕框列表
+    :param final_box: 最终计算出的全局最大包围框
+    """
+    if not saved_frame_paths or not final_box:
+        return
+
+    # 1. 将 good_boxes 转换为不可变的 tuple 集合，方便后续做 O(1) 的存在性比对
+    # 结构转换： list of lists -> set of tuples
+    # 注意：box 中的点通常是 [[x1,y1], [x2,y2]...]，需要深层转换
+    good_boxes_set = set()
+    for box in good_boxes:
+        # box 是一个包含坐标点的列表，将其转换为 tuple
+        box_tuple = tuple(tuple(point) for point in box)
+        good_boxes_set.add(box_tuple)
+
+    # 2. 准备 Final Box 的点 (用于 cv2.polylines)
+    final_box_np = np.array(final_box, np.int32).reshape((-1, 1, 2))
+
+    # 3. 遍历每一张图片及其对应的 OCR 结果
+    ocr_data = ocr_result_json.get("data", [])
+
+    # 确保图片数量和OCR结果数量一致，防止越界
+    limit = min(len(saved_frame_paths), len(ocr_data))
+
+    print(f"\n[可视化] 正在为 {limit} 张抽帧图片绘制包围框...")
+
+    for i in range(limit):
+        img_path = saved_frame_paths[i]
+        ocr_item = ocr_data[i]
+
+        # 读取图片
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
+
+        # --- 绘制该图片中属于 good_boxes 的独立字幕框 (绿色) ---
+        subtitles = ocr_item.get("subtitles", [])
+        for sub in subtitles:
+            box = sub.get("box", [])
+            if not box:
+                continue
+
+            # 转换为 tuple 进行比对
+            current_box_tuple = tuple(tuple(point) for point in box)
+
+            # 只有当这个框存在于 good_boxes_set 中时才绘制
+            if current_box_tuple in good_boxes_set:
+                box_np = np.array(box, np.int32).reshape((-1, 1, 2))
+                # 绿色，线宽 2
+                cv2.polylines(img, [box_np], isClosed=True, color=(0, 255, 0), thickness=2)
+
+        # --- 绘制全局最终包围框 (红色) ---
+        # 红色，线宽 2
+        cv2.polylines(img, [final_box_np], isClosed=True, color=(0, 0, 255), thickness=2)
+
+        # --- 覆盖保存图片 ---
+        cv2.imwrite(img_path, img)
+
+    print("[可视化] 绘图完成，图片已覆盖保存。")
+
+
 def find_overall_subtitle_box_target_number(
-    video_path: str,
-    merged_timerange_list: list[dict],
-    num_samples: int = 20,
-    output_dir = 'temp_dir',
-    video_duration_ms: int = 0
+        video_path: str,
+        merged_timerange_list: list[dict],
+        num_samples: int = 20,
+        output_dir='temp_dir',
+        video_duration_ms: int = 0
 ):
     """
     主函数，找到包围视频字幕的最小框，并将框绘制到所有抽帧图片上。
     且保证抽取到 num_samples 帧（或所有符合区间的帧）。
-    如果字幕框高度超过视频高度的10%，则返回 None。
+    如果字幕框高度超过视频高度的10%（注：代码逻辑里写的是20%），则返回 None。
     :param video_path: 视频文件路径
     :param merged_timerange_list: [{ "startTime": "00:00:00.205", "endTime": "00:00:09.060" }, ...]
     :param num_samples: 希望抽取的帧数
@@ -277,10 +349,10 @@ def find_overall_subtitle_box_target_number(
             continue
         # 对应的帧索引区间
         start_idx = int(np.ceil(start_ms / 1000 * fps))
-        end_idx   = int(np.floor(end_ms   / 1000 * fps))
+        end_idx = int(np.floor(end_ms / 1000 * fps))
         # 限制在 [0, total_frames-1]
         start_idx = max(0, start_idx)
-        end_idx   = min(total_frames - 1, end_idx)
+        end_idx = min(total_frames - 1, end_idx)
         valid_frames.update(range(start_idx, end_idx + 1))
 
     valid_frames = sorted(valid_frames)
@@ -313,7 +385,6 @@ def find_overall_subtitle_box_target_number(
         print("未能提取任何帧。")
         return None
 
-
     # --- 阶段 2: 对抽出的帧进行字幕检测 ---
     # print(f"\n[阶段 2] 开始检测 {len(saved_frame_paths)} 张图片的字幕框...")
     is_short_author = is_short_author_voice(video_path, video_duration_ms, merged_timerange_list)
@@ -329,7 +400,6 @@ def find_overall_subtitle_box_target_number(
     if not detected_boxes:
         print(f"未找到任何字幕框。{video_path}")
         return gen_proper_box(video_path, video_duration_ms, merged_timerange_list)
-
 
     # --- 阶段 3: 分析并计算最终包围框 ---
     # print("\n[阶段 3] 开始分析字幕框并计算最终包围区域...")
@@ -355,6 +425,12 @@ def find_overall_subtitle_box_target_number(
     height_ratio = final_box_height / short_side
 
     print(f"[阶段 3] 计算出的最终包围框: {final_box} (高度占视频短边比例: {height_ratio:.2%})")
+
+    # ----------------------------
+    # 【新增功能调用】在此处调用绘图函数
+    # ----------------------------
+    draw_subtitle_visualization(saved_frame_paths, result_json, good_boxes, final_box)
+
     if height_ratio > 0.20:
         print(f"[结果] 最终字幕框高度超过视频短边的20%。")
         return gen_proper_box(video_path, video_duration_ms, merged_timerange_list)
