@@ -773,7 +773,7 @@ def check_owner_asr(owner_asr_info, video_duration):
     return True, error_info
 
 
-def check_video_script(video_script_info, final_scene_info, allow_commentary, is_need_narration):
+def check_video_script(video_script_info, final_scene_info, is_need_narration=True):
     """
     检查 video_script_info 列表中的每个方案是否符合预设的规则。
     如果违反多样性规则，会直接从列表种移除不合规的方案。
@@ -781,8 +781,6 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
     Args:
         video_script_info (list): 包含一个或多个视频脚本方案的列表。**注意：此列表可能会在函数内部被修改（删除元素）**。
         final_scene_info (dict): 包含有效场景ID列表等信息的字典。
-        allow_commentary (bool): 是否允许/包含解说词。
-        is_need_narration (bool): 是否需要旁白检查。
 
     Returns:
         tuple: (bool, str)
@@ -864,11 +862,6 @@ def check_video_script(video_script_info, final_scene_info, allow_commentary, is
                 # 5. 检查 on_screen_text
                 if 'on_screen_text' not in scene:
                     return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'on_screen_text'。"
-
-                # 6. 检查 transition_text
-                if allow_commentary:
-                    if 'transition_text' not in scene:
-                        return False, f"方案 {solution_num} 的场景 {scene_num} 缺少 'transition_text'。"
 
                 # 检查旁白
                 if is_need_narration:
@@ -1148,6 +1141,391 @@ def build_prompt_data(task_info, video_info_dict):
     return final_info
 
 
+def convert_video_data(input_data):
+    """
+    将原始视频分析数据转换为以 video_id 为键的精简格式。
+
+    Args:
+        input_data (dict): 包含 'video_summaries' 和 'all_scenes' 的原始字典数据。
+
+    Returns:
+        dict: 转换后的字典，key 为 video_id，value 为包含摘要和场景列表的字典。
+    """
+    output_data = {}
+
+    # 1. 初始化视频主信息 (处理 video_summaries)
+    video_summaries = input_data.get('video_summaries', {})
+    for vid_id, vid_info in video_summaries.items():
+        output_data[vid_id] = {
+            'video_id': vid_id,
+            'video_summary': vid_info.get('summary', ''),
+            'scene_summary_list': []
+        }
+
+    # 2. 收集并处理场景信息 (处理 all_scenes)
+    # 使用临时字典按 video_id 分组存储场景，便于后续排序
+    scenes_by_video = {}
+
+    all_scenes = input_data.get('all_scenes', [])
+    for scene in all_scenes:
+        vid_id = scene.get('source_video_id')
+        if not vid_id:
+            continue
+
+        # 如果 video_summaries 中缺少该 ID，则初始化一个默认结构
+        if vid_id not in output_data:
+            output_data[vid_id] = {
+                'video_id': vid_id,
+                'video_summary': '',
+                'scene_summary_list': []
+            }
+
+        if vid_id not in scenes_by_video:
+            scenes_by_video[vid_id] = []
+
+        # 格式转换：scene_summary 从 list 转换为 string
+        raw_summary = scene.get('scene_summary', [])
+        summary_text = ""
+        if isinstance(raw_summary, list):
+            summary_text = "".join(raw_summary)
+        elif isinstance(raw_summary, str):
+            summary_text = raw_summary
+
+        # 获取排序依据 (scene_number_list 的第一个元素)
+        scene_num_list = scene.get('scene_number_list', [0])
+        sort_key = scene_num_list[0] if scene_num_list else 0
+
+        # 构建目标场景对象
+        scene_item = {
+            'scene_id': scene.get('scene_id'),
+            'scene_summary': summary_text
+        }
+
+        # 存入临时列表：(排序键, 场景对象)
+        scenes_by_video[vid_id].append((sort_key, scene_item))
+
+    # 3. 排序并组装最终数据
+    for vid_id, scenes_list in scenes_by_video.items():
+        # 根据 scene_number 从小到大排序
+        scenes_list.sort(key=lambda x: x[0])
+
+        # 提取排序后的场景对象并赋值
+        output_data[vid_id]['scene_summary_list'] = [item[1] for item in scenes_list]
+
+    return output_data
+
+
+def check_draft_video_plan(video_content_plans, all_scene_id_list, material_usage_mode='free'):
+    """
+    检查视频内容计划的有效性。
+    修改后逻辑：遍历所有方案，剔除不合格方案，记录错误。
+    如果剔除后列表为空，则返回失败和汇总错误；如果仍有方案保留，则视为成功。
+
+    Args:
+        video_content_plans (list): 模型生成的计划列表 (将被原地修改)
+        all_scene_id_list (list/set/dict): 原始有效的视频ID集合，用于校验是否存在
+
+    Returns:
+        tuple: (bool, str) -> (是否通过, 错误信息)
+    """
+
+    # 0. 基础类型检查 (如果整体都不是列表，直接返回失败，无法进行后续过滤)
+    if not isinstance(video_content_plans, list):
+        return False, "返回数据格式错误：video_content_plans 必须是一个列表"
+
+    # 为了提高查找效率，将 valid_video_list 转换为集合 (Set)
+    valid_keys_set = set(all_scene_id_list)
+
+    valid_video_id_set = set()
+
+    for scene_id in all_scene_id_list:
+        video_id = scene_id.split('_part')[0]
+        valid_video_id_set.add(video_id)
+
+    # 定义必须存在的字段
+    required_fields = {
+        'scene_sourcing_plan',
+        'video_theme',
+        'score'
+    }
+
+    # 用于存储经过筛选后的有效方案
+    valid_plans = []
+    # 用于记录被剔除方案的错误信息
+    accumulated_errors = []
+
+    for index, plan in enumerate(video_content_plans):
+        # 1. 检查是否为字典
+        if not isinstance(plan, dict):
+            accumulated_errors.append(f"第 {index + 1} 个方案格式错误：列表元素必须是字典")
+            continue  # 跳过此方案，不加入 valid_plans
+
+        # 2. 检查必须包含的字段 (Missing Keys)
+        missing_keys = required_fields - set(plan.keys())
+        if missing_keys:
+            accumulated_errors.append(f"第 {index + 1} 个方案缺失字段：{', '.join(missing_keys)}")
+            continue
+
+        # 3. 检查 video_keys 的有效性
+        scene_sourcing_plan_list = plan.get('scene_sourcing_plan', [])
+
+        # 3.1 检查类型是否为列表
+        if not isinstance(scene_sourcing_plan_list, list):
+            accumulated_errors.append(f"第 {index + 1} 个方案的 'video_keys' 必须是一个列表")
+            continue
+
+        # 3.2 检查长度是否大于 1 (剪辑至少需要2个视频)
+        if len(scene_sourcing_plan_list) <= 0:
+            accumulated_errors.append(
+                f"第 {index + 1} 个方案无效：'video_keys' 长度为 {len(scene_sourcing_plan_list)}，必须包含至少 2 个场景")
+            continue
+
+        if material_usage_mode == 'major':
+            if len(scene_sourcing_plan_list) < len(valid_keys_set) / 2:
+                accumulated_errors.append(
+                    f"第 {index + 1} 个方案无效：'scene_sourcing_plan' 长度为 {len(scene_sourcing_plan_list)}，'major' 模式下必须包含超过半数的场景 (至少 {len(valid_keys_set) / 2})")
+                continue
+
+        if material_usage_mode == 'full':
+            if len(scene_sourcing_plan_list) < len(valid_keys_set):
+                accumulated_errors.append(
+                    f"第 {index + 1} 个方案无效：'scene_sourcing_plan' 长度为 {len(scene_sourcing_plan_list)}，'full' 模式下必须包含全部场景 (至少 {len(valid_keys_set)})")
+                continue
+
+        plan_id_set = set()
+        plan_scene_id_list = []
+        for scene_sourcing_plan in scene_sourcing_plan_list:
+            scene_id = scene_sourcing_plan.get('source_scene_id', '')
+            if scene_id in plan_scene_id_list:
+                accumulated_errors.append(
+                    f"第 {index + 1} 个方案无效：'scene_sourcing_plan' 中存在重复的 scene_id '{scene_id}'")
+                break
+            plan_scene_id_list.append(scene_id)
+            video_id = scene_id.split('_part')[0]
+            plan_id_set.add(video_id)
+
+        # 如果valid_video_id_set大于等于2，那么plan_id_set必须大于等于2
+        if len(valid_video_id_set) >= 2 and len(plan_id_set) < 2:
+            accumulated_errors.append(
+                f"第 {index + 1} 个方案无效：涉及的视频源数量为 {len(plan_id_set)}，当原始数据中视频源数量大于等于2时，方案中必须涉及至少2个视频源")
+            continue
+
+        # 3.3 检查 key 是否都在 valid_video_list 中 (防止模型臆造 ID)
+        invalid_id_found = False
+        for scene_sourcing_plan in scene_sourcing_plan_list:
+            source_scene_id = scene_sourcing_plan.get('source_scene_id', '')
+            if source_scene_id not in valid_keys_set:
+                accumulated_errors.append(
+                    f"第 {index + 1} 个方案包含无效的视频 ID：'{source_scene_id}' (不在原始数据中)")
+                invalid_id_found = True
+                break  # 只要发现一个无效ID，该方案即作废
+        if invalid_id_found:
+            continue
+
+        # 4. 检查字段内容是否为空
+        if not plan.get('video_theme') or not isinstance(plan.get('video_theme'), str):
+            accumulated_errors.append(f"第 {index + 1} 个方案 'new_video_theme' 为空或类型错误")
+            continue
+
+        # 5. 检查 score 是否能转换为 float
+        score_val = plan.get('score')
+        try:
+            float(score_val)
+        except (ValueError, TypeError):
+            accumulated_errors.append(f"第 {index + 1} 个方案 'score' 格式错误：'{score_val}' 无法转换为浮点数")
+            continue
+
+        # 如果所有检查都通过，加入有效列表
+        valid_plans.append(plan)
+
+    # 原地修改 video_content_plans，保留仅有效的方案
+    video_content_plans[:] = valid_plans
+
+    # 最终判断：如果过滤后没有任何方案剩余，才算失败
+    if not video_content_plans:
+        # 拼接所有的错误信息返回
+        error_report = "\n".join(accumulated_errors)
+        return False, f"所有方案均未通过校验，错误详情：\n{error_report}"
+
+    if accumulated_errors:
+        print(f"部分方案未通过校验，已剔除无效方案，剩余有效方案数量：{len(video_content_plans)}。错误详情：\n{accumulated_errors}")
+    # 如果还有剩余方案，返回成功 (错误信息可置空，或者根据需求返回警告，此处按惯例置空)
+    return True, ""
+
+
+def gen_draft_video_script_llm(final_info_list):
+    """
+    生成初步的视频脚本
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+
+    try:
+        creative_guidance = final_info_list.get('creative_guidance', '')
+        material_usage_mode = final_info_list.get('material_usage_mode', 'free')
+        prompt_path = './prompt/挖掘热门视频无热榜0204_scend_id.txt'
+        full_prompt = read_file_to_str(prompt_path)
+        draft_final_info_list = convert_video_data(final_info_list)
+
+
+        if material_usage_mode == 'major':
+            material_usage_prompt_path = './prompt/补丁_素材使用一半以上.txt'
+            material_usage_prompt = read_file_to_str(material_usage_prompt_path)
+            full_prompt = f"{full_prompt}\n{material_usage_prompt}\n"
+
+        if material_usage_mode == 'full':
+            material_usage_prompt_path = './prompt/补丁_素材全部使用.txt'
+            material_usage_prompt = read_file_to_str(material_usage_prompt_path)
+            full_prompt = f"{full_prompt}\n{material_usage_prompt}\n"
+
+        if creative_guidance:
+            creative_guidance_prompt_path = './prompt/补丁_创作指导.txt'
+            creative_guidance_prompt = read_file_to_str(creative_guidance_prompt_path)
+            full_prompt = f"{full_prompt}\n{creative_guidance_prompt}\n {creative_guidance}\n"
+
+        all_scene_id_list = []
+        for info in draft_final_info_list.values():
+            scene_summary_list = info.get('scene_summary_list', [])
+            for scene_summary in scene_summary_list:
+                scene_id = scene_summary.get('scene_id', '')
+                all_scene_id_list.append(scene_id)
+
+
+
+        full_prompt = f"{full_prompt}\n尽量每个视频都有场景被采用到最终的方案\n尽量每个视频都有场景被采用到最终的方案\n下面是相应的视频场景数据：\n{draft_final_info_list}"
+        max_retries = 3
+        log_pre = f"视频生成初步脚本 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+        retry_delay = 10
+        for attempt in range(1, max_retries + 1):
+            print(f"视频生成初步脚本... (第 {attempt}/{max_retries} 次) {log_pre}")
+            error_info = ""
+            gen_error_info = ""
+            try:
+                random_value = random.random()
+                if random_value < 0.01:
+                    # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+                else:
+                    model_name = "gemini-flash-latest"
+                    model_name = "gemini-3-flash-preview"
+                    raw_response = get_llm_content(prompt=full_prompt, model_name=model_name)
+
+                draft_video_script_info = string_to_object(raw_response)
+
+                check_result, check_info = check_draft_video_plan(draft_video_script_info, all_scene_id_list,  material_usage_mode=material_usage_mode)
+
+
+                if not check_result:
+                    error_info = f"{check_info} {raw_response} {log_pre} {check_info}  "
+                    raise ValueError(error_info)
+
+                # 将draft_video_script_info 按照score降序排序
+                draft_video_script_info.sort(key=lambda x: float(x.get('score', 0)), reverse=True)
+
+                return error_info, draft_video_script_info
+            except Exception as e:
+                error_str = f"{str(e)} {gen_error_info}  {log_pre}"
+                print(f"初步视频脚本 生成 未通过 (尝试 {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
+                    time.sleep(retry_delay)  # 等待一段时间后再重试
+                else:
+                    print(f"达到最大重试次数，失败. {log_pre}")
+                    return error_str, None  # 达到最大重试次数后返回 None
+
+    except Exception as e:
+        traceback.print_exc()
+        error_info = f"生成初步视频脚本失败: {e} "
+        print(error_info)
+        return error_info, None
+
+def build_final_prompt_data(draft_video_script_info, final_info_list):
+    """
+    生成最终方案的数据
+    :param draft_video_script_info:
+    :param final_info_list:
+    :return:
+    """
+    final_prompt_data = {}
+    need_filed_list = ['video_theme', 'one_sentence_summary', 'content_logic_description', 'scene_sourcing_plan']
+
+    # 从draft_video_script_info中提取需要的字段，如果没有直接抛错
+    for need_filed in need_filed_list:
+        if need_filed not in draft_video_script_info:
+            raise ValueError(f"初步视频脚本信息缺失必要字段: {need_filed}")
+        final_prompt_data[need_filed] = draft_video_script_info[need_filed]
+
+    scene_sourcing_plan_list = final_prompt_data.get('scene_sourcing_plan', [])
+
+    for scene_sourcing_plan in scene_sourcing_plan_list:
+        source_scene_id = scene_sourcing_plan.get('source_scene_id', '')
+        for scene_info in final_info_list.get('all_scenes', []):
+            if scene_info.get('scene_id') == source_scene_id:
+                scene_summary_list = scene_info.get('scene_summary', [])
+                scene_summary = ','.join(scene_summary_list) if isinstance(scene_summary_list, list) else scene_summary_list
+                narration_script_list = scene_info.get('narration_script_list', [])
+                original_script_list = scene_info.get('original_script_list', [])
+                scene_sourcing_plan['scene_summary'] = scene_summary
+                scene_sourcing_plan['narration_script_list'] = narration_script_list
+                scene_sourcing_plan['original_script_list'] = original_script_list
+                break
+
+    return final_prompt_data
+
+
+def convert_plan_format(new_data_list, default_score=0.0):
+    """
+    将新版脚本方案数据结构转换为旧版格式。
+
+    Args:
+        new_data_list (list): 包含新格式字典的列表。
+        default_score (float): 原格式中'方案整体评分'字段的默认值，因为新数据中没有此字段。
+
+    Returns:
+        list: 转换后的旧格式列表。
+    """
+    original_format_list = []
+
+    for item in new_data_list:
+        # 1. 构建外层字典
+        converted_item = {
+            "title": item.get("title", ""),
+            "cover_text": item.get("cover_text", ""),
+            "video_abstract": item.get("video_abstract", ""),
+            "solution_idea": item.get("solution_idea", ""),
+            "方案整体评分": default_score,  # 填充缺失字段
+            "场景顺序与新文案": []
+        }
+
+        # 2. 遍历并转换内部的场景列表
+        # 新格式键名为 'refined_plan'
+        refined_plan = item.get("refined_plan", [])
+
+        for scene in refined_plan:
+            new_scene_entry = {
+                # 映射：order -> new_scene_number
+                "new_scene_number": scene.get("order"),
+
+                # 映射：source_scene_id -> scene_id
+                "scene_id": scene.get("source_scene_id"),
+
+                # 映射：narrative_function -> selection_logic
+                # 这里的逻辑是：场景的"叙事功能"就是选择它的"逻辑"
+                "selection_logic": scene.get("narrative_function", ""),
+
+                "transition_text": scene.get("transition_text", ""),
+                "transition_necessity_score": scene.get("transition_necessity_score", 0),
+                "on_screen_text": scene.get("on_screen_text", ""),
+                "new_narration_script_list": scene.get("new_narration_script_list", [])
+            }
+
+            converted_item["场景顺序与新文案"].append(new_scene_entry)
+
+        original_format_list.append(converted_item)
+
+    return original_format_list
+
 def gen_video_script_llm(task_info, video_info_dict):
     """
     生成新的脚本
@@ -1155,41 +1533,35 @@ def gen_video_script_llm(task_info, video_info_dict):
     :param video_info_dict:
     :return:
     """
-    creation_guidance_info = task_info.get('creation_guidance_info', {})
     final_info_list = build_prompt_data(task_info, video_info_dict)
     origin_final_scene_info = copy.deepcopy(final_info_list)
-    # 剔除all_scenes中的start和end字段
-    for scene in final_info_list.get('all_scenes', []):
-        if 'start' in scene:
-            del scene['start']
-        if 'end' in scene:
-            del scene['end']
-        if 'scene_number_list' in scene:
-            del scene['scene_number_list']
+
+    # 生成初步的方案
+    draft_video_script_info = task_info.get('draft_video_script_info', {})
+    if not draft_video_script_info:
+        error_info, draft_video_script_info = gen_draft_video_script_llm(final_info_list)
+        if error_info:
+            return error_info, None, None
+        task_info['draft_video_script_info'] = draft_video_script_info
+    print("生成初步视频脚本成功")
 
     # print("生成场景的最终数据成功")
 
-    prompt_path = './prompt/多素材视频生成不加过度.txt'
-    allow_commentary = creation_guidance_info.get('is_need_commentary', False)
-    is_need_narration = creation_guidance_info.get('is_need_audio_replace', False)
-
-    if allow_commentary == True and is_need_narration == True:
-        prompt_path = './prompt/多素材视频生成.txt'
-
-    if allow_commentary == True and is_need_narration == False:
-        prompt_path = './prompt/多素材视频生成非替换语音.txt'
-
-    if allow_commentary == False and is_need_narration == False:
-        prompt_path = './prompt/多素材视频生成非替换语音不加过度.txt'
-
-    if allow_commentary == False and is_need_narration == True:
-        prompt_path = './prompt/多素材视频生成不加过度.txt'
-
+    prompt_path = './prompt/多素材视频生成_指定场景.txt'
     task_info['final_scene_info'] = origin_final_scene_info
-    task_info['script_prompt_path'] = prompt_path
     full_prompt = read_file_to_str(prompt_path)
 
-    full_prompt = f"{full_prompt}\n尽量每个视频都有场景被采用到最终的方案\n尽量每个视频都有场景被采用到最终的方案\n下面是相应的视频场景数据：\n{final_info_list}"
+    best_draft_video_script_info = draft_video_script_info[0]
+    final_prompt_data = build_final_prompt_data(best_draft_video_script_info, final_info_list)
+
+    creative_guidance = final_info_list.get('creative_guidance', '')
+    if creative_guidance:
+        creative_guidance_prompt_path = './prompt/补丁_创作指导.txt'
+        creative_guidance_prompt = read_file_to_str(creative_guidance_prompt_path)
+        full_prompt = f"{full_prompt}\n{creative_guidance_prompt}\n {creative_guidance}\n"
+
+
+    full_prompt = f"{full_prompt}\n下面是初步的方案数据\n{final_prompt_data}"
     max_retries = 3
     log_pre = f"多素材视频生成脚本 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     retry_delay = 10
@@ -1210,8 +1582,11 @@ def gen_video_script_llm(task_info, video_info_dict):
 
 
             # 解析和校验
-            video_script_info = string_to_object(raw_response)
-            check_result, check_info = check_video_script(video_script_info, final_info_list, allow_commentary, is_need_narration)
+            new_video_script_info = string_to_object(raw_response)
+            task_info['origin_video_script_info'] = new_video_script_info
+            video_script_info = convert_plan_format(new_video_script_info, default_score=best_draft_video_script_info.get('score', 0.0) / 10)
+
+            check_result, check_info = check_video_script(video_script_info, final_info_list)
             if not check_result:
                 error_info = f"新视频脚本 检查未通过: {check_info} {raw_response} {log_pre} {check_info}  "
                 raise ValueError(error_info)
