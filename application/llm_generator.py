@@ -26,7 +26,7 @@ from application.video_common_config import correct_owner_timestamps, build_vide
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.find_paid_topics import get_all_paid_topics
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json, \
-    safe_process_limit
+    safe_process_limit, simple_cipher
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 from utils.gemini_web import generate_gemini_content_managed
 from utils.paddle_ocr import analyze_and_filter_boxes
@@ -1125,9 +1125,14 @@ def build_prompt_data(task_info, video_info_dict):
         # 获取new_scene_info每个元素的visual_description，放入一个列表中
         merged_scene_list = analyze_scene_content(new_scene_info, owner_asr_info, merge_mode=merge_mode)
         counted_scene = 0
+
         for scene in merged_scene_list:
             counted_scene += 1
-            scene['scene_id'] = f"{video_id}_part{counted_scene}"
+
+            suffix = f'_part{counted_scene}'
+
+            new_suffix = simple_cipher(suffix)
+            scene['scene_id'] = f"{video_id}{new_suffix}"
             scene['source_video_id'] = video_id
         all_scene_info_list.extend(merged_scene_list)
 
@@ -1239,7 +1244,7 @@ def check_draft_video_plan(video_content_plans, all_scene_id_list, material_usag
     valid_video_id_set = set()
 
     for scene_id in all_scene_id_list:
-        video_id = scene_id.split('_part')[0]
+        video_id = scene_id.split('_')[0]
         valid_video_id_set.add(video_id)
 
     # 定义必须存在的字段
@@ -1301,7 +1306,7 @@ def check_draft_video_plan(video_content_plans, all_scene_id_list, material_usag
                     f"第 {index + 1} 个方案无效：'scene_sourcing_plan' 中存在重复的 scene_id '{scene_id}'")
                 break
             plan_scene_id_list.append(scene_id)
-            video_id = scene_id.split('_part')[0]
+            video_id = scene_id.split('_')[0]
             plan_id_set.add(video_id)
 
         # 如果valid_video_id_set大于等于2，那么plan_id_set必须大于等于2
@@ -1538,6 +1543,7 @@ def gen_video_script_llm(task_info, video_info_dict):
 
     # 生成初步的方案
     draft_video_script_info = task_info.get('draft_video_script_info', {})
+    draft_video_script_info = []
     if not draft_video_script_info:
         error_info, draft_video_script_info = gen_draft_video_script_llm(final_info_list)
         if error_info:

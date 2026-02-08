@@ -148,13 +148,14 @@ def query_all_material_videos(manager, is_need_refresh):
     return local_material_video_info
 
 
-def process_and_sort_video_info(video_info, target_tags_info):
+def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
     """
     计算匹配得分并更新到 video_info 中，最后返回按得分降序排序的 video_info 字典。
 
     得分计算包含两部分：
     1. tags_info 标签加权匹配。
     2. info 整体转字符串后的全文模糊匹配（防止漏掉没有tags_info但内容匹配的数据）。
+    3. 黑名单过滤：如果 info 字符串包含黑名单内容，强制得分为 0。
 
     外部依赖: has_long_common_substring(str1, str2) -> bool
     """
@@ -184,6 +185,14 @@ def process_and_sort_video_info(video_info, target_tags_info):
             if has_comm:
                 total_score += t_weight * t_weight
                 common_str_list.append(common_str)
+
+        # --- 新增逻辑：黑名单检查 ---
+        # 如果 info_str 包含任意黑名单字符串，直接将总分置为 0
+        for black_str in blacklist:
+            if black_str in info_str:
+                total_score = 0
+                common_str_list = []  # 被拉黑的数据不应保留匹配详情
+                break
 
         # 将最终计算的总分写入字典
         info['match_score'] = total_score
@@ -343,13 +352,18 @@ def gen_hot_video_llm(video_info, hot_video=None):
     if hot_video:
         PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
     else:
-        PROMPT_FILE_PATH = './prompt/挖掘热门视频无热榜.txt'
+        PROMPT_FILE_PATH = './prompt/挖掘热门视频规定scene_id.txt'
     last_prompt = """# Action:
 请根据上述所有指令和数据，进行深度分析并输出最终结果：
 """
     base_prompt = read_file_to_str(PROMPT_FILE_PATH)
     if hot_video:
-        base_prompt = f"{base_prompt}\n当前热门视频主题 (Trending Themes)如下：\n{hot_video}\n\n"
+
+        creative_guidance_prompt_path = './prompt/补丁_创作指导.txt'
+        creative_guidance_prompt = read_file_to_str(creative_guidance_prompt_path)
+        base_prompt = f"{base_prompt}\n{creative_guidance_prompt}\n"
+
+        base_prompt = f"{base_prompt}\n当前热门视频主题 (Trending Themes)如下：\n{hot_video}\n（符合热门主题，输出时在 reason_for_selection 末尾写：是如何符合当前热门视频主题的）\n"
 
     full_prompt = f"{base_prompt}\n视频素材信息 (Video Materials)如下：\n{video_info}\n\n{last_prompt}"
     model_name = "gemini-2.5-pro"
@@ -432,7 +446,7 @@ def get_need_dig_video_list():
     return all_dig_video_list, good_tags_info, good_video_list
 
 
-def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100):
+def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100, blacklist=[]):
     """
     获取本次挖掘最终的素材列表
     :return:
@@ -448,7 +462,7 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
         for vid in delete_keys:
             del filter_all_video_info[vid]
 
-    sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags)
+    sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags, blacklist=blacklist)
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
     good_video_info = {}
     min_match_score = 1
@@ -717,12 +731,18 @@ def find_good_plan(manager):
     for target_video_type, target_tags in good_tags_info.items():
         if target_video_type == 'sport' and random.random() < 0.8:
             continue
-
+        blacklist = []
+        if target_video_type == 'fun' and random.random() < 0.8:
+            continue
         # 2. 针对非保留类型：如果既不是 game 也不是 sport，全部跳过
         # 注意：sport 如果通过了上面那一关，会走到这里，所以这里要放行 sport
-        if target_video_type not in ['game', 'sport']:
+        if target_video_type not in ['game', 'sport', 'fun']:
             continue
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=150)
+        if target_video_type == 'fun':
+            blacklist = ['日落时分说爱你', '刘玫', ]
+
+
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100,blacklist=blacklist)
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
@@ -749,7 +769,7 @@ def find_good_plan(manager):
                 # 计算平均值
                 if len(temp_score_list) > 0:
                     final_score = sum(temp_score_list) / len(temp_score_list) + final_score
-                creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
+                creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("content_logic_description")}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
                 plan['dig_type'] = "free_dig_new"

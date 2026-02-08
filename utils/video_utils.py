@@ -1138,7 +1138,7 @@ def cover_video_area_blur_super_robust(
         top_left,
         bottom_right,
         time_ranges=None,
-        blur_strength: int = 50,
+        blur_strength: int = 30,
         crf: int = 23,
         preset: str = "ultrafast"
 ):

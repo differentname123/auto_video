@@ -495,7 +495,7 @@ def init_config():
         # '3546973573482600': 'shuijun3',
         '3690972783315441': 'mama',
         '3546717871934392': 'nana',
-        # '3546759607355668': 'ruru',
+        '3546759607355668': 'ruru',
         # '3546973825141556': 'tao',
         # '437687603': 'taoxiao',
 
@@ -536,7 +536,7 @@ def init_config():
         '3632318595991783': 'xiaomu',
         # "3546971140786786": 'ping',
         # "3690972028340306": 'xiu',
-        "3690971298531782": 'zhong',
+        # "3690971298531782": 'zhong',
         "3546594393721601": 'qiuru',
         "3546764430805848": 'huazhu'
 
@@ -1265,3 +1265,33 @@ def has_long_common_substring(str1, str2, threshold=2):
 
     # 未找到匹配
     return False, None
+
+def simple_cipher(text, mode='encrypt', key=888):
+    # 1. 准备字符集：0-9, a-z, A-Z (共62个字符)
+    # 顺序：0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ
+    chars = string.digits + string.ascii_letters
+    n = len(chars)
+
+    result = []
+
+    # 设定移动方向：加密是 +，解密是 -
+    direction = 1 if mode == 'encrypt' else -1
+
+    for i, char in enumerate(text):
+        # 只处理字母和数字
+        if char in chars:
+            # 找到当前字符的位置
+            old_index = chars.index(char)
+
+            # 计算偏移量：密钥 + 当前字符的位置 (位置不同，偏移量就不同)
+            offset = key + i
+
+            # 计算新位置 (Python的负数取模会自动处理，不用担心越界)
+            new_index = (old_index + direction * offset) % n
+
+            result.append(chars[new_index])
+        else:
+            # 遇到符号或空格，保持原样
+            result.append(char)
+
+    return "".join(result)

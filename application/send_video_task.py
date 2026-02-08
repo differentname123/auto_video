@@ -557,6 +557,14 @@ def gen_standard_video_info_by_dig_data(plan_info):
             if score < 95:
                 continue
             video_id_list = plan_info.get('video_id_list', [])
+            if not video_id_list:
+                scene_sourcing_plan = plan_info.get('scene_sourcing_plan', [])
+                for scene_info in scene_sourcing_plan:
+                    source_scene_id = scene_info.get('source_scene_id', '')
+                    video_id = source_scene_id.split('_')[0]
+                    if video_id:
+                        video_id_list.append(video_id)
+
             if len(video_id_list) != 2:
                 continue
 
@@ -1094,7 +1102,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'dan', 'xiaomu']
+    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'ruru', 'xiaomu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
