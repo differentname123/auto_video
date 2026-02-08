@@ -341,7 +341,7 @@ def is_mostly_overlapped(time_range, time_range_list, threshold=0.9):
 
 
 
-def process_narration_clips(segment_list, data, owner_asr_time_range, min_duration=500):
+def process_narration_clips(segment_list, data, owner_asr_time_range, is_need_narration, min_duration=500):
     """
     (主入口函数) 处理多个时间段的旁白数据。
 
@@ -398,15 +398,16 @@ def process_narration_clips(segment_list, data, owner_asr_time_range, min_durati
         segment_result = process_single_range_logic(start, end, assigned_clips, min_duration)
         final_result.extend(segment_result)
 
-    for scene in final_result[:]:  # 遍历浅拷贝
-        text = scene.get('new_narration_script_list', '')
-        text = text.strip() if isinstance(text, str) else ''
-        if not text:
-            start = scene.get('narration_script_start', 0)
-            end = scene.get('narration_script_end', 0)
-            if is_mostly_overlapped((start, end), owner_asr_time_range):
-                print(f"删除与作者说话时间段高度重叠的空白片段: {scene}")
-                final_result.remove(scene)
+    if is_need_narration:
+        for scene in final_result[:]:  # 遍历浅拷贝
+            text = scene.get('new_narration_script_list', '')
+            text = text.strip() if isinstance(text, str) else ''
+            if not text:
+                start = scene.get('narration_script_start', 0)
+                end = scene.get('narration_script_end', 0)
+                if is_mostly_overlapped((start, end), owner_asr_time_range):
+                    print(f"删除与作者说话时间段高度重叠的空白片段: {scene}")
+                    final_result.remove(scene)
     return final_result
 
 
@@ -661,7 +662,7 @@ def gen_transition_video(video_path, split_scene_list, transition_text, voice_in
     return transition_video_output_path
 
 
-def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info, owner_asr_time_range):
+def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_segment_list, subtitle_box, voice_info, owner_asr_time_range, is_need_narration):
     """
     生成单个场景视频
     :return:
@@ -696,7 +697,7 @@ def gen_scene_video(video_path, new_script_scene, narration_detail_info, merged_
             'narration_script_start': asr_info.get('fixed_start', asr_info.get('start')),
             'narration_script_end': asr_info.get('fixed_end', asr_info.get('end'))
         })
-    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, owner_asr_time_range, min_duration=500)
+    split_scene_list = process_narration_clips(merged_segment_list, new_narration_script_list_info_list, owner_asr_time_range, is_need_narration, min_duration=500)
     count = 0
     for split_scene in split_scene_list:
         count += 1
@@ -937,7 +938,7 @@ def gen_video_with_bgm(video_path, output_video_path, video_info_dict, new_scrip
 
 
 def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_info_dict, all_logical_scene_dict,
-                         voice_info, owner_asr_time_range):
+                         voice_info, owner_asr_time_range, is_need_narration):
     """
     处理单个场景的视频生成逻辑
     Returns:
@@ -1007,7 +1008,8 @@ def process_single_scene(new_script_scene, all_final_scene_dict, all_owner_asr_i
         merged_segment_list,
         real_subtitle_box,
         voice_info,
-        owner_asr_time_range
+        owner_asr_time_range,
+        is_need_narration
     )
 
     return failure_details, final_scene_output_path
@@ -1120,13 +1122,14 @@ def clear_exist_split_scene(video_info_dict):
 
 
 
-def gen_new_video(task_info, video_info_dict):
+def gen_new_video(task_info, video_info_dict, is_need_narration):
     """
     生成新的视频
     :param task_info:
     :param video_info_dict:
     :return:
     """
+    is_need_commentary = task_info.get('creation_guidance_info', {}).get('is_need_commentary', False)
     failure_details = {}
     all_task_video_path_info = build_task_video_paths(task_info)
     final_output_path = all_task_video_path_info.get('final_output_path')
@@ -1171,6 +1174,11 @@ def gen_new_video(task_info, video_info_dict):
     # 生成好了的每一个场景视频
     all_scene_video_file_list = []
     for new_script_scene in new_script_scenes:
+        if not is_need_narration:
+            new_script_scene['new_narration_script_list'] = []
+        if not is_need_commentary:
+            new_script_scene['transition_text'] = ''
+
         scene_id = new_script_scene.get('scene_id')
         video_id = scene_id.split('_')[0]
         owner_asr_time_range = owner_asr_time_range_info.get(video_id, [])
@@ -1180,7 +1188,8 @@ def gen_new_video(task_info, video_info_dict):
             all_owner_asr_info_dict,
             all_logical_scene_dict,
             voice_info,
-            owner_asr_time_range
+            owner_asr_time_range,
+            is_need_narration
         )
         if check_failure_details(failure_details):
             return failure_details, best_script
@@ -1250,7 +1259,7 @@ def gen_video_by_script(task_info, video_info_dict):
     if check_failure_details(failure_details):
         return failure_details, chosen_script, cost_time_info
 
-    failure_details, chosen_script = gen_new_video(task_info, video_info_dict)
+    failure_details, chosen_script = gen_new_video(task_info, video_info_dict, is_need_narration)
     if check_failure_details(failure_details):
         return failure_details, chosen_script, cost_time_info
 

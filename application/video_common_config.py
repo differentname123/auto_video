@@ -8,6 +8,7 @@
 :description:
     
 """
+import copy
 import os
 import sys
 from collections import Counter
@@ -108,7 +109,8 @@ def find_best_solution(video_script_info: list):
         return None
     best_solution = max(video_script_info, key=lambda solution: solution['方案整体评分'])
 
-    return best_solution
+    return copy.deepcopy(best_solution)
+
 
 def build_video_paths(video_id):
     """
