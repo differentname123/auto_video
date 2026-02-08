@@ -722,7 +722,7 @@ def find_good_plan(manager):
         # 注意：sport 如果通过了上面那一关，会走到这里，所以这里要放行 sport
         if target_video_type not in ['game', 'sport']:
             continue
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=True, top_n=150)
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=150)
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
