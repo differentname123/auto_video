@@ -565,8 +565,8 @@ def gen_standard_video_info_by_dig_data(plan_info):
                     if video_id:
                         video_id_list.append(video_id)
 
-            if len(video_id_list) != 2:
-                continue
+            # if len(video_id_list) != 2:
+            #     continue
 
             video_theme = plan_info.get('video_theme', '')
             video_type = plan_info.get('video_type', '')

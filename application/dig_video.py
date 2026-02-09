@@ -95,7 +95,7 @@ def query_all_material_videos(manager, is_need_refresh):
 
     # 找出超过10次的ID并移除
     for vid, count in video_usage_count.items():
-        if count > 10:
+        if count > 1000:
             if vid in local_material_video_info:
                 del local_material_video_info[vid]
                 high_freq_removed_count += 1
