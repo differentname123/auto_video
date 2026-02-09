@@ -327,7 +327,7 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
     results = []
     success_count = 0
 
-    print(f"Starting Fast Det+Rec OCR for {len(image_path_list)} images (Max Width: {max_width}px)...")
+    # print(f"Starting Fast Det+Rec OCR for {len(image_path_list)} images (Max Width: {max_width}px)...")
 
     for img_path in image_path_list:
         item_result = {"file": img_path, "status": "failed"}
