@@ -17,6 +17,8 @@ import torch
 from PIL import Image
 from simple_lama_inpainting import SimpleLama
 
+from utils.inpating.lama_utils import convert_normalized_boxes_to_poly
+
 
 # ==========================================
 # 核心辅助函数：仅在内存中处理单帧修复
@@ -172,13 +174,6 @@ def inpaint_video_intervals(video_path, output_path, repair_info_list, lama=None
     # 5. 使用 FFmpeg 合并原音频 (System call)
     print("正在合并原始音频...")
 
-    # 构建 ffmpeg 命令
-    # -i temp_video: 只有画面的视频
-    # -i original_video: 提供音频
-    # -c:v copy -c:a copy: 直接流复制，不重新编码，速度极快且无损
-    # -map 0:v:0: 使用第一个输入的视频流
-    # -map 1:a:0: 使用第二个输入的音频流 (如果有)
-    # -shortest: 以最短流为准（通常防止长度微小差异）
 
     ffmpeg_cmd = [
         "ffmpeg", "-y",
@@ -215,67 +210,7 @@ def inpaint_video_intervals(video_path, output_path, repair_info_list, lama=None
     print(f"全部完成，输出文件: {output_path}")
 
 
-def convert_normalized_boxes_to_poly(video_path, normalized_boxes):
-    """
-    将归一化的 xywh 格式转换为 LaMa 修复函数需要的绝对坐标多边形格式。
 
-    :param video_path: 视频文件路径 (用于获取分辨率)
-    :param normalized_boxes: 归一化坐标列表，格式如下:
-           [
-             {"x": 0.1603, "y": 0.4668, "w": 0.667, "h": 0.3636},
-             ...
-           ]
-           其中 x, y 是左上角坐标，w, h 是宽高，均为 0-1 之间的小数。
-
-    :return: 适用于 inpaint_video_intervals 的 boxs 列表，格式如下:
-             [
-               [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],  # 第一个框的四个点
-               ...
-             ]
-    """
-    if not os.path.exists(video_path):
-        raise FileNotFoundError(f"视频路径不存在: {video_path}")
-
-    # 1. 获取视频分辨率
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"无法打开视频文件: {video_path}")
-
-    v_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    v_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    cap.release()
-
-    target_boxes = []
-
-    # 2. 遍历并转换坐标
-    for box in normalized_boxes:
-        # 获取归一化数据 (默认为0以防数据缺失)
-        n_x = box.get("x", 0)
-        n_y = box.get("y", 0)
-        n_w = box.get("w", 0)
-        n_h = box.get("h", 0)
-
-        # 计算绝对像素坐标 (左上角)
-        x1 = int(n_x * v_width)
-        y1 = int(n_y * v_height)
-
-        # 计算右下角
-        # 注意：这里计算出具体的宽和高像素，加上起始点得到终点
-        x2 = int((n_x + n_w) * v_width)
-        y2 = int((n_y + n_h) * v_height)
-
-        # 构建矩形框的四个顶点 (顺时针: 左上 -> 右上 -> 右下 -> 左下)
-        # 这种格式正好符合 cv2.fillPoly 和我们之前代码的要求
-        poly_points = [
-            [x1, y1],  # 左上
-            [x2, y1],  # 右上
-            [x2, y2],  # 右下
-            [x1, y2]  # 左下
-        ]
-
-        target_boxes.append(poly_points)
-
-    return target_boxes
 
 
 if __name__ == '__main__':
@@ -289,23 +224,8 @@ if __name__ == '__main__':
     global_lama = SimpleLama(device=device)
 
     # # 2. 定义测试参数
-    video_file = r"W:\project\python_project\auto_video\videos\material\7598194159421377828\test_scenes\clip_video.mp4"  # 替换为你的视频路径
+    video_file = r"W:\project\python_project\auto_video\videos\material\7459184511578852646\7459184511578852646_static_cut.mp4"  # 替换为你的视频路径
     output_video = video_file.replace(".mp4", "_inpainted.mp4")
-    #
-    # # 模拟输入数据
-    # # 注意：boxs 是三维数组，意味着可以包含多个多边形
-    # repair_info = [
-    #     {
-    #         "start": 0,  # 0ms 开始
-    #         "end": 5000,  # 2000ms 结束
-    #         "boxs": [
-    #             # 第一个框 (例如左上角水印)
-    #             [[100, 878], [1333, 878], [1333, 993], [100, 993]],
-    #             # 第二个框 (例如右下角字幕) - 如果同一时间有两个地方要修
-    #             # [[800, 800], [900, 800], [900, 900], [800, 900]]
-    #         ]
-    #     }
-    # ]
 
     # 你的输入数据
     input_boxes = [
@@ -320,8 +240,26 @@ if __name__ == '__main__':
     try:
         # 1. 转换格式
         formatted_boxes = convert_normalized_boxes_to_poly(video_file, input_boxes)
-        print("转换后的格式:", formatted_boxes)
 
+        print("转换后的格式:", formatted_boxes)
+        formatted_boxes = [[
+            [
+                389,
+                914
+            ],
+            [
+                1049,
+                914
+            ],
+            [
+                1049,
+                954
+            ],
+            [
+                389,
+                954
+            ]
+        ]]
         # 2. 结合之前的视频修复函数构建完整参数
         # 假设这些框需要从 0ms 修复到 5000ms
         repair_info = [
