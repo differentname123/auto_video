@@ -124,7 +124,8 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
                         stats["skip"] += 1
                     else:
                         # 动作: OCR
-                        filename = f"f{curr_idx}_b{box_i}_{uuid.uuid4().hex[:6]}.jpg"
+
+                        filename = f"frame{curr_idx}_box{box_i}.jpg"
                         filepath = os.path.join(temp_dir, filename)
 
                         # 只有判定不同时才写入磁盘
@@ -199,15 +200,30 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
 
 if __name__ == "__main__":
     # 配置区
-    video_file = r"W:\project\python_project\auto_video\videos\material\7459184511578852646\7459184511578852646_static_cut.mp4"
+    video_file = r"W:\project\python_project\auto_video\videos\material\7602198039888989481\7602198039888989481_static_cut.mp4"
 
     # 示例框
     formatted_boxes = [[
-        [389, 914], [1049, 914], [1049, 954], [389, 954]
-    ]]
+    [
+        423,
+        1749
+    ],
+    [
+        3408,
+        1749
+    ],
+    [
+        3408,
+        2048
+    ],
+    [
+        423,
+        2048
+    ]
+]]
 
     ocr_info = [
-        {"start": 0, "end": 86000, "boxs": formatted_boxes}
+        {"start": 42000, "end": 45000, "boxs": formatted_boxes}
     ]
 
     try:
