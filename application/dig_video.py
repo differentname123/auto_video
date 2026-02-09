@@ -175,7 +175,7 @@ def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
                     has_comm, common_str = has_long_common_substring(v_tag, t_tag)
                     if has_comm:
                         # 双方都有权重，乘积累加
-                        total_score += v_weight * t_weight
+                        total_score += v_weight + t_weight
                         common_str_list.append((v_tag, t_tag))
         info_str = str(info)
 
@@ -183,7 +183,7 @@ def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
             has_comm, common_str = has_long_common_substring(info_str, t_tag)
 
             if has_comm:
-                total_score += t_weight * t_weight
+                total_score += t_weight + t_weight
                 common_str_list.append(common_str)
 
         # --- 新增逻辑：黑名单检查 ---
@@ -755,7 +755,7 @@ def update_target_tags(all_dig_video_list, good_tags_info):
     return all_target_tags_new
 
 
-def find_good_plan(manager):
+def find_good_plan(manager, count):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
     :return:
@@ -793,7 +793,8 @@ def find_good_plan(manager):
 
     # 获得素材库数据
     all_video_info = query_all_material_videos(manager, is_need_refresh)
-    all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info)
+    if count % 5 == 0:
+        all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info)
 
 
     # 依次的进行挖掘
@@ -903,9 +904,11 @@ if __name__ == '__main__':
     # time.sleep(3600 * 3)
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
+    count = 0
     while True:
         try:
-            find_good_plan(manager)
+            find_good_plan(manager, count)
+            count += 1
             time.sleep(1)
         except Exception as e:
             traceback.print_exc()
