@@ -42,7 +42,7 @@ def _init_engine(use_gpu: bool):
             det_use_cuda=use_gpu,
             cls_use_cuda=use_gpu,
             rec_use_cuda=use_gpu,
-            det_unclip_ratio=0.8  # <--- 这里！调小这个参数
+            det_unclip_ratio=0.9  # <--- 这里！调小这个参数
 
         )
         print(f"Engine initialized successfully (GPU={use_gpu}).")

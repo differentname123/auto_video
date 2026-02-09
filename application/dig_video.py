@@ -175,7 +175,7 @@ def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
                     has_comm, common_str = has_long_common_substring(v_tag, t_tag)
                     if has_comm:
                         # 双方都有权重，乘积累加
-                        total_score += v_weight + t_weight
+                        total_score += (v_weight + t_weight) * 2
                         common_str_list.append((v_tag, t_tag))
         info_str = str(info)
 
@@ -697,13 +697,15 @@ def gen_true_tags_llm(tags_list):
     return filter_tag_list
 
 
-def update_target_tags(all_dig_video_list, good_tags_info):
+def update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh):
     """
     进行通用无关标签的去除，防止进行干扰
     :return:
     """
     all_target_tags_info = {}
     all_target_tags_new = read_json(ALL_TARGET_TAGS_INFO_FILE)
+    if not is_need_refresh:
+        return all_target_tags_new
     name_map = {}
 
     for selected_video_info in all_dig_video_list:
@@ -755,7 +757,7 @@ def update_target_tags(all_dig_video_list, good_tags_info):
     return all_target_tags_new
 
 
-def find_good_plan(manager, count):
+def find_good_plan(manager):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
     :return:
@@ -793,8 +795,7 @@ def find_good_plan(manager, count):
 
     # 获得素材库数据
     all_video_info = query_all_material_videos(manager, is_need_refresh)
-    if count % 5 == 0:
-        all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info)
+    all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info, True)
 
 
     # 依次的进行挖掘
@@ -904,11 +905,9 @@ if __name__ == '__main__':
     # time.sleep(3600 * 3)
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    count = 0
     while True:
         try:
-            find_good_plan(manager, count)
-            count += 1
+            find_good_plan(manager)
             time.sleep(1)
         except Exception as e:
             traceback.print_exc()

@@ -1189,7 +1189,10 @@ def cover_video_area_blur_super_robust(
     enable_expr = _build_enable_expr(time_ranges)
 
     # 6.2 视频模糊参数
-    luma_radius = blur_strength
+    geo_limit = min(w, h) // 2
+
+    luma_radius = min(blur_strength, geo_limit)
+    print(f"Calculated luma_radius: {luma_radius} (based on blur_strength={blur_strength} and geo_limit={geo_limit}) video_path {video_path}")
     chroma_radius = min(blur_strength, 9)
     power = 2
     boxblur_params = f"{luma_radius}:{power}:{chroma_radius}:{power}"
