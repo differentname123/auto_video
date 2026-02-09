@@ -795,7 +795,7 @@ def find_good_plan(manager):
 
     # 获得素材库数据
     all_video_info = query_all_material_videos(manager, is_need_refresh)
-    all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info, True)
+    all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh)
 
 
     # 依次的进行挖掘
