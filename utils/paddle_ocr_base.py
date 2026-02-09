@@ -158,7 +158,7 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
     对外的主函数：无状态、每次运行初始化、运行完清理。
     """
     all_start_time = time.time()
-    print(f"Starting batch OCR for {len(image_path_list)} images (Stateless Mode)...")
+    print(f"Starting batch OCR for {len(image_path_list)} images (Stateless Mode)...{image_path_list[0]}")
 
     response = {
         "code": 0,

@@ -16,7 +16,7 @@ import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
     DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content, \
-    BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE
+    BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, ALL_TARGET_TAGS_INFO_FILE
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
     gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
@@ -346,6 +346,28 @@ def check_video_content_plan(video_content_plans, valid_video_list):
     # 所有检查通过
     return True, ""
 
+def check_filter_tags(filter_tag_list, valid_tag_list):
+    """
+    检查视频内容计划的有效性。
+
+    Args:
+        video_content_plans (list): 模型生成的计划列表
+        valid_video_list (list/set/dict): 原始有效的视频ID集合，用于校验是否存在
+
+    Returns:
+        tuple: (bool, str) -> (是否通过, 错误信息)
+    """
+    # 检查filter_tag_list所有的元素是否都在valid_tag_list中
+    for index, tag in enumerate(filter_tag_list):
+        if tag not in valid_tag_list:
+            return False, f"第 {index + 1} 个标签无效：'{tag}' (不在原始数据中)"
+
+    # 检查filter_tag_list长度是否小于了valid_tag_list一半
+    if len(filter_tag_list) < len(valid_tag_list) / 2:
+        return False, f"过滤后的标签数量过少：{len(filter_tag_list)}，小于原始标签数量一半 {len(valid_tag_list) / 2}"
+
+    # 所有检查通过
+    return True, ""
 
 def gen_hot_video_llm(video_info, hot_video=None):
 
@@ -473,7 +495,7 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
         selected_keys = random.sample(list(final_good_video_list.keys()), top_n - 50)
         final_good_video_list = {key: final_good_video_list[key] for key in selected_keys}
 
-    print(f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    print(f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)}  target_tags {len(target_tags)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
     return final_good_video_list
 
@@ -645,6 +667,94 @@ def archive_outdated_plans(exist_info, archive_info, days=7):
 
     return exist_info, archive_info
 
+
+def gen_true_tags_llm(tags_list):
+
+    PROMPT_FILE_PATH = './prompt/过滤得到真正的标签.txt'
+    base_prompt = read_file_to_str(PROMPT_FILE_PATH)
+
+    full_prompt = f"{base_prompt}\n{tags_list}"
+    model_name = "gemini-2.5-flash"
+    # model_name = "gemini-3-pro-preview"
+    max_retries = 3
+    filter_tag_list = []
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"尝试第 {attempt} 次过滤标签 标签列表长度为{len(tags_list)} {PROMPT_FILE_PATH}...")
+            raw = ask_gemini(full_prompt, model_name=model_name)
+
+            # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
+            filter_tag_info = string_to_object(raw)
+            filter_tag_list = filter_tag_info.get('filtered_tags', [])
+            is_valid, error_message = check_filter_tags(filter_tag_list, tags_list)
+            if not is_valid:
+                raise ValueError(f"第 {attempt} 次尝试: LLM 返回的数据格式或内容无效: {error_message}")
+
+            return filter_tag_list
+        except Exception as e:
+            print(f"第 {attempt} 次尝试: 生成视频内容计划时出错: {e}")
+            time.sleep(2 ** attempt)
+    return filter_tag_list
+
+
+def update_target_tags(all_dig_video_list, good_tags_info):
+    """
+    进行通用无关标签的去除，防止进行干扰
+    :return:
+    """
+    all_target_tags_info = {}
+    all_target_tags_new = read_json(ALL_TARGET_TAGS_INFO_FILE)
+    name_map = {}
+
+    for selected_video_info in all_dig_video_list:
+        target_tags = get_target_tags(manager, selected_video_info)
+        target_tags_list = list(target_tags.keys())
+        # 对target_tags_list进行排序
+        target_tags_list.sort()
+
+        tag_key = '_'.join(target_tags_list)
+        all_target_tags_info[tag_key] = target_tags
+
+        upload_params = selected_video_info.get('upload_params', {})
+        hot_video = upload_params.get('title', '变得有吸引力一点')
+        name_map[tag_key] = hot_video
+
+
+    for target_video_type, target_tags in good_tags_info.items():
+        target_tags_list = list(target_tags.keys())
+        target_tags_list.sort()
+        tag_key = '_'.join(target_tags_list)
+        all_target_tags_info[tag_key] = target_tags
+        name_map[tag_key] = f"热门视频{target_video_type}"
+
+
+    for key, target_tags in all_target_tags_info.items():
+
+        target_tags_list = list(target_tags.keys())
+        target_tags_list.sort()
+        tag_key = '_'.join(target_tags_list)
+        true_name = name_map.get(tag_key, '未知话题')
+
+        print(f"\n\n正在处理话题: {true_name} 标签数量为{len(target_tags)}，标签列表为{target_tags_list} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+        if tag_key in all_target_tags_new:
+            continue
+
+        filter_tag_list = gen_true_tags_llm(target_tags_list)
+        if len(filter_tag_list) < 0.5 * len(target_tags):
+            print(f"过滤后的标签数量过少，跳过本次更新，保留原有标签数量为{len(target_tags)}")
+            all_target_tags_new[tag_key] = target_tags
+        else:
+            new_target_tags = {}
+            for tag in filter_tag_list:
+                if tag in target_tags:
+                    new_target_tags[tag] = target_tags[tag]
+            all_target_tags_new[tag_key] = new_target_tags
+            print(f"更新标签成功，原有标签数量为{len(target_tags)}，过滤后标签数量为{len(new_target_tags)}")
+
+            save_json(ALL_TARGET_TAGS_INFO_FILE, all_target_tags_new)
+    return all_target_tags_new
+
+
 def find_good_plan(manager):
     """
     通过已有素材找到合适的更加好的视频方案来制作视频
@@ -683,6 +793,7 @@ def find_good_plan(manager):
 
     # 获得素材库数据
     all_video_info = query_all_material_videos(manager, is_need_refresh)
+    all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info)
 
 
     # 依次的进行挖掘
@@ -700,6 +811,12 @@ def find_good_plan(manager):
         if check_need_dig_result:
             # 选择出素材组
             target_tags = get_target_tags(manager, selected_video_info)
+            target_tags_list = list(target_tags.keys())
+            # 对target_tags_list进行排序
+            target_tags_list.sort()
+
+            tag_key = '_'.join(target_tags_list)
+            target_tags = all_target_tags_new.get(tag_key, target_tags)
 
             final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
             video_data = build_prompt_data(final_good_video_list, target_video_type)
@@ -736,7 +853,12 @@ def find_good_plan(manager):
         if target_video_type == 'fun':
             blacklist = ['日落时分说爱你', '刘玫', ]
 
+        target_tags_list = list(target_tags.keys())
+        # 对target_tags_list进行排序
+        target_tags_list.sort()
 
+        tag_key = '_'.join(target_tags_list)
+        target_tags = all_target_tags_new.get(tag_key, target_tags)
         final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100,blacklist=blacklist)
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

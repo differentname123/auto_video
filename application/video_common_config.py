@@ -462,8 +462,10 @@ DIG_HOT_VIDEO_PLAN_FILE = r'W:\project\python_project\auto_video\config\dig_hot_
 
 DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE = r'W:\project\python_project\auto_video\config\dig_hot_video_plan_archive.json'  # 用于存放挖热点视频的计划信息
 
-
 SNAPSHOT_CACHE_DIR = r'W:\project\python_project\auto_video\videos\snapshot_cache'
+
+
+ALL_TARGET_TAGS_INFO_FILE = r'W:\project\python_project\auto_video\config\true_tags.json'
 
 
 def is_contain_owner_speaker(owner_asr_info):
