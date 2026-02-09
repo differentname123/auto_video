@@ -3,29 +3,30 @@ import numpy as np
 import os
 import uuid
 import traceback
+import time
+import shutil
 
-# 假设这两个函数在 utils.paddle_ocr_debug 中
+from utils.common_utils import save_json
+# 假设这两个函数在 utils.paddle_ocr_fast 中
 from utils.paddle_ocr_fast import run_fast_det_rec_ocr, _init_engine
 
 
 def crop_polygon(img, points):
-    """裁剪图像，利用切片特性简化边界处理"""
+    """高效裁剪，利用切片特性"""
     x, y, w, h = cv2.boundingRect(np.array(points, dtype=np.int32))
-    # 确保左上角不小于0即可，右下角越界Python切片会自动截断
     x, y = max(0, x), max(0, y)
     return img[y:y + h, x:x + w]
 
 
 def is_similar_image(img1, img2, threshold=30):
-    """判断两张图片是否相似 (尺寸缩放 + 灰度差值)"""
+    """相似度比对 (尺寸缩放 + 灰度差值)"""
     if img1 is None or img2 is None or img1.shape != img2.shape:
         return False
 
-    # 转灰度
     g1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
     g2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
 
-    # 缩放加速比对 (保持比例)
+    # 缩放至 64宽，保持比例，大幅加速比对
     h, w = g1.shape
     new_w = 64
     new_h = int(new_w * h / w) if w > 0 else 64
@@ -37,101 +38,174 @@ def is_similar_image(img1, img2, threshold=30):
 
 
 def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
+    """
+    高性能视频 OCR 处理器：扫描 -> 批量OCR -> 合并结果
+    """
+    t_start_all = time.time()
+    print(f"[{time.strftime('%H:%M:%S')}] 开始处理视频: {os.path.basename(video_path)}")
+
+    # 1. 初始化
     global_engine = _init_engine(use_gpu=True)
     video_dir = os.path.dirname(os.path.abspath(video_path))
+    # 创建一个专属临时目录，避免文件混乱，处理完后可以直接删目录
+    temp_dir = os.path.join(video_dir, f"temp_ocr_{uuid.uuid4().hex[:8]}")
+    os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"无法打开视频: {video_path}")
 
     fps = cap.get(cv2.CAP_PROP_FPS)
-    total_results = []
+    total_final_results = []
 
     try:
-        for info in ocr_info:
+        # 按时间段处理
+        for seg_idx, info in enumerate(ocr_info):
             boxes = info['boxs']
-            start_frame = int((info['start'] / 1000) * fps)
-            end_frame = int((info['end'] / 1000) * fps)
+            start_ms, end_ms = info['start'], info['end']
+            start_frame = int((start_ms / 1000) * fps)
+            end_frame = int((end_ms / 1000) * fps)
 
+            print(f"\n--- 处理片段 {seg_idx + 1}/{len(ocr_info)} [帧范围: {start_frame}-{end_frame}] ---")
+
+            # --- 阶段 1: 扫描视频，生成任务 ---
             cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-            # 状态缓存: [last_image, last_text]
-            # 使用列表索引直接对应 box 索引
-            cache = [[None, ""] for _ in boxes]
+            # timeline_tasks: 记录每一帧的状态
+            # 格式: [ { "timestamp": ms, "box_actions": [action_code, value] }, ... ]
+            # action_code: 0=OCR(value=img_path), 1=COPY(value=None)
+            timeline_tasks = []
 
-            for curr_frame_idx in range(start_frame, end_frame + 1):
+            # batch_ocr_tasks: 待OCR的文件列表 [(path, frame_local_idx, box_idx)]
+            batch_ocr_paths = []
+            path_map_key = {}  # 路径 -> (frame_idx_in_segment, box_idx) 的映射
+
+            # 缓存上一帧的图片，用于对比
+            last_crops = [None] * len(boxes)
+
+            # 统计数据
+            stats = {"total": 0, "ocr": 0, "skip": 0}
+
+            for curr_idx in range(start_frame, end_frame + 1):
                 ret, frame = cap.read()
                 if not ret: break
 
-                frame_res = {
-                    "frame_index": curr_frame_idx,
-                    "timestamp": cap.get(cv2.CAP_PROP_POS_MSEC),
+                stats["total"] += 1
+                timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
+
+                frame_task = {
+                    "frame_index": curr_idx,
+                    "timestamp": timestamp,
+                    "box_actions": []
+                }
+
+                for box_i, points in enumerate(boxes):
+                    crop = crop_polygon(frame, points)
+
+                    if is_similar_image(crop, last_crops[box_i], threshold=similarity_threshold):
+                        # 动作: 复用上一帧
+                        frame_task["box_actions"].append((1, None))
+                        stats["skip"] += 1
+                    else:
+                        # 动作: OCR
+                        filename = f"f{curr_idx}_b{box_i}_{uuid.uuid4().hex[:6]}.jpg"
+                        filepath = os.path.join(temp_dir, filename)
+
+                        # 立即保存图片 (IO操作)
+                        cv2.imwrite(filepath, crop)
+
+                        frame_task["box_actions"].append((0, filepath))
+                        batch_ocr_paths.append(filepath)
+
+                        # 记录映射关系，方便后续填回
+                        # 注意：normpath处理windows路径分隔符问题
+                        path_map_key[os.path.normpath(filepath)] = (len(timeline_tasks), box_i)
+
+                        last_crops[box_i] = crop  # 更新对比图
+                        stats["ocr"] += 1
+
+                timeline_tasks.append(frame_task)
+
+            print(f"扫描完成。总帧数: {stats['total']} | 需OCR数量: {stats['ocr']} | 复用数量: {stats['skip']}")
+
+            # --- 阶段 2: 统一 OCR ---
+            ocr_results_map = {}  # {(frame_local_idx, box_idx): "text"}
+
+            if batch_ocr_paths:
+                t_ocr_start = time.time()
+                print(f"正在执行批量 OCR ({len(batch_ocr_paths)} 张图片)...")
+
+                try:
+                    # 一次性调用，极快
+                    ocr_response = run_fast_det_rec_ocr(batch_ocr_paths, engine=global_engine)
+
+                    # 解析结果
+                    for item in ocr_response.get('data', []):
+                        p = os.path.normpath(item['file'])
+                        text = item.get('text', '')
+                        if p in path_map_key:
+                            key = path_map_key[p]  # key is (frame_local_idx, box_idx)
+                            ocr_results_map[key] = text
+
+                    print(f"OCR 耗时: {time.time() - t_ocr_start:.2f}s")
+                except Exception as e:
+                    print(f"[Error] OCR 批量处理失败: {e}")
+                    traceback.print_exc()
+
+            # --- 阶段 3: 合并结果与时间轴回填 ---
+            # 维护当前每一个box的最新文本
+            current_texts = [""] * len(boxes)
+
+            for f_local_idx, task in enumerate(timeline_tasks):
+                final_frame_res = {
+                    "frame_index": task["frame_index"],
+                    "timestamp": task["timestamp"],
                     "ocr_data": {}
                 }
 
-                # 待处理任务: 存储 (box_index, cropped_img, temp_file_path)
-                pending_tasks = []
+                for box_i, (action_code, val) in enumerate(task["box_actions"]):
+                    if action_code == 0:
+                        # 是 OCR 任务，从结果 Map 中取值
+                        text = ocr_results_map.get((f_local_idx, box_i), "")
+                        current_texts[box_i] = text  # 更新记忆
 
-                # 1. 筛选需要 OCR 的区域
-                for i, points in enumerate(boxes):
-                    crop = crop_polygon(frame, points)
+                    # action_code == 1 (复用) 时，直接使用 current_texts 中的旧值
 
-                    if is_similar_image(crop, cache[i][0], threshold=similarity_threshold):
-                        # 相似则复用
-                        frame_res["ocr_data"][i] = cache[i][1]
-                    else:
-                        # 不相似则准备 OCR，同时更新缓存图像
-                        temp_name = f"tmp_{uuid.uuid4().hex}.jpg"
-                        temp_path = os.path.join(video_dir, temp_name)
-                        pending_tasks.append((i, crop, temp_path))
-                        cache[i][0] = crop  # 更新对比图
+                    final_frame_res["ocr_data"][box_i] = current_texts[box_i]
 
-                # 2. 批量执行 OCR
-                if pending_tasks:
-                    img_paths = [task[2] for task in pending_tasks]
-                    try:
-                        # 写入临时文件
-                        for _, img, path in pending_tasks:
-                            cv2.imwrite(path, img)
-
-                        # 调用接口
-                        ocr_ret = run_fast_det_rec_ocr(img_paths, engine=global_engine)
-
-                        # 建立 {标准路径: 文本} 的查找表
-                        data_map = {os.path.normpath(item['file']): item.get('text', '')
-                                    for item in ocr_ret.get('data', [])}
-
-                        # 填回结果
-                        for i, _, path in pending_tasks:
-                            text = data_map.get(os.path.normpath(path), "")
-                            frame_res["ocr_data"][i] = text
-                            cache[i][1] = text  # 更新缓存文本
-
-                    except Exception:
-                        traceback.print_exc()
-                    finally:
-                        # 统一清理
-                        for path in img_paths:
-                            if os.path.exists(path):
-                                os.remove(path)
-
-                total_results.append(frame_res)
+                total_final_results.append(final_frame_res)
 
     finally:
         cap.release()
+        # 彻底清理临时目录
+        if os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+                print(f"清理临时文件完成。")
+            except:
+                pass
 
-    return total_results
+    t_end_all = time.time()
+    print(f"\n[{time.strftime('%H:%M:%S')}] 全部完成。总耗时: {t_end_all - t_start_all:.2f}s")
+    return total_final_results
 
 
 if __name__ == "__main__":
-    # 测试代码保持不变
-    formatted_boxes = [[[389, 914], [1049, 914], [1049, 954], [389, 954]]]
+    # 配置区
     video_file = r"W:\project\python_project\auto_video\videos\material\7459184511578852646\7459184511578852646_static_cut.mp4"
-    ocr_info = [{"start": 0, "end": 5000, "boxs": formatted_boxes}]
+
+    # 示例框
+    formatted_boxes = [[
+        [389, 914], [1049, 914], [1049, 954], [389, 954]
+    ]]
+
+    ocr_info = [
+        {"start": 0, "end": 86000, "boxs": formatted_boxes}
+    ]
 
     try:
         results = video_ocr_processor(video_file, ocr_info)
-        for res in results:
-            print(f"Time: {res['timestamp']:.2f}ms, Data: {res['ocr_data']}")
+        save_json("video_ocr_results.json", results)
     except Exception as e:
-        print(f"运行出错: {e}")
+        print(f"主程序运行出错: {e}")
+        traceback.print_exc()
