@@ -1102,7 +1102,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'ruru', 'xiaomu']
+    need_process_users = ['hong', 'lin', 'dahao', 'zhong', "qizhu", 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'xiaomu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 

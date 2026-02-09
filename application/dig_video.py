@@ -352,18 +352,13 @@ def gen_hot_video_llm(video_info, hot_video=None):
     if hot_video:
         PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
     else:
-        PROMPT_FILE_PATH = './prompt/挖掘热门视频规定scene_id.txt'
+        PROMPT_FILE_PATH = './prompt/挖掘热门视频无热榜.txt'
     last_prompt = """# Action:
 请根据上述所有指令和数据，进行深度分析并输出最终结果：
 """
     base_prompt = read_file_to_str(PROMPT_FILE_PATH)
     if hot_video:
-
-        creative_guidance_prompt_path = './prompt/补丁_创作指导.txt'
-        creative_guidance_prompt = read_file_to_str(creative_guidance_prompt_path)
-        base_prompt = f"{base_prompt}\n{creative_guidance_prompt}\n"
-
-        base_prompt = f"{base_prompt}\n当前热门视频主题 (Trending Themes)如下：\n{hot_video}\n（符合热门主题，输出时在 reason_for_selection 末尾写：是如何符合当前热门视频主题的）\n"
+        base_prompt = f"{base_prompt}\n当前热门视频主题 (Trending Themes)如下：\n{hot_video}\n\n"
 
     full_prompt = f"{base_prompt}\n视频素材信息 (Video Materials)如下：\n{video_info}\n\n{last_prompt}"
     model_name = "gemini-2.5-pro"
@@ -769,7 +764,7 @@ def find_good_plan(manager):
                 # 计算平均值
                 if len(temp_score_list) > 0:
                     final_score = sum(temp_score_list) / len(temp_score_list) + final_score
-                creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("content_logic_description")}"
+                creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
                 plan['dig_type'] = "free_dig_new"
