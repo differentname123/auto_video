@@ -29,6 +29,7 @@ from application.video_common_config import find_best_solution, VIDEO_TASK_BASE_
 from utils.common_utils import is_valid_target_file_simple, merge_intervals, ms_to_time, save_json, read_json, \
     time_to_ms, first_greater, remove_last_punctuation, safe_process_limit
 from utils.edge_tts_utils import parse_tts_filename, all_voice_name_list
+from utils.inpating.lama import inpaint_video_intervals
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 from utils.paddle_ocr import find_overall_subtitle_box_target_number, adjust_subtitle_box, analyze_and_filter_boxes
@@ -193,6 +194,19 @@ def _process_single_video(video_id, video_info, is_need_narration):
     start_time = time.time()
 
     cover_subtitle(video_path, cover_video_path, top_left, bottom_right, time_ranges=time_ranges)
+
+    # repair_info_list = []
+    # for time_range in time_ranges:
+    #     start_time_sec = time_range[0]
+    #     end_time_sec = time_range[1]
+    #     repair_info_list.append({
+    #         "start": start_time_sec * 1000,
+    #         "end": end_time_sec * 1000,
+    #         "boxs": [raw_box]
+    #     })
+    #
+    # inpaint_video_intervals(video_path, cover_video_path, repair_info_list=repair_info_list)
+
 
     elapsed_time = time.time() - start_time
     print(f"完成生成，耗时: {elapsed_time:.2f} 秒 {log_pre}")
@@ -1460,7 +1474,7 @@ if __name__ == "__main__":
     video_info_list = manager.find_materials_by_ids(['7602198039888989481'])
     for video_info in video_info_list:
         video_id = video_info.get('video_id')
-        fix_owner_asr_by_subtitle(video_info)
+        # fix_owner_asr_by_subtitle(video_info)
         _process_single_video(video_id, video_info, is_need_narration=True)
 
     # time_list = [11167, 12433, 11750]

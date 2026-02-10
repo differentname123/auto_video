@@ -318,8 +318,13 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
     # 1. 引擎初始化逻辑
     local_engine = False
     if engine is None:
-        engine = _init_engine(use_gpu)
-        local_engine = True
+        # 注意：此处假设外部有 _init_engine 函数，保持原逻辑不变
+        try:
+            engine = _init_engine(use_gpu)
+            local_engine = True
+        except NameError:
+            # 防止上下文中没有 _init_engine 的报错处理（仅作代码完整性示意）
+            pass
 
     if engine is None:
         return {"code": -1, "message": "Model Init Failed"}
@@ -351,9 +356,11 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
             h, w = img.shape[:2]
 
             # 2. 核心加速点：图片预缩放
+            scale_ratio = 1.0  # 初始化缩放比例，用于后续坐标还原
             if w > max_width:
                 # 保持宽高比进行缩放
-                new_h = int(h * (max_width / w))
+                scale_ratio = max_width / w
+                new_h = int(h * scale_ratio)
                 img_resized = cv2.resize(img, (max_width, new_h), interpolation=cv2.INTER_LINEAR)
             else:
                 img_resized = img
@@ -369,6 +376,10 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
                 combined_text = []
                 min_score = 1.0
 
+                # 用于收集所有有效框的坐标点
+                all_x_coords = []
+                all_y_coords = []
+
                 for item in ocr_result:
                     box, text, score = item
 
@@ -378,12 +389,34 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
                     combined_text.append(text)
                     min_score = min(min_score, score)
 
+                    # 收集该文本块的四个顶点坐标
+                    for point in box:
+                        all_x_coords.append(point[0])
+                        all_y_coords.append(point[1])
+
                 final_text = "".join(combined_text)
 
-                if final_text:
+                # 只有当识别到文本且有坐标时才计算包围框
+                if final_text and all_x_coords:
+                    # 1. 找到所有点的极值（最小外接矩形）
+                    min_x = min(all_x_coords)
+                    max_x = max(all_x_coords)
+                    min_y = min(all_y_coords)
+                    max_y = max(all_y_coords)
+
+                    # 2. 将坐标还原回原图尺寸 (除以缩放比例)
+                    # 构造四个顶点：[左上, 右上, 右下, 左下]
+                    merged_box = [
+                        [min_x / scale_ratio, min_y / scale_ratio],
+                        [max_x / scale_ratio, min_y / scale_ratio],
+                        [max_x / scale_ratio, max_y / scale_ratio],
+                        [min_x / scale_ratio, max_y / scale_ratio]
+                    ]
+
                     item_result.update({
                         "text": final_text,
                         "score": float(min_score),
+                        "box": merged_box,  # 新增：合并后的最小包围框
                         "status": "success"
                     })
                     success_count += 1

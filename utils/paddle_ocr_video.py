@@ -38,7 +38,7 @@ def get_image_signature(img, width=48):
     return gray
 
 
-def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
+def video_ocr_processor(video_path, ocr_info, similarity_threshold=10):
     """
     高性能视频 OCR 处理器：扫描 -> 批量OCR -> 合并结果
     优化：数学计算时间戳 + 图像指纹缓存机制
@@ -49,7 +49,7 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
     # 1. 初始化
     global_engine = _init_engine(use_gpu=True)
     video_dir = os.path.dirname(os.path.abspath(video_path))
-    temp_dir = os.path.join(video_dir, f"temp_ocr_{uuid.uuid4().hex[:8]}")
+    temp_dir = os.path.join(video_dir, f"temp_ocr")
     os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_path)
@@ -159,15 +159,18 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
                         text = item.get('text', '')
                         if p in path_map_key:
                             key = path_map_key[p]
-                            ocr_results_map[key] = text
+                            ocr_results_map[key] = item
 
                     print(f"执行批量 OCR ({len(batch_ocr_paths)} 张图片)... OCR 耗时: {time.time() - t_ocr_start:.2f}s")
                 except Exception as e:
                     print(f"[Error] OCR 批量处理失败: {e}")
                     traceback.print_exc()
 
-            # --- 阶段 3: 合并结果与时间轴回填 ---
-            current_texts = [""] * len(boxes)
+            # --- 阶段 3: 合并结果与时间轴回填 (修复后) ---
+
+            # [Fix] 初始化缓存字典，用于在跳过帧时存储和回填上一次的有效结果
+            # 键是 box_i (框的索引)，值是该框最后一次 OCR 的结果数据
+            last_valid_box_results = {}
 
             for f_local_idx, task in enumerate(timeline_tasks):
                 final_frame_res = {
@@ -177,11 +180,33 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
                 }
 
                 for box_i, (action_code, val) in enumerate(task["box_actions"]):
-                    if action_code == 0:
-                        text = ocr_results_map.get((f_local_idx, box_i), "")
-                        current_texts[box_i] = text
+                    current_box_result = None
 
-                    final_frame_res["ocr_data"][box_i] = current_texts[box_i]
+                    if action_code == 0:
+                        # 0 代表执行了 OCR，从结果映射中获取
+                        item = ocr_results_map.get((f_local_idx, box_i), {})
+                        text = item.get('text', '')
+                        box = item.get('box', [])
+
+                        current_box_result = {
+                            "text": text,
+                            "box": box
+                        }
+                        # [Fix] 更新缓存，供下一帧复用
+                        last_valid_box_results[box_i] = current_box_result
+
+                    elif action_code == 1:
+                        # 1 代表跳过（内容重复），应该复用上一帧的结果
+                        # [Fix] 从缓存中读取
+                        if box_i in last_valid_box_results:
+                            current_box_result = last_valid_box_results[box_i]
+                        else:
+                            # 理论上不会发生，除非第一帧就是重复帧（逻辑上第一帧 last_sig 为 None，强制 OCR）
+                            current_box_result = {"text": "", "box": []}
+
+                    # 将结果填入当前帧数据
+                    if current_box_result:
+                        final_frame_res["ocr_data"][box_i] = current_box_result
 
                 total_final_results.append(final_frame_res)
 
@@ -189,7 +214,8 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
         cap.release()
         if os.path.exists(temp_dir):
             try:
-                shutil.rmtree(temp_dir)
+                pass
+                # shutil.rmtree(temp_dir)
             except:
                 pass
 
@@ -204,26 +230,26 @@ if __name__ == "__main__":
 
     # 示例框
     formatted_boxes = [[
-    [
-        423,
-        1749
-    ],
-    [
-        3408,
-        1749
-    ],
-    [
-        3408,
-        2048
-    ],
-    [
-        423,
-        2048
-    ]
-]]
+        [
+            423,
+            1749
+        ],
+        [
+            3408,
+            1749
+        ],
+        [
+            3408,
+            2048
+        ],
+        [
+            423,
+            2048
+        ]
+    ]]
 
     ocr_info = [
-        {"start": 42000, "end": 45000, "boxs": formatted_boxes}
+        {"start": 0, "end": 5000, "boxs": formatted_boxes}
     ]
 
     try:
