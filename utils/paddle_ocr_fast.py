@@ -55,7 +55,7 @@ def _init_engine(use_gpu: bool):
             det_use_cuda=use_gpu,
             cls_use_cuda=use_gpu,
             rec_use_cuda=use_gpu,
-            det_unclip_ratio=1,  # <--- 这里！调小这个参数
+            det_unclip_ratio=0.9,  # <--- 这里！调小这个参数
 
         # 预热选项 (可选，稍微增加启动时间但稳定后续速度)
             det_use_dml=False,  # 如果是Windows非N卡可以用True，N卡用False
@@ -451,13 +451,13 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
     }
 
 if __name__ == "__main__":
-    image_list = []
-    for root, dirs, files in os.walk(r"W:\project\python_project\auto_video\videos\material\7597599415717615476\test_subtitle_box"):
-        for file in files:
-            if file.endswith(".jpg"):
-                if "cropped" in file:
-                    continue
-                image_list.append(os.path.join(root, file))
+    image_list = [r"W:\project\python_project\auto_video\videos\material\7602198039888989481\temp_ocr\frame48_box0.jpg"]
+    # for root, dirs, files in os.walk(r"W:\project\python_project\auto_video\videos\material\7597599415717615476\test_subtitle_box"):
+    #     for file in files:
+    #         if file.endswith(".jpg"):
+    #             if "cropped" in file:
+    #                 continue
+    #             image_list.append(os.path.join(root, file))
 
 
     print("\n--- 极速识别模式 (纯识别) ---")
