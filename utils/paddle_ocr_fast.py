@@ -45,7 +45,7 @@ def _init_engine(use_gpu: bool):
             # 限制检测时图片的长边长度。
             # 默认是 960。对于简单的大字字幕，降低到 320 或 480 即可。
             # 这会极大减少计算量，速度提升 2~3 倍。
-            det_limit_side_len=480,
+            # det_limit_side_len=480,
 
             # 检测框阈值，保持默认或适当降低以防止漏检
             det_db_box_thresh=0.5,
@@ -55,8 +55,9 @@ def _init_engine(use_gpu: bool):
             det_use_cuda=use_gpu,
             cls_use_cuda=use_gpu,
             rec_use_cuda=use_gpu,
+            det_unclip_ratio=1,  # <--- 这里！调小这个参数
 
-            # 预热选项 (可选，稍微增加启动时间但稳定后续速度)
+        # 预热选项 (可选，稍微增加启动时间但稳定后续速度)
             det_use_dml=False,  # 如果是Windows非N卡可以用True，N卡用False
         )
         print(f"Engine initialized successfully (GPU={use_gpu}).")
@@ -385,7 +386,9 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
 
                     if score < score_threshold:
                         continue
-
+                    # 当 text不为空
+                    if not text:
+                        continue
                     combined_text.append(text)
                     min_score = min(min_score, score)
 

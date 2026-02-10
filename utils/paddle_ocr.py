@@ -135,7 +135,7 @@ def draw_box_on_images(image_paths: List[str], box_coords: List[List[int]]):
             print(f"绘制 '{os.path.basename(path)}' 时出错: {e}")
 
 
-def adjust_subtitle_box(video_path, final_box):
+def adjust_subtitle_box(video_path, final_box, ratio=0.1):
     """
     将字幕框左右边距至少设为视频宽度的 10%，
     但如果原框更宽就不再缩窄它。
@@ -156,8 +156,8 @@ def adjust_subtitle_box(video_path, final_box):
     cap.release()
 
     # 2. 阈值：左右各保留 10%
-    thresh_left  = int(width * 0.1)
-    thresh_right = int(width * 0.9)
+    thresh_left  = int(width * ratio)
+    thresh_right = int(width * (1 - ratio))
 
     # 3. 原始框的最小/最大 x，和最小/最大 y
     xs = [pt[0] for pt in final_box]

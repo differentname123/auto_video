@@ -8,6 +8,7 @@ import shutil
 
 from utils.common_utils import save_json, read_json
 from utils.inpating.lama import inpaint_video_intervals
+from utils.paddle_ocr import adjust_subtitle_box
 # 假设这两个函数在 utils.paddle_ocr_fast 中
 from utils.paddle_ocr_fast import run_fast_det_rec_ocr, _init_engine
 import json
@@ -296,7 +297,7 @@ def get_image_signature(img, width=48):
 def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
     """
     高性能视频 OCR 处理器：扫描 -> 批量OCR -> 合并结果
-    优化：数学计算时间戳 + 图像指纹缓存机制
+    优化：数学计算时间戳 + 图像指纹缓存机制 + 坐标系还原
     """
     t_start_all = time.time()
     print(f"[{time.strftime('%H:%M:%S')}] 开始处理视频: {os.path.basename(video_path)}")
@@ -328,6 +329,14 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
             boxes = info['boxs']
             start_ms, end_ms = info['start'], info['end']
 
+            # 【新增逻辑 1】预先计算每个裁剪框在原图中的偏移量 (x, y)
+            # 这样后续合并 OCR 结果时，可以将局部坐标还原为全局坐标
+            box_offsets = []
+            for b_points in boxes:
+                # 必须与 crop_polygon 中的逻辑一致
+                bx, by, bw, bh = cv2.boundingRect(np.array(b_points, dtype=np.int32))
+                box_offsets.append((max(0, bx), max(0, by)))
+
             # 严格计算帧范围
             start_frame = int(round((start_ms / 1000) * fps))
             end_frame = int(round((end_ms / 1000) * fps))
@@ -341,8 +350,7 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
             batch_ocr_paths = []
             path_map_key = {}
 
-            # 【核心优化】缓存上一帧的“指纹”（也就是缩放后的灰度图），而不是原图
-            # 避免了每次比对时都要对上一帧重新 resize 和 cvtColor
+            # 缓存上一帧的“指纹”
             last_signatures = [None] * len(boxes)
 
             stats = {"total": 0, "ocr": 0, "skip": 0}
@@ -355,7 +363,7 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
 
                 stats["total"] += 1
 
-                # 【修复问题1】使用数学公式计算精确时间戳，不再依赖 cap.get(POS_MSEC)
+                # 计算精确时间戳
                 timestamp = (curr_idx / fps) * 1000.0
 
                 frame_task = {
@@ -367,14 +375,13 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
                 for box_i, points in enumerate(boxes):
                     crop = crop_polygon(frame, points)
 
-                    # 【修复问题2】获取当前帧的指纹
+                    # 获取当前帧的指纹
                     curr_sig = get_image_signature(crop)
                     last_sig = last_signatures[box_i]
 
                     is_duplicate = False
                     # 快速比对逻辑
                     if last_sig is not None and curr_sig.shape == last_sig.shape:
-                        # 此时已经是两个很小的灰度矩阵，absdiff 和 mean 极快
                         diff_score = np.mean(cv2.absdiff(curr_sig, last_sig))
                         if diff_score < similarity_threshold:
                             is_duplicate = True
@@ -385,7 +392,6 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
                         stats["skip"] += 1
                     else:
                         # 动作: OCR
-
                         filename = f"frame{curr_idx}_box{box_i}.jpg"
                         filepath = os.path.join(temp_dir, filename)
 
@@ -417,7 +423,7 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
 
                     for item in ocr_response.get('data', []):
                         p = os.path.normpath(item['file'])
-                        text = item.get('text', '')
+                        # item['box'] 这里是相对于小图的坐标
                         if p in path_map_key:
                             key = path_map_key[p]
                             ocr_results_map[key] = item
@@ -427,10 +433,9 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
                     print(f"[Error] OCR 批量处理失败: {e}")
                     traceback.print_exc()
 
-            # --- 阶段 3: 合并结果与时间轴回填 (修复后) ---
+            # --- 阶段 3: 合并结果与时间轴回填 ---
 
-            # [Fix] 初始化缓存字典，用于在跳过帧时存储和回填上一次的有效结果
-            # 键是 box_i (框的索引)，值是该框最后一次 OCR 的结果数据
+            # 初始化缓存字典，用于在跳过帧时存储和回填上一次的有效结果
             last_valid_box_results = {}
 
             for f_local_idx, task in enumerate(timeline_tasks):
@@ -447,22 +452,31 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
                         # 0 代表执行了 OCR，从结果映射中获取
                         item = ocr_results_map.get((f_local_idx, box_i), {})
                         text = item.get('text', '')
-                        box = item.get('box', [])
+                        raw_box = item.get('box', [])
+
+                        # 【新增逻辑 2】将局部坐标转换为全局坐标
+                        global_box = []
+                        if raw_box:
+                            off_x, off_y = box_offsets[box_i]  # 获取该框的左上角偏移
+                            for point in raw_box:
+                                global_box.append([
+                                    point[0] + off_x,
+                                    point[1] + off_y
+                                ])
 
                         current_box_result = {
                             "text": text,
-                            "box": box
+                            "box": global_box
                         }
-                        # [Fix] 更新缓存，供下一帧复用
+
+                        # 更新缓存，供下一帧复用
                         last_valid_box_results[box_i] = current_box_result
 
                     elif action_code == 1:
                         # 1 代表跳过（内容重复），应该复用上一帧的结果
-                        # [Fix] 从缓存中读取
                         if box_i in last_valid_box_results:
                             current_box_result = last_valid_box_results[box_i]
                         else:
-                            # 理论上不会发生，除非第一帧就是重复帧（逻辑上第一帧 last_sig 为 None，强制 OCR）
                             current_box_result = {"text": "", "box": []}
 
                     # 将结果填入当前帧数据
@@ -547,7 +561,8 @@ if __name__ == "__main__":
     video_file = r"W:\project\python_project\auto_video\videos\material\7602198039888989481\7602198039888989481_static_cut.mp4"
 
     # 示例框
-    formatted_boxes = [[
+
+    raw_box = [
         [
             423,
             1749
@@ -564,10 +579,24 @@ if __name__ == "__main__":
             423,
             2048
         ]
-    ]]
+    ]
+
+
+    top_left, bottom_right, _, _ = adjust_subtitle_box(video_file, raw_box, 0)
+
+    # 根据top_left, bottom_right得到调整后的四个坐标点
+    adjust_box = [
+        [top_left[0], top_left[1]],
+        [bottom_right[0], top_left[1]],
+        [bottom_right[0], bottom_right[1]],
+        [top_left[0], bottom_right[1]]
+    ]
+
+    formatted_boxes = [adjust_box]
+
 
     ocr_info = [
-        {"start": 0, "end": 500000, "boxs": formatted_boxes}
+        {"start": 0, "end": 5000, "boxs": formatted_boxes}
     ]
 
 
