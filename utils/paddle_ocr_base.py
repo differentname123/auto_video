@@ -316,20 +316,20 @@ if __name__ == "__main__":
 
     ]
     # 扫描W:\project\python_project\auto_video\videos\material\7590376286820814107\frame下面所有的png文件
-    image_list = []
-    for root, dirs, files in os.walk(r"W:\project\python_project\auto_video\videos\material\7590376286820814107\frame"):
-        for file in files:
-            if file.endswith(".jpg"):
-                image_list.append(os.path.join(root, file))
+    image_list = [r"W:\project\python_project\auto_video\videos\material\7602198039888989481\temp_ocr\frame1180_box0.jpg"]
+    # for root, dirs, files in os.walk(r"W:\project\python_project\auto_video\videos\material\7590376286820814107\frame"):
+    #     for file in files:
+    #         if file.endswith(".jpg"):
+    #             image_list.append(os.path.join(root, file))
 
 
 
 
     print("\n--- Starting Safe Batch OCR ---")
     # # 这一步绝对不会报错，只会返回 JSON
-    for i in range(5):
+    for i in range(1):
         print(f"\n--- OCR Attempt {i + 1} ---")
-        result_json = run_subtitle_ocr(test_images, crop_ratio=0.5)
+        result_json = run_subtitle_ocr(image_list, crop_ratio=1.5)
         print(result_json)
         # 获取所有的box，保存到box_list
         box_list = [sub.get("box", []) for item in result_json.get("data", []) for sub in item.get("subtitles", [])]

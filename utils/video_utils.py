@@ -4171,3 +4171,126 @@ def extract_audio(input_video, output_audio=None):
     except subprocess.CalledProcessError as e:
         print(f"音频提取失败: {e.stderr.decode()}")
         raise e
+
+
+def burn_ocr_subtitles_to_video(
+        video_path: str,
+        subtitle_data: list,
+        output_path: str,
+        font_path: str = 'C:/Windows/Fonts/msyhbd.ttc',
+        font_color: str = '#FFD700',
+        border_color: str = 'black',
+        border_width: int = 5
+) -> None:
+    """
+    根据 OCR 数据（四点坐标框）将字幕烧录到视频的指定位置。
+    修复了 Windows 路径转义导致的报错问题。
+    """
+
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"输入视频不存在: {video_path}")
+    if not os.path.exists(font_path):
+        raise FileNotFoundError(f"字体文件不存在: {font_path}")
+
+    # 1. 格式化字体路径 (这是给滤镜内部用的，必须转义冒号和反斜杠)
+    formatted_font_path = font_path.replace('\\', '/')
+    if os.name == 'nt':
+        formatted_font_path = formatted_font_path.replace(':', '\\:')
+
+    filters = []
+
+    # 2. 遍历所有时间段
+    for item in subtitle_data:
+        # 将毫秒转换为秒
+        start_t = item.get('start', 0) / 1000.0
+        end_t = item.get('end', 0) / 1000.0
+
+        ocr_dict = item.get('ocr_data', {})
+
+        # 3. 遍历该时间段内的所有 OCR 文本块
+        for key, text_info in ocr_dict.items():
+            raw_text = text_info.get('text', '')
+            box_points = text_info.get('box', [])
+
+            if not raw_text or not box_points:
+                continue
+
+            # 计算矩形中心和高度
+            xs = [p[0] for p in box_points]
+            ys = [p[1] for p in box_points]
+
+            min_x, max_x = min(xs), max(xs)
+            min_y, max_y = min(ys), max(ys)
+
+            box_h = max_y - min_y
+            center_x = (min_x + max_x) / 2
+            center_y = (min_y + max_y) / 2
+
+            # 规则：字号为框高度的 90%
+            font_size = max(1, int(box_h * 0.9))
+
+            # 转义文本
+            safe_text = _escape_ffmpeg_text(raw_text)
+
+            # 构建 drawtext 滤镜
+            # 注意：enable 确保了只在特定时间绘制，其他时间保持原画
+            drawtext_cmd = (
+                f"drawtext="
+                f"fontfile='{formatted_font_path}':"
+                f"text='{safe_text}':"
+                f"fontsize={font_size}:"
+                f"fontcolor={font_color}:"
+                f"borderw={border_width}:"
+                f"bordercolor={border_color}:"
+                f"x={center_x}-text_w/2:"
+                f"y={center_y}-text_h/2:"
+                f"enable='between(t,{start_t:.3f},{end_t:.3f})'"
+            )
+
+            filters.append(drawtext_cmd)
+
+    if not filters:
+        print("未发现有效字幕数据，直接拷贝视频...")
+        import shutil
+        shutil.copy(video_path, output_path)
+        return
+
+    # 4. 写入临时文件
+    # 使用 utf-8 编码，防止中文乱码
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".txt", encoding='utf-8') as temp_script:
+        # 将滤镜指令用逗号连接
+        full_filter_str = ",".join(filters)
+        temp_script.write(full_filter_str)
+        script_path = temp_script.name
+
+    # 【重要修复】：script_path 是给操作系统用的文件路径，不需要转义冒号
+    # 只需要把反斜杠换成正斜杠以防万一即可，或者直接用原始路径
+    formatted_script_path = script_path.replace('\\', '/')
+
+    # 5. 调用 FFmpeg
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-i", video_path,
+        "-filter_complex_script", formatted_script_path,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "copy",  # 音频流直接复制，保持时长和音质
+        output_path
+    ]
+
+    print(f"开始烧录字幕，共 {len(filters)} 条文本片段...")
+    try:
+        subprocess.run(cmd, check=True, encoding='utf-8')
+        print(f"处理完成！输出文件: {output_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg 执行出错: {e}")
+        # 调试用：打印滤镜内容
+        with open(script_path, 'r', encoding='utf-8') as f:
+            print(f"滤镜脚本内容预览: {f.read()[:200]}...")
+    finally:
+        # 清理临时文件
+        if os.path.exists(script_path):
+            try:
+                os.remove(script_path)
+            except PermissionError:
+                pass

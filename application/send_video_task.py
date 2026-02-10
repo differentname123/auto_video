@@ -747,6 +747,12 @@ def get_available_count(manager, video_info):
         can_use_count = max(can_use_count, 1)
         print(f"高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
 
+    is_middle_high_score = final_score > 1000
+    is_within_24_hours = latest_create_time >= (now - timedelta(hours=24))
+    if is_middle_high_score and not is_within_24_hours:
+        can_use_count = max(can_use_count, 1)
+        print(f"中高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
+
     video_info['exist_count'] = len(exist_tasks)
     video_info['single_count'] = single_count
     video_info['can_use_count'] = can_use_count

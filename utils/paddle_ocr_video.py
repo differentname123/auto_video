@@ -1,3 +1,5 @@
+import subprocess
+
 import cv2
 import numpy as np
 import os
@@ -14,6 +16,8 @@ from utils.paddle_ocr_fast import run_fast_det_rec_ocr, _init_engine
 import json
 import copy
 from difflib import SequenceMatcher
+
+from utils.video_utils import burn_ocr_subtitles_to_video
 
 
 def calculate_iou(box1, box2):
@@ -272,62 +276,68 @@ def optimize_ocr_results(raw_data):
     # =========================================================================
 
     # 1. 先按 Key 分组
-    segments_by_key = {}
-    for seg in all_segments_list:
-        k = seg['key']
-        if k not in segments_by_key:
-            segments_by_key[k] = []
-        segments_by_key[k].append(seg)
+        # 1. 先按 Key 分组
+        segments_by_key = {}
+        for seg in all_segments_list:
+            k = seg['key']
+            if k not in segments_by_key:
+                segments_by_key[k] = []
+            segments_by_key[k].append(seg)
 
-    merged_segments = []
+        merged_segments = []
 
-    for k in segments_by_key:
-        segs = sorted(segments_by_key[k], key=lambda x: x['start'])
-        if not segs: continue
+        for k in segments_by_key:
+            segs = sorted(segments_by_key[k], key=lambda x: x['start'])
+            if not segs: continue
 
-        # 迭代合并
-        curr = segs[0]
-        for i in range(1, len(segs)):
-            next_seg = segs[i]
+            curr = segs[0]
+            for i in range(1, len(segs)):
+                next_seg = segs[i]
 
-            # 判断时间连续性 (允许 1-2 帧的微小误差，例如 100ms)
-            time_gap = next_seg['start'] - curr['end']
-            is_continuous = time_gap < 100.0
+                # 判断时间连续性
+                time_gap = next_seg['start'] - curr['end']
+                is_continuous = time_gap < 100.0  # 允许 100ms 误差
 
-            if is_continuous:
-                txt1 = curr['text']
-                txt2 = next_seg['text']
+                if is_continuous:
+                    txt1 = curr['text']
+                    txt2 = next_seg['text']
 
-                # 判断文本相似性或包含关系
-                # 场景: "TER就把..." vs "就把..."
-                similarity = get_text_similarity(txt1, txt2)
-                is_subset = (txt1 in txt2) or (txt2 in txt1)
-
-                # 如果连续且相似
-                if similarity > 0.6 or is_subset:
-                    # 决定保留哪个文本：保留持续时间更长的那个（通常是正确的）
-                    dur1 = curr['end'] - curr['start']
-                    dur2 = next_seg['end'] - next_seg['start']
-
-                    if dur2 > dur1:
-                        # 后面的段更稳定，curr 变为 next 的一部分
-                        curr['text'] = next_seg['text']
+                    # 情况 A: 文本完全一致 -> 安全合并
+                    if txt1 == txt2:
                         curr['end'] = next_seg['end']
-                        # 合并Box
+                        # 只有文本完全一样时，才合并 Box（适应镜头推拉或字幕移动）
                         curr['box'] = get_union_box([curr['box'], next_seg['box']])
-                    else:
-                        # 前面的段更稳定，next 变为 curr 的一部分
-                        curr['end'] = next_seg['end']
-                        curr['box'] = get_union_box([curr['box'], next_seg['box']])
+                        continue
 
-                    # 继续下一轮，curr 保持不变（已经吸收了next）
-                    continue
+                    # 情况 B: 文本不一致，但相似 -> 需要去噪
+                    similarity = get_text_similarity(txt1, txt2)
+                    is_subset = (txt1 in txt2) or (txt2 in txt1)
 
-            # 无法合并，保存 curr，切换 next 为 curr
+                    if similarity > 0.6 or is_subset:
+                        # 权重判断：谁的时间长，谁就是“主文本”
+                        dur1 = curr['end'] - curr['start']
+                        dur2 = next_seg['end'] - next_seg['start']
+
+                        if dur2 > dur1:
+                            # 后面的段更长 -> curr 变成 next 的形状
+                            curr['text'] = next_seg['text']
+                            curr['box'] = next_seg['box']  # 【关键修改】直接使用胜者的 Box，不要合并！
+                            curr['end'] = next_seg['end']
+                        else:
+                            # 前面的段更长 -> 保持 curr 的文本和 Box
+                            curr['end'] = next_seg['end']
+                            # 【关键修改】不要合并 next_seg['box']，因为那是被判定为“错误/噪音”的文本对应的框
+
+                        # 继续处理，curr 已吸收 next
+                        continue
+
+                # 无法合并，归档旧的，开始新的
+                merged_segments.append(curr)
+                curr = next_seg
+
             merged_segments.append(curr)
-            curr = next_seg
 
-        merged_segments.append(curr)
+        all_segments = merged_segments
 
     all_segments = merged_segments  # 替换原来的列表
     # =========================================================================
@@ -633,6 +643,69 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
     return total_final_results
 
 
+def draw_boxes_on_video_ffmpeg(input_path, start_ms, end_ms, box_points):
+    """
+    使用 FFmpeg 加速版：在视频指定时间段绘框
+    """
+    # 1. 自动生成输出路径
+    file_dir, file_name = os.path.split(input_path)
+    name, ext = os.path.splitext(file_name)
+    output_path = os.path.join(file_dir, f"{name}_processed{ext}")
+
+    # 2. 坐标预处理
+    # OpenCV 的 polylines 可以画多边形，但 FFmpeg 的 drawbox 只能画矩形。
+    # 这里我们计算包围这些点的最小矩形 (x, y, w, h)，以最大程度还原“画框”功能。
+    pts = np.array(box_points, np.int32)
+    x_min = np.min(pts[:, 0])
+    y_min = np.min(pts[:, 1])
+    x_max = np.max(pts[:, 0])
+    y_max = np.max(pts[:, 1])
+
+    w = x_max - x_min
+    h = y_max - y_min
+
+    # 3. 时间单位转换 (毫秒 -> 秒)
+    start_s = start_ms / 1000.0
+    end_s = end_ms / 1000.0
+
+    print(f"正在处理: {file_name}")
+    print(f"标记时间: {start_s}s 到 {end_s}s")
+    print(f"绘制区域: x={x_min}, y={y_min}, w={w}, h={h}")
+
+    # 4. 构建 FFmpeg 命令
+    # drawbox 参数解析:
+    # x, y, w, h: 矩形参数
+    # color: 颜色 (green)
+    # t: 线条粗细 (thickness=3)
+    # enable: 启用条件 (仅在 start_s 和 end_s 之间绘制)
+    filter_cmd = (
+        f"drawbox=x={x_min}:y={y_min}:w={w}:h={h}:color=green:t=3:"
+        f"enable='between(t,{start_s},{end_s})'"
+    )
+
+    cmd = [
+        'ffmpeg',
+        '-y',  # 覆盖输出文件不询问
+        '-i', input_path,  # 输入文件
+        '-vf', filter_cmd,  # 视频滤镜
+        '-c:a', 'copy',  # 音频直接复制 (不重编码，速度极快)
+        '-c:v', 'libx264',  # 视频编码器
+        '-preset', 'ultrafast',  # 编码速度预设 (ultrafast 最快)
+        '-crf', '23',  # 质量控制 (数值越小质量越高，23是默认)
+        output_path  # 输出文件
+    ]
+
+    try:
+        # 执行命令
+        # stdout/stderr 设置为 DEVNULL 可以隐藏 FFmpeg 繁杂的日志，只看 Python 输出
+        # 如果需要调试，可以去掉 stderr=subprocess.DEVNULL
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        print(f"--- 处理完成 ---")
+        print(f"保存路径: {output_path}")
+    except subprocess.CalledProcessError as e:
+        print(f"错误：FFmpeg 执行失败。")
+        # 打印错误日志以便调试
+        print(e.stderr.decode())
 def transform_ocr_to_repair_info(raw_data):
     """
     将原始 OCR 数据列表转换为 repair_info 格式
@@ -684,6 +757,15 @@ def inpaint_subtitle_box():
     repair_info = transform_ocr_to_repair_info(format_result)
     # repair_info = repair_info[:2]
     inpaint_video_intervals(video_file, output_video, repair_info)
+    subtitle_video_path = output_video.replace(".mp4", "_subtitle.mp4")
+
+    # format_result = format_result[:2]
+    burn_ocr_subtitles_to_video(
+        video_path=output_video,
+        subtitle_data=format_result,
+        output_path=subtitle_video_path,
+        font_path=r'C:\Users\zxh\AppData\Local\Microsoft\Windows\Fonts\AaFengKuangYuanShiRen-2.ttf'
+    )
 
 
 if __name__ == "__main__":
@@ -714,9 +796,34 @@ if __name__ == "__main__":
         2048
     ]
 ]
+    #
+    # draw_boxes_on_video_ffmpeg(video_file, 20000, 22000, [
+    #       [
+    #         542.72,
+    #         1802.76
+    #       ],
+    #       [
+    #         3292.16,
+    #         1802.76
+    #       ],
+    #       [
+    #         3292.16,
+    #         1999.88
+    #       ],
+    #       [
+    #         542.72,
+    #         1999.88
+    #       ]
+    #     ]
+    #
+    #                            )
 
 
-    top_left, bottom_right, _, _ = adjust_subtitle_box(video_file, raw_box, 0.1)
+
+
+
+
+    top_left, bottom_right, _, _ = adjust_subtitle_box(video_file, raw_box, 0.0)
 
     # 根据top_left, bottom_right得到调整后的四个坐标点
     adjust_box = [
@@ -730,7 +837,7 @@ if __name__ == "__main__":
 
 
     ocr_info = [
-        {"start": 00, "end": 450000, "boxs": formatted_boxes}
+        {"start": 0, "end": 500000, "boxs": formatted_boxes}
     ]
 
 
@@ -744,3 +851,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"主程序运行出错: {e}")
         traceback.print_exc()
+
+
+    inpaint_subtitle_box()
