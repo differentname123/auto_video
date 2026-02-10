@@ -1814,6 +1814,12 @@ def find_boundary_pairs(owner_info_list: list) -> list:
     """
     data_list = owner_info_list
     boundary_pairs = []
+
+    # 如果第一句就是owner，增加一个虚构的'other'交界对
+    if data_list and data_list[0].get('speaker') == 'owner':
+        virtual_other = {'speaker': 'other', 'start': 0, 'end': 0}
+        boundary_pairs.append((virtual_other, data_list[0]))
+
     # 遍历到倒数第二个元素，以便安全地访问 i+1
     for i in range(len(data_list) - 1):
         current_item = data_list[i]
