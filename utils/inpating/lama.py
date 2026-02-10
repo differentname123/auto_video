@@ -1,13 +1,14 @@
 # -- coding: utf-8 --
 """
 :description:
-    基于 LaMa 的图片与视频去水印/修复工具 (深度优化 + 极速合并版)
+    基于 LaMa 的图片与视频去水印/修复工具 (深度优化 + 极速合并 + 降分辨率加速版)
 
     性能与逻辑说明：
     1. [提取] 使用 mpeg4 编码，保证帧级精准度 (解决音画不同步)。
     2. [提取] 强制 tag 为 mp4v，与 OpenCV 输出完全一致。
     3. [合并] 回归 stream copy (-c copy)，避免全片重编码，恢复原始代码的极速体验。
-    4. [核心] 保留 GPU Tensor 优化，推理速度极快。
+    4. [核心] 保留 GPU Tensor 优化。
+    5. [加速] 在推理前降低修复区域分辨率 (0.5x)，修复后再还原，大幅提升速度。
 """
 import os
 import time
@@ -38,9 +39,11 @@ class MaskCache:
     def __init__(self, device):
         self.device = device
         self.cache = {}
+        # 定义默认缩放比例，虽然下面会动态计算，保留此变量以防影响 cache key 生成
+        self.shrink_ratio = 0.25
 
     def get_processing_data(self, width: int, height: int, boxes: List[List[int]]) -> List[Tuple]:
-        boxes_key = json.dumps(boxes)
+        boxes_key = json.dumps(boxes) + f"_{self.shrink_ratio}"
         if boxes_key in self.cache:
             return self.cache[boxes_key]
 
@@ -49,6 +52,7 @@ class MaskCache:
         kernel = np.ones((10, 10), np.uint8)
 
         for box_coords in boxes:
+            # 1. 在原图尺寸上生成基础 Mask
             mask = np.zeros((height, width), dtype=np.uint8)
             points = np.array([box_coords], dtype=np.int32)
             cv2.fillPoly(mask, pts=points, color=255)
@@ -59,35 +63,64 @@ class MaskCache:
             x_max = np.max(points[:, :, 0])
             y_max = np.max(points[:, :, 1])
 
+            # 原始裁剪坐标
             crop_x1 = max(0, int(x_min - margin))
             crop_y1 = max(0, int(y_min - margin))
             crop_x2 = min(width, int(x_max + margin))
             crop_y2 = min(height, int(y_max + margin))
 
-            # 强制 8 对齐
-            def align_to_8(v_min, v_max, max_limit):
-                length = v_max - v_min
-                remainder = length % 8
-                if remainder != 0:
-                    pad = 8 - remainder
-                    if v_max + pad <= max_limit:
-                        v_max += pad
-                    elif v_min - pad >= 0:
-                        v_min -= pad
-                    else:
-                        v_max -= remainder
-                return v_min, v_max
+            # --- 修改开始：计算缩放后的对齐尺寸 ---
 
-            crop_x1, crop_x2 = align_to_8(crop_x1, crop_x2, width)
-            crop_y1, crop_y2 = align_to_8(crop_y1, crop_y2, height)
+            # 先确保原图裁剪区域稍微规整一点（偶数即可）
+            if (crop_x2 - crop_x1) % 2 != 0: crop_x2 += 1
+            if (crop_y2 - crop_y1) % 2 != 0: crop_y2 += 1
 
-            mask_crop = dilated_mask[crop_y1:crop_y2, crop_x1:crop_x2]
-            mask_tensor = torch.from_numpy(mask_crop).float() / 255.0
+            # 获取原始裁剪区域的宽和高
+            orig_w = crop_x2 - crop_x1
+            orig_h = crop_y2 - crop_y1
+
+            # [新增逻辑] 动态计算缩放比例：确保最长边不超过 512px
+            long_side = max(orig_w, orig_h)
+            if long_side > 512:
+                dynamic_ratio = 512.0 / long_side
+            else:
+                # 如果原尺寸小于 512，则不进行缩放，保证最佳画质
+                dynamic_ratio = 1.0
+            print(f"Original crop size: ({orig_w}x{orig_h}), Dynamic ratio: {dynamic_ratio:.3f}")
+            # 计算缩放后的目标宽高
+            target_w = int(orig_w * dynamic_ratio)
+            target_h = int(orig_h * dynamic_ratio)
+
+            # 强制目标宽高必须是 8 的倍数 (LaMa 模型要求)
+            def align_down_to_8(v):
+                rem = v % 8
+                if rem == 0: return v
+                # 如果数值太小，至少保留8
+                if v < 8: return 8
+                return v - rem  # 向下取整比较安全
+
+            target_w = align_down_to_8(target_w)
+            target_h = align_down_to_8(target_h)
+
+            # 截取原始 Mask
+            mask_crop_orig = dilated_mask[crop_y1:crop_y2, crop_x1:crop_x2]
+
+            # 将 Mask 缩放到目标尺寸 (使用最近邻插值保持二值化特性)
+            if mask_crop_orig.size > 0:
+                mask_crop_small = cv2.resize(mask_crop_orig, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+            else:
+                # 异常保护
+                mask_crop_small = np.zeros((target_h, target_w), dtype=np.uint8)
+
+            # 转 Tensor
+            mask_tensor = torch.from_numpy(mask_crop_small).float() / 255.0
             mask_tensor = mask_tensor.unsqueeze(0).unsqueeze(0)
             mask_tensor = (mask_tensor > 0.5).float()
             mask_tensor = mask_tensor.to(self.device)
 
-            processing_items.append(((crop_x1, crop_y1, crop_x2, crop_y2), mask_tensor))
+            # 存储：(原始裁剪坐标, Mask Tensor, 目标小尺寸)
+            processing_items.append(((crop_x1, crop_y1, crop_x2, crop_y2), mask_tensor, (target_w, target_h)))
+            # --- 修改结束 ---
 
         self.cache[boxes_key] = processing_items
         return processing_items
@@ -203,20 +236,43 @@ def _process_repair_segment(cap: cv2.VideoCapture, start_frame: int, end_frame: 
                     boxes = frames_to_repair[frame_idx]
                     proc_data = mask_cache.get_processing_data(width, height, boxes)
 
-                    for (crop_coords, mask_tensor) in proc_data:
+                    # proc_data 解包: ((x1,y1,x2,y2), mask_tensor, (target_w, target_h))
+                    for (crop_coords, mask_tensor, target_size) in proc_data:
                         cx1, cy1, cx2, cy2 = crop_coords
+                        target_w, target_h = target_size
+
+                        # 1. 截取原分辨率图像
                         crop_bgr = frame_bgr[cy1:cy2, cx1:cx2]
-                        img_tensor = torch.from_numpy(crop_bgr).permute(2, 0, 1).float().div(255.0)
+
+                        # 2. [加速关键] 缩小图像到 target_size
+                        # 使用线性插值速度快，效果尚可
+                        if crop_bgr.shape[0] == 0 or crop_bgr.shape[1] == 0:
+                            continue  # 防止空切片报错
+
+                        orig_h_crop, orig_w_crop = crop_bgr.shape[:2]
+
+                        small_bgr = cv2.resize(crop_bgr, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+
+                        # 3. 转 Tensor 并推理
+                        img_tensor = torch.from_numpy(small_bgr).permute(2, 0, 1).float().div(255.0)
                         img_tensor = img_tensor.unsqueeze(0).to(device)
-                        img_tensor_rgb = img_tensor[:, [2, 1, 0], :, :]
+                        img_tensor_rgb = img_tensor[:, [2, 1, 0], :, :]  # BGR -> RGB
 
                         with torch.no_grad():
                             inpainted_tensor = model(img_tensor_rgb, mask_tensor)
 
-                        inpainted_bgr = inpainted_tensor[:, [2, 1, 0], :, :]
-                        inpainted_bgr = inpainted_bgr.clamp(0, 1).mul(255).byte()
-                        inpainted_np = inpainted_bgr.squeeze(0).permute(1, 2, 0).cpu().numpy()
-                        frame_bgr[cy1:cy2, cx1:cx2] = inpainted_np
+                        # 4. 后处理
+                        inpainted_bgr_small = inpainted_tensor[:, [2, 1, 0], :, :]  # RGB -> BGR
+                        inpainted_bgr_small = inpainted_bgr_small.clamp(0, 1).mul(255).byte()
+                        inpainted_np_small = inpainted_bgr_small.squeeze(0).permute(1, 2, 0).cpu().numpy()
+
+                        # 5. [还原] 将修复后的小图放大回原始尺寸
+                        # 使用线性插值还原
+                        inpainted_np_orig = cv2.resize(inpainted_np_small, (orig_w_crop, orig_h_crop),
+                                                       interpolation=cv2.INTER_LINEAR)
+
+                        # 6. 贴回原图
+                        frame_bgr[cy1:cy2, cx1:cx2] = inpainted_np_orig
 
                     output_queue.put(frame_bgr)
                 except Exception as e:
@@ -312,7 +368,6 @@ def inpaint_video_intervals(video_path: str, output_path: str, repair_info_list:
 
         if ef <= sf: continue
 
-
         if seg['type'] == 'keep':
             _extract_segment_ffmpeg(video_path, sf / fps, (ef - sf) / fps, seg_file)
         else:
@@ -320,8 +375,8 @@ def inpaint_video_intervals(video_path: str, output_path: str, repair_info_list:
 
         if os.path.exists(seg_file):
             segment_files.append(seg_file)
-        print(f"Processing segment {i + 1}/{len(segments)} [{seg['type'].upper()}]: Frames {sf}-{ef} 耗时 {time.time() - seg_start_time:.2f}s")
-
+        print(
+            f"Processing segment {i + 1}/{len(segments)} [{seg['type'].upper()}]: Frames {sf}-{ef} 耗时 {time.time() - seg_start_time:.2f}s")
 
     cap.release()
 
@@ -378,12 +433,29 @@ if __name__ == '__main__':
     else:
         global_lama = None
 
-    video_file = r"W:\project\python_project\auto_video\videos\material\7459184511578852646\7459184511578852646_static_cut.mp4"
+    video_file = r"W:\project\python_project\auto_video\videos\material\7602198039888989481\7602198039888989481_static_cut.mp4"
     output_video = video_file.replace(".mp4", "_inpainted_fast.mp4")
 
     # box结构: [x, y]
     formatted_boxes = [[
-        [389, 914], [1049, 914], [1049, 954], [389, 954]
+
+            [
+                423,
+                1749
+            ],
+            [
+                3408,
+                1749
+            ],
+            [
+                3408,
+                2048
+            ],
+            [
+                423,
+                2048
+            ]
+
     ]]
 
     repair_info = [
