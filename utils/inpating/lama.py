@@ -306,12 +306,12 @@ def inpaint_video_intervals(video_path: str, output_path: str, repair_info_list:
     start_time = time.time()
 
     for i, seg in enumerate(segments):
+        seg_start_time = time.time()
         seg_file = os.path.join(temp_dir, f"seg_{i:04d}.mp4")
         sf, ef = seg['start'], seg['end']
 
         if ef <= sf: continue
 
-        print(f"Processing segment {i + 1}/{len(segments)} [{seg['type'].upper()}]: Frames {sf}-{ef}")
 
         if seg['type'] == 'keep':
             _extract_segment_ffmpeg(video_path, sf / fps, (ef - sf) / fps, seg_file)
@@ -320,6 +320,8 @@ def inpaint_video_intervals(video_path: str, output_path: str, repair_info_list:
 
         if os.path.exists(seg_file):
             segment_files.append(seg_file)
+        print(f"Processing segment {i + 1}/{len(segments)} [{seg['type'].upper()}]: Frames {sf}-{ef} 耗时 {time.time() - seg_start_time:.2f}s")
+
 
     cap.release()
 
