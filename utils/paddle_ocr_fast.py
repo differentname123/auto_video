@@ -18,7 +18,7 @@ def _get_model_paths():
     models_dir = os.path.join(base_dir, "models_monkt")
     det_path = os.path.join(models_dir, "detection", "v5", "ch_PP-OCRv5_mobile_det.onnx")
 
-    # det_path = os.path.join(models_dir, "detection", "v5", "det_v4.onnx")
+    det_path = os.path.join(models_dir, "detection", "v5", "det.onnx")
     rec_path = os.path.join(models_dir, "languages", "chinese", "rec.onnx")
     keys_path = os.path.join(models_dir, "languages", "chinese", "dict.txt")
 

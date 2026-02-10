@@ -458,9 +458,7 @@ if __name__ == '__main__':
 
     ]]
 
-    repair_info = [
-        {"start": 0, "end": 5000, "boxs": formatted_boxes}
-    ]
+    repair_info = [{'boxs': [[[1093, 14], [1897, 14], [1897, 293], [1093, 293]]], 'end': 1033.3333333333335, 'start': 133.33333333333334}, {'boxs': [[[1035, 0], [1981, 0], [1981, 299], [1035, 299]]], 'end': 1933.3333333333333, 'start': 1033.3333333333335}]
 
     if os.path.exists(video_file) and global_lama:
         try:

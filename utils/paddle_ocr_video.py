@@ -6,9 +6,264 @@ import traceback
 import time
 import shutil
 
-from utils.common_utils import save_json
+from utils.common_utils import save_json, read_json
+from utils.inpating.lama import inpaint_video_intervals
 # 假设这两个函数在 utils.paddle_ocr_fast 中
 from utils.paddle_ocr_fast import run_fast_det_rec_ocr, _init_engine
+import json
+import copy
+from difflib import SequenceMatcher
+
+
+def calculate_iou(box1, box2):
+    """简单的辅助函数，用于计算两个框的重叠程度（可选，此处主要靠文字和时间修复）"""
+    # 这里主要依赖文字相似度，暂不需要复杂的IoU计算，
+    # 但保留此接口以便未来扩展空间位置校验。
+    return 0
+
+
+def get_text_similarity(str1, str2):
+    """计算两个字符串的相似度"""
+    if not str1 or not str2:
+        return 0.0
+    return SequenceMatcher(None, str1, str2).ratio()
+
+
+def get_union_box(boxes):
+    """计算一组框的最小包围框 (Union Box)"""
+    if not boxes:
+        return []
+
+    # 展平所有坐标点
+    all_x = []
+    all_y = []
+    for box in boxes:
+        # box 格式通常为 [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        if not box: continue
+        for point in box:
+            all_x.append(point[0])
+            all_y.append(point[1])
+
+    if not all_x or not all_y:
+        return []
+
+    min_x, max_x = min(all_x), max(all_x)
+    min_y, max_y = min(all_y), max(all_y)
+
+    # 返回标准的4点矩形框
+    return [
+        [min_x, min_y],
+        [max_x, min_y],
+        [max_x, max_y],
+        [min_x, max_y]
+    ]
+
+
+def optimize_ocr_results(raw_data):
+    # 1. 初始化：计算平均帧间隔，用于推算结束时间
+    if len(raw_data) > 1:
+        frame_duration = raw_data[1]['timestamp'] - raw_data[0]['timestamp']
+    else:
+        frame_duration = 33.33  # 默认 30fps
+
+    # 提取所有出现的 key
+    all_keys = set()
+    for frame in raw_data:
+        if 'ocr_data' in frame:
+            for k in frame['ocr_data']:
+                all_keys.add(k)
+
+    # 将数据转为按 Key 索引的轨迹列表: tracks[key] = [ {timestamp, text, box}, ... ]
+    # 这一步是为了方便对单个物体进行时序修复
+    tracks = {k: [] for k in all_keys}
+
+    # 填充轨迹，保持帧的顺序
+    for i, frame in enumerate(raw_data):
+        ts = frame['timestamp']
+        ocr_data = frame.get('ocr_data', {})
+
+        for k in all_keys:
+            if k in ocr_data:
+                tracks[k].append({
+                    'index': i,
+                    'timestamp': ts,
+                    'text': ocr_data[k].get('text', ''),
+                    'box': ocr_data[k].get('box', [])
+                })
+            else:
+                # 这一帧没有这个key，填空
+                tracks[k].append({
+                    'index': i,
+                    'timestamp': ts,
+                    'text': '',
+                    'box': []
+                })
+
+    # 2. 修复逻辑 (Repair)
+    # 针对每个key的轨迹进行双向修复
+    for k in tracks:
+        track = tracks[k]
+        n = len(track)
+
+        # 多次遍历以处理连续的错误
+        # 逻辑：如果当前帧是空的或者包含了子串，但前后有相同的“强”文字，则修复
+
+        # 简单窗口修复（窗口大小可以根据实际情况调整，这里设为前后各看2帧）
+        # 这里使用一个简单的逻辑：找到连续的非空文本块，然后填补中间的空隙
+
+        # Pass 1: 填补短小的空隙 (Gap Filling) 和 修复相似文本
+        # 比如: "A", "", "A" -> "A", "A", "A"
+        # 比如: "ABC", "AB", "ABC" -> "ABC", "ABC", "ABC"
+
+        for i in range(1, n - 1):
+            prev_frame = track[i - 1]
+            curr_frame = track[i]
+            next_frame = track[i + 1]
+
+            # 如果前后文字一致且非空
+            if prev_frame['text'] and prev_frame['text'] == next_frame['text']:
+                # 如果当前为空，或者当前文字是前后文字的子串/相似度高
+                is_weak = (not curr_frame['text']) or \
+                          (len(curr_frame['text']) < len(prev_frame['text']) and curr_frame['text'] in prev_frame[
+                              'text']) or \
+                          (get_text_similarity(curr_frame['text'], prev_frame['text']) > 0.6)
+
+                if is_weak and curr_frame['text'] != prev_frame['text']:
+                    curr_frame['text'] = prev_frame['text']
+                    # 框也需要修复，暂时复用上一帧的框，稍后会重新计算聚合框
+                    if not curr_frame['box']:
+                        curr_frame['box'] = prev_frame['box']
+
+        # Pass 2: 处理稍大一点的空隙 (比如中间空了2帧)
+        # 这里的逻辑是寻找每一个非空文本的“段”，如果两个段文本相同且距离很近，合并它们
+        # 简单起见，再进行一次更激进的扫描
+        for i in range(1, n - 2):
+            # 检查 pattern: Text, Empty, Empty, Text
+            if track[i]['text'] == '' and track[i + 1]['text'] == '':
+                prev_f = track[i - 1]
+                next_f = track[i + 2]
+                if prev_f['text'] and prev_f['text'] == next_f['text']:
+                    track[i]['text'] = prev_f['text']
+                    track[i]['box'] = prev_f['box']
+                    track[i + 1]['text'] = prev_f['text']
+                    track[i + 1]['box'] = prev_f['box']
+
+    # 3. 生成独立的事件段 (Generate Segments) 并计算包围框
+    # 格式: { 'key': '0', 'text': 'xxx', 'start': 0.0, 'end': 100.0, 'box': [...] }
+    all_segments = []
+
+    for k in tracks:
+        track = tracks[k]
+        if not track: continue
+
+        current_segment = None
+
+        for i, frame in enumerate(track):
+            txt = frame['text']
+            box = frame['box']
+            ts = frame['timestamp']
+
+            if not txt:
+                # 遇到空文本，结束当前段
+                if current_segment:
+                    # 计算该段的 Union Box
+                    current_segment['box'] = get_union_box(current_segment['raw_boxes'])
+                    # 移除临时数据
+                    del current_segment['raw_boxes']
+                    # 设定结束时间 (当前帧的时间作为上一段的结束点，或者当前帧时间+duration)
+                    # 通常认为上一帧结束时刻是当前帧开始时刻
+                    current_segment['end'] = ts
+                    all_segments.append(current_segment)
+                    current_segment = None
+            else:
+                # 有文本
+                if current_segment is None:
+                    # 开启新段
+                    current_segment = {
+                        'key': k,
+                        'text': txt,
+                        'start': ts,
+                        'end': ts + frame_duration,  # 暂定
+                        'raw_boxes': [box] if box else []
+                    }
+                else:
+                    # 检查文本是否变化
+                    if txt == current_segment['text']:
+                        # 文本相同，延续段
+                        if box:
+                            current_segment['raw_boxes'].append(box)
+                        current_segment['end'] = ts + frame_duration
+                    else:
+                        # 文本变了，结束旧段，开启新段
+                        current_segment['box'] = get_union_box(current_segment['raw_boxes'])
+                        del current_segment['raw_boxes']
+                        # 旧段结束时间是当前帧开始时间
+                        current_segment['end'] = ts
+                        all_segments.append(current_segment)
+
+                        current_segment = {
+                            'key': k,
+                            'text': txt,
+                            'start': ts,
+                            'end': ts + frame_duration,
+                            'raw_boxes': [box] if box else []
+                        }
+
+        # 循环结束处理最后的段
+        if current_segment:
+            current_segment['box'] = get_union_box(current_segment['raw_boxes'])
+            del current_segment['raw_boxes']
+            all_segments.append(current_segment)
+
+    # 4. 时序切片 (Time Slicing)
+    # 我们需要把不同key的重叠时间段压扁成无重叠的线性时间轴
+
+    # 收集所有关键时间点（切点）
+    cut_points = set()
+    for seg in all_segments:
+        cut_points.add(seg['start'])
+        cut_points.add(seg['end'])
+
+    sorted_points = sorted(list(cut_points))
+
+    final_output = []
+
+    # 遍历每一个微小的时间区间
+    for i in range(len(sorted_points) - 1):
+        t_start = sorted_points[i]
+        t_end = sorted_points[i + 1]
+        mid_time = (t_start + t_end) / 2  # 取中点判断区间归属
+
+        # 找出这个区间内活跃的所有 segments
+        active_segments = []
+        for seg in all_segments:
+            # 判断 segment 是否覆盖这个区间
+            # 使用稍微宽松的判定防止浮点数精度问题: start <= mid < end
+            if seg['start'] <= mid_time and seg['end'] > mid_time:
+                active_segments.append(seg)
+
+        if not active_segments:
+            continue
+
+        # 构建当前区间的 ocr_data
+        current_ocr_data = {}
+        for seg in active_segments:
+            current_ocr_data[seg['key']] = {
+                'text': seg['text'],
+                'box': seg['box']
+            }
+
+        # 尝试合并：如果当前生成的 ocr_data 与 result 中最后一个条目的 ocr_data 完全一致，则只延长结束时间
+        if final_output and final_output[-1]['ocr_data'] == current_ocr_data:
+            final_output[-1]['end'] = t_end
+        else:
+            final_output.append({
+                'start': t_start,
+                'end': t_end,
+                'ocr_data': current_ocr_data
+            })
+
+    return final_output
 
 
 def crop_polygon(img, points):
@@ -38,7 +293,7 @@ def get_image_signature(img, width=48):
     return gray
 
 
-def video_ocr_processor(video_path, ocr_info, similarity_threshold=10):
+def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
     """
     高性能视频 OCR 处理器：扫描 -> 批量OCR -> 合并结果
     优化：数学计算时间戳 + 图像指纹缓存机制
@@ -50,6 +305,12 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=10):
     global_engine = _init_engine(use_gpu=True)
     video_dir = os.path.dirname(os.path.abspath(video_path))
     temp_dir = os.path.join(video_dir, f"temp_ocr")
+    if os.path.exists(temp_dir):
+        try:
+            shutil.rmtree(temp_dir)
+        except:
+            pass
+
     os.makedirs(temp_dir, exist_ok=True)
 
     cap = cv2.VideoCapture(video_path)
@@ -224,7 +485,64 @@ def video_ocr_processor(video_path, ocr_info, similarity_threshold=10):
     return total_final_results
 
 
+def transform_ocr_to_repair_info(raw_data):
+    """
+    将原始 OCR 数据列表转换为 repair_info 格式
+    """
+    repair_info = []
+
+    for item in raw_data:
+        # 提取时间
+        start_time = item.get('start')
+        end_time = item.get('end')
+
+        # 提取并格式化该时间段内的所有 box
+        formatted_boxes = []
+        ocr_data = item.get('ocr_data', {})
+
+        # ocr_data 是一个字典 {'0': {...}, '1': {...}}，我们需要遍历它的值
+        for key in ocr_data:
+            obj = ocr_data[key]
+            if 'box' in obj:
+                raw_box = obj['box']
+                # 原始数据是浮点数，目标格式通常是整数坐标
+                # 这里将坐标四舍五入转为 int
+                cleaned_box = [
+                    [int(round(point[0])), int(round(point[1]))]
+                    for point in raw_box
+                ]
+                formatted_boxes.append(cleaned_box)
+
+        # 构造单个结果条目
+        entry = {
+            "start": start_time,
+            "end": end_time,
+            "boxs": formatted_boxes  # 注意目标格式使用的是 "boxs"
+        }
+        repair_info.append(entry)
+
+    return repair_info
+
+def inpaint_subtitle_box():
+    """
+    直接修复精确的字幕区域
+    :return:
+    """
+    results = read_json("video_ocr_results.json")
+    format_result = optimize_ocr_results(results)
+    print()
+    video_file = r"W:\project\python_project\auto_video\videos\material\7602198039888989481\7602198039888989481_static_cut.mp4"
+    output_video = video_file.replace(".mp4", "_inpainted_fast.mp4")
+    repair_info = transform_ocr_to_repair_info(format_result)
+    repair_info = repair_info[:2]
+    inpaint_video_intervals(video_file, output_video, repair_info)
+
+
 if __name__ == "__main__":
+    # inpaint_subtitle_box()
+
+
+
     # 配置区
     video_file = r"W:\project\python_project\auto_video\videos\material\7602198039888989481\7602198039888989481_static_cut.mp4"
 
@@ -249,8 +567,9 @@ if __name__ == "__main__":
     ]]
 
     ocr_info = [
-        {"start": 0, "end": 5000, "boxs": formatted_boxes}
+        {"start": 0, "end": 500000, "boxs": formatted_boxes}
     ]
+
 
     try:
         results = video_ocr_processor(video_file, ocr_info)
