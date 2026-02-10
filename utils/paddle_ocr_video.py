@@ -98,7 +98,7 @@ def optimize_ocr_results(raw_data):
                     'box': []
                 })
 
-    # 2. 修复逻辑 (Repair)
+    # 2. 修复逻辑 (Repair) - 原始逻辑保留，处理中间的抖动
     for k in tracks:
         track = tracks[k]
         n = len(track)
@@ -203,7 +203,7 @@ def optimize_ocr_results(raw_data):
             return boxes
 
     # 3. 生成独立的事件段 (Generate Segments) 并计算包围框
-    all_segments = []
+    all_segments_list = []  # 改名，避免歧义，这是一个扁平列表
 
     for k in tracks:
         track = tracks[k]
@@ -224,7 +224,7 @@ def optimize_ocr_results(raw_data):
 
                     del current_segment['raw_boxes']
                     current_segment['end'] = ts
-                    all_segments.append(current_segment)
+                    all_segments_list.append(current_segment)
                     current_segment = None
             else:
                 # 有文本
@@ -249,7 +249,7 @@ def optimize_ocr_results(raw_data):
 
                         del current_segment['raw_boxes']
                         current_segment['end'] = ts
-                        all_segments.append(current_segment)
+                        all_segments_list.append(current_segment)
 
                         current_segment = {
                             'key': k,
@@ -264,7 +264,73 @@ def optimize_ocr_results(raw_data):
             valid_boxes = _filter_boxes_by_ratio(current_segment['raw_boxes'], current_segment['text'])
             current_segment['box'] = get_union_box(valid_boxes)
             del current_segment['raw_boxes']
-            all_segments.append(current_segment)
+            all_segments_list.append(current_segment)
+
+    # =========================================================================
+    # [新增] 3.5. 深度合并碎片段 (Fix Start-up Noise & Fragmented Segments)
+    # 解决 "TER..." 和 "..." 被切分为两段的问题
+    # =========================================================================
+
+    # 1. 先按 Key 分组
+    segments_by_key = {}
+    for seg in all_segments_list:
+        k = seg['key']
+        if k not in segments_by_key:
+            segments_by_key[k] = []
+        segments_by_key[k].append(seg)
+
+    merged_segments = []
+
+    for k in segments_by_key:
+        segs = sorted(segments_by_key[k], key=lambda x: x['start'])
+        if not segs: continue
+
+        # 迭代合并
+        curr = segs[0]
+        for i in range(1, len(segs)):
+            next_seg = segs[i]
+
+            # 判断时间连续性 (允许 1-2 帧的微小误差，例如 100ms)
+            time_gap = next_seg['start'] - curr['end']
+            is_continuous = time_gap < 100.0
+
+            if is_continuous:
+                txt1 = curr['text']
+                txt2 = next_seg['text']
+
+                # 判断文本相似性或包含关系
+                # 场景: "TER就把..." vs "就把..."
+                similarity = get_text_similarity(txt1, txt2)
+                is_subset = (txt1 in txt2) or (txt2 in txt1)
+
+                # 如果连续且相似
+                if similarity > 0.6 or is_subset:
+                    # 决定保留哪个文本：保留持续时间更长的那个（通常是正确的）
+                    dur1 = curr['end'] - curr['start']
+                    dur2 = next_seg['end'] - next_seg['start']
+
+                    if dur2 > dur1:
+                        # 后面的段更稳定，curr 变为 next 的一部分
+                        curr['text'] = next_seg['text']
+                        curr['end'] = next_seg['end']
+                        # 合并Box
+                        curr['box'] = get_union_box([curr['box'], next_seg['box']])
+                    else:
+                        # 前面的段更稳定，next 变为 curr 的一部分
+                        curr['end'] = next_seg['end']
+                        curr['box'] = get_union_box([curr['box'], next_seg['box']])
+
+                    # 继续下一轮，curr 保持不变（已经吸收了next）
+                    continue
+
+            # 无法合并，保存 curr，切换 next 为 curr
+            merged_segments.append(curr)
+            curr = next_seg
+
+        merged_segments.append(curr)
+
+    all_segments = merged_segments  # 替换原来的列表
+    # =========================================================================
 
     # 4. 时序切片 (Time Slicing)
     cut_points = set()
@@ -279,6 +345,10 @@ def optimize_ocr_results(raw_data):
         t_start = sorted_points[i]
         t_end = sorted_points[i + 1]
         mid_time = (t_start + t_end) / 2
+
+        # 过滤极短的时间片 (可选，防止浮点数误差产生极细切片)
+        if t_end - t_start < 1.0:
+            continue
 
         active_segments = []
         for seg in all_segments:
@@ -295,13 +365,14 @@ def optimize_ocr_results(raw_data):
                 'box': seg['box']
             }
 
+        # 合并相邻且内容完全一致的切片结果
         if final_output and final_output[-1]['ocr_data'] == current_ocr_data:
             final_output[-1]['end'] = t_end
         else:
             final_output.append({
-                'start': t_start,
-                'end': t_end,
-                'ocr_data': current_ocr_data
+                'ocr_data': current_ocr_data,
+                'start': int(t_start),
+                'end': int(t_end),
             })
 
     return final_output
@@ -316,16 +387,39 @@ def crop_polygon(img, points):
 
 def get_image_signature(img, width=48):
     """
-    生成图像指纹 (优化版)
-    1. 使用 INTER_NEAREST 极速缩放
-    2. 直接转灰度
-    3. 返回用于比对的小型矩阵
+    生成图像指纹 (优化版 - 聚焦中心区域)
+    1. 裁切掉上下左右的边缘背景，只保留中间更有可能包含文字的区域进行比对。
+       这能显著提高由于字幕框过大导致的微小文字变化识别率。
+    2. 使用 INTER_NEAREST 极速缩放
+    3. 直接转灰度
     """
     if img is None or img.size == 0:
         return None
 
     h, w = img.shape[:2]
+
+    # --- [新增逻辑] 聚焦中间区域 (Center Crop) ---
+    # 只有当图片尺寸足够时才裁剪，防止极小图出错
+    if h > 8 and w > 8:
+        # 垂直方向：保留中间 50% (去掉顶部 25% 和底部 25%)
+        # 字幕通常在框的垂直居中位置，上下边缘多为背景噪音
+        y_start = int(h * 0.25)
+        y_end = int(h * 0.75)
+
+        # 水平方向：保留中间 70% (去掉左边 15% 和右边 15%)
+        # 稍微保留宽一点，防止长字幕首尾差异被忽略，但去掉最边缘的背景
+        x_start = int(w * 0.15)
+        x_end = int(w * 0.85)
+
+        # 再次校验防止切空（对于极扁或极细的图）
+        if y_end > y_start and x_end > x_start:
+            img = img[y_start:y_end, x_start:x_end]
+
+    # 获取裁切后的新尺寸
+    h, w = img.shape[:2]
+
     # 保持比例计算新高度，防止变形导致的误判
+    # 注意：虽然裁切改变了原图视野，但只要前后帧都按同样比例裁切，比对依然有效
     new_h = int(width * h / w) if w > 0 else width
 
     # 性能优化点：使用 INTER_NEAREST (最近邻插值) 替代默认的线性插值，速度快 3-5 倍
@@ -334,7 +428,7 @@ def get_image_signature(img, width=48):
     return gray
 
 
-def video_ocr_processor(video_path, ocr_info, similarity_threshold=20):
+def video_ocr_processor(video_path, ocr_info, similarity_threshold=25):
     """
     高性能视频 OCR 处理器：扫描 -> 批量OCR -> 合并结果
     优化：数学计算时间戳 + 图像指纹缓存机制 + 坐标系还原
@@ -603,23 +697,23 @@ if __name__ == "__main__":
     # 示例框
 
     raw_box = [
-        [
-            423,
-            1549
-        ],
-        [
-            3408,
-            1549
-        ],
-        [
-            3408,
-            2048
-        ],
-        [
-            423,
-            2048
-        ]
+    [
+        423,
+        1749
+    ],
+    [
+        3408,
+        1749
+    ],
+    [
+        3408,
+        2048
+    ],
+    [
+        423,
+        2048
     ]
+]
 
 
     top_left, bottom_right, _, _ = adjust_subtitle_box(video_file, raw_box, 0.1)
@@ -636,7 +730,7 @@ if __name__ == "__main__":
 
 
     ocr_info = [
-        {"start": 0, "end": 5000, "boxs": formatted_boxes}
+        {"start": 00, "end": 450000, "boxs": formatted_boxes}
     ]
 
 

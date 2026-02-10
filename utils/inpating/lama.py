@@ -315,12 +315,25 @@ def inpaint_video_intervals(video_path: str, output_path: str, repair_info_list:
     for info in repair_info_list:
         start_ms, end_ms = info.get('start', 0), info.get('end', 0)
         boxes = info.get('boxs', [])
-        start_f = max(0, int((start_ms / 1000.0) * fps))
-        end_f = min(total_frames, int((end_ms / 1000.0) * fps))
+
+        # 【关键修改】使用 round() 替代 int() 直接截断，与 OCR 逻辑保持一致
+        # 解释：21533ms * 30fps = 645.99 -> round后为 646
+        start_f = max(0, int(round((start_ms / 1000.0) * fps)))
+        end_f = min(total_frames, int(round((end_ms / 1000.0) * fps)))
+
+        # 【逻辑优化】防止 start_f == end_f 时导致切片为空
+        # 如果 start_ms 和 end_ms 非常接近，round 结果可能相同，导致这帧被漏掉
+        # 只有当计算结果真的相同时，且这确实是一个瞬间动作才跳过，
+        # 但通常 OCR 的时间段是闭区间，建议由 end_f 负责控制结束
+
         if start_f < end_f:
             is_repair_frame[start_f:end_f] = True
             for f in range(start_f, end_f):
                 frames_to_repair.setdefault(f, []).extend(boxes)
+        elif start_f == end_f and start_f < total_frames:
+            # 边缘情况处理：如果时间段极短但仍需处理该单帧
+            is_repair_frame[start_f] = True
+            frames_to_repair.setdefault(start_f, []).extend(boxes)
 
     min_skip_frames = int(fps * 2.0)
     segments = []

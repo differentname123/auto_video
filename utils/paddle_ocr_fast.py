@@ -45,7 +45,7 @@ def _init_engine(use_gpu: bool):
             # 限制检测时图片的长边长度。
             # 默认是 960。对于简单的大字字幕，降低到 320 或 480 即可。
             # 这会极大减少计算量，速度提升 2~3 倍。
-            # det_limit_side_len=480,
+            det_limit_side_len=480,
 
             # 检测框阈值，保持默认或适当降低以防止漏检
             det_db_box_thresh=0.5,
@@ -307,24 +307,22 @@ def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: fl
 
 
 def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=None, max_width: int = 1500,
-                         score_threshold: float = 0.5) -> dict:
+                         score_threshold: float = 0.5, padding_size: int = 50, save_box: bool = False) -> dict:
     """
     极速检测+识别模式：针对条状字幕图优化。
-    通过限制输入图片尺寸（max_width）来加速检测器运行，并合并结果。
 
-    :param max_width: 限制图片的最大宽度，超过此宽度将按比例缩放。推荐值 1000~2000。
+    优化点说明：
+    1. 使用 BORDER_REPLICATE 代替纯白填充，防止产生强边缘误识别。
+    2. 增加坐标 Clip 逻辑，防止出现负数或超出图片范围的坐标。
     """
     t_start = time.time()
 
-    # 1. 引擎初始化逻辑
     local_engine = False
     if engine is None:
-        # 注意：此处假设外部有 _init_engine 函数，保持原逻辑不变
         try:
             engine = _init_engine(use_gpu)
             local_engine = True
         except NameError:
-            # 防止上下文中没有 _init_engine 的报错处理（仅作代码完整性示意）
             pass
 
     if engine is None:
@@ -332,8 +330,6 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
 
     results = []
     success_count = 0
-
-    # print(f"Starting Fast Det+Rec OCR for {len(image_path_list)} images (Max Width: {max_width}px)...")
 
     for img_path in image_path_list:
         item_result = {"file": img_path, "status": "failed"}
@@ -344,7 +340,6 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
             continue
 
         try:
-            # 1. 读取图片
             with open(img_path, 'rb') as f:
                 img_bytes = np.frombuffer(f.read(), np.uint8)
 
@@ -356,73 +351,99 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
 
             h, w = img.shape[:2]
 
-            # 2. 核心加速点：图片预缩放
-            scale_ratio = 1.0  # 初始化缩放比例，用于后续坐标还原
+            # 1. 图片预缩放
+            scale_ratio = 1.0
             if w > max_width:
-                # 保持宽高比进行缩放
                 scale_ratio = max_width / w
                 new_h = int(h * scale_ratio)
                 img_resized = cv2.resize(img, (max_width, new_h), interpolation=cv2.INTER_LINEAR)
             else:
                 img_resized = img
 
-            # 3. 推理 (开启检测，关闭分类)
-            # RapidOCR 会自动处理图像数据格式
-            ocr_result, _ = engine(img_resized, use_det=True, use_cls=False, use_rec=True)
+            # --- 核心修改 1：使用 BORDER_REPLICATE 填充 ---
+            # 解释：复制边缘像素，而不是填充纯色。这样背景自然过渡，不会形成把模型搞晕的"黑白分界线"
+            if padding_size > 0:
+                img_input = cv2.copyMakeBorder(
+                    img_resized,
+                    padding_size, padding_size, padding_size, padding_size,
+                    cv2.BORDER_REPLICATE  # <--- 改动在这里
+                )
+            else:
+                img_input = img_resized
+
+            # 2. 推理
+            ocr_result, _ = engine(img_input, use_det=True, use_cls=False, use_rec=True)
 
             if ocr_result:
-                # --- 结果清洗与合并 ---
                 ocr_result.sort(key=lambda x: x[0][0][0])
-
                 combined_text = []
                 min_score = 1.0
-
-                # 用于收集所有有效框的坐标点
                 all_x_coords = []
                 all_y_coords = []
 
                 for item in ocr_result:
                     box, text, score = item
+                    if score < score_threshold or not text:
+                        continue
 
-                    if score < score_threshold:
-                        continue
-                    # 当 text不为空
-                    if not text:
-                        continue
                     combined_text.append(text)
                     min_score = min(min_score, score)
-
-                    # 收集该文本块的四个顶点坐标
                     for point in box:
                         all_x_coords.append(point[0])
                         all_y_coords.append(point[1])
 
                 final_text = "".join(combined_text)
 
-                # 只有当识别到文本且有坐标时才计算包围框
                 if final_text and all_x_coords:
-                    # 1. 找到所有点的极值（最小外接矩形）
+                    # 找到 padding 坐标系下的极值
                     min_x = min(all_x_coords)
                     max_x = max(all_x_coords)
                     min_y = min(all_y_coords)
                     max_y = max(all_y_coords)
 
-                    # 2. 将坐标还原回原图尺寸 (除以缩放比例)
-                    # 构造四个顶点：[左上, 右上, 右下, 左下]
+                    # --- 核心修改 2：坐标还原与截断 (Safety Clip) ---
+
+                    # 步骤A: 减去 Padding 并除以缩放比例
+                    real_min_x = (min_x - padding_size) / scale_ratio
+                    real_max_x = (max_x - padding_size) / scale_ratio
+                    real_min_y = (min_y - padding_size) / scale_ratio
+                    real_max_y = (max_y - padding_size) / scale_ratio
+
+                    # 步骤B: 强制限制在原图 [0, w] 和 [0, h] 范围内
+                    # 使用 np.clip 确保坐标不小于0，也不大于图片实际宽高
+                    real_min_x = np.clip(real_min_x, 0, w)
+                    real_max_x = np.clip(real_max_x, 0, w)
+                    real_min_y = np.clip(real_min_y, 0, h)
+                    real_max_y = np.clip(real_max_y, 0, h)
+
                     merged_box = [
-                        [min_x / scale_ratio, min_y / scale_ratio],
-                        [max_x / scale_ratio, min_y / scale_ratio],
-                        [max_x / scale_ratio, max_y / scale_ratio],
-                        [min_x / scale_ratio, max_y / scale_ratio]
+                        [float(real_min_x), float(real_min_y)],
+                        [float(real_max_x), float(real_min_y)],
+                        [float(real_max_x), float(real_max_y)],
+                        [float(real_min_x), float(real_max_y)]
                     ]
 
                     item_result.update({
                         "text": final_text,
                         "score": float(min_score),
-                        "box": merged_box,  # 新增：合并后的最小包围框
+                        "box": merged_box,
                         "status": "success"
                     })
                     success_count += 1
+
+                    # 画框逻辑 (保持不变，但现在坐标是安全的了)
+                    if save_box:
+                        try:
+                            # 只有当框有实际面积时才画（避免由clip导致的极窄框报错）
+                            if real_max_x > real_min_x and real_max_y > real_min_y:
+                                pt1 = (int(real_min_x), int(real_min_y))
+                                pt2 = (int(real_max_x), int(real_max_y))
+                                cv2.rectangle(img, pt1, pt2, (0, 0, 255), 2)
+                                file_name, ext = os.path.splitext(img_path)
+                                save_path = f"{file_name}_boxed{ext}"
+                                cv2.imwrite(save_path, img)
+                        except Exception as e_save:
+                            print(f"Warning: Failed to save boxed image: {e_save}")
                 else:
                     item_result["status"] = "filtered"
             else:
@@ -434,7 +455,6 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
 
         results.append(item_result)
 
-    # 4. 清理资源
     if local_engine:
         del engine
         gc.collect()
@@ -446,9 +466,10 @@ def run_fast_det_rec_ocr(image_path_list: list, use_gpu: bool = True, engine=Non
         "total": len(image_path_list),
         "success": success_count,
         "time_cost": f"{total_time:.4f}s",
-        "avg_time": f"{total_time / len(image_path_list):.4f}s" if image_path_list else 0,
         "data": results
     }
+
+
 
 if __name__ == "__main__":
     image_list = [r"W:\project\python_project\auto_video\videos\material\7602198039888989481\temp_ocr\frame48_box0.jpg"]
@@ -463,8 +484,8 @@ if __name__ == "__main__":
     print("\n--- 极速识别模式 (纯识别) ---")
     global_engine = _init_engine(use_gpu=True)
     total_cost = 0.0
-    for i in range(1):
-        result = run_fast_det_rec_ocr(image_list, engine=global_engine)
+    for i in range(5):
+        result = run_fast_det_rec_ocr(image_list, engine=global_engine, save_box=True)
         print(f"总耗时: {result['time_cost']}")
         total_cost += float(result['time_cost'][:-1])
         for item in result['data']:

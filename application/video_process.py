@@ -151,7 +151,7 @@ def _process_single_video(video_id, video_info, is_need_narration):
     # owner_asr_info_list = correct_owner_timestamps(owner_asr_info_list, video_duration_ms)
     update_time = video_info.get('update_time', datetime.min)
     # 目标日期：2026-02-04 00:00:00
-    target_date = datetime(2026, 2, 4)
+    target_date = datetime(2026, 2, 11)
     # 判断条件：只要 owner_asr_info_list 里没有 "fixed"，或者更新时间在 2026-02-04 之前
     if 'fixed' not in str(owner_asr_info_list) or update_time < target_date:
         owner_asr_info_list = fix_owner_asr_by_subtitle(video_info)
