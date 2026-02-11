@@ -826,8 +826,8 @@ def get_send_count_by_hour():
         max_exist_similar_count = 9
         max_total_count = 17
     elif 18 <= current_hour < 22:
-        max_exist_similar_count = 11
-        max_total_count = 19
+        max_exist_similar_count = 12
+        max_total_count = 20
     else:
         max_exist_similar_count = 13
         max_total_count = 21
