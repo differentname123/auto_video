@@ -726,11 +726,15 @@ def check_owner_asr(owner_asr_info, video_duration):
     """
     max_end_time_ms = 0
     error_info = 'asr文本检查通过'
+    has_owner = False
     # 使用 enumerate 获取索引和元素，便于日志记录
     for i, segment in enumerate(owner_asr_info):
         try:
             start_str = segment.get("start")
             end_str = segment.get("end")
+            speaker = segment.get("speaker", "")
+            if speaker == 'owner':
+                has_owner = True
 
             # 检查 start 和 end 是否为字符串，如果不是，则格式错误
             if not isinstance(start_str, str) or not isinstance(end_str, str):
@@ -762,6 +766,9 @@ def check_owner_asr(owner_asr_info, video_duration):
     # 循环结束后，检查 ASR 的最大时间是否超过视频总时长（允许1秒的误差）
     if max_end_time_ms > video_duration + 1000:
         error_info = f"[ERROR] ASR 最大结束时间 {max_end_time_ms} ms 超过视频总时长 {video_duration} ms"
+        return False, error_info
+    if has_owner is False:
+        error_info = f"[ERROR] ASR 文本中未检测到任何 'owner' 说话人内容"
         return False, error_info
 
     # 为owner_asr_info增加source_clip_id字段，从1开始
