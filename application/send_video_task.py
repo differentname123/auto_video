@@ -528,6 +528,7 @@ def gen_standard_video_info_by_statistic_data(good_video_list):
         user_name = video_info.get('userName', '')
         video_type = get_user_type(user_name)
         final_score = video_info.get('final_score', 0)
+        final_score += 1000
         dig_type = 'exist_video'
         creative_guidance = f"标题尽量体现: {hot_video}"
 
@@ -541,6 +542,7 @@ def gen_standard_video_info_by_statistic_data(good_video_list):
             "creative_guidance": creative_guidance,
         }
         temp_dict.update(video_info)
+        temp_dict['final_score'] = final_score
         standard_video_list.append(temp_dict)
     return standard_video_list
 
@@ -698,8 +700,11 @@ def gen_user_detail_upload_info(manager, user_list):
         detail_info['need_count'] = need_count
         detail_info['send_count'] = 0
 
-
-
+    for name, info in user_detail_upload_info.items():
+        dig = info['dig_type']
+        print(f"\n{name}")
+        for typ, count in dig.items():
+            print(f"  {typ:18} → {count:2d}")
 
     return user_detail_upload_info
 
@@ -1108,7 +1113,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'zhong', 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'xiaomu', 'shun', 'jie', 'qiqixiao']
+    need_process_users = ['hong', 'dahao', 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana', 'xiaomu', 'shun', 'jie', 'qiqixiao']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
@@ -1118,6 +1123,8 @@ def send_good_plan(manager):
     to_upload_video_list = build_need_upload_video()
     used_video_list = []
     final_video_list = []
+
+
 
     for video_info in to_upload_video_list:
         chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info)
