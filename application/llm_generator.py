@@ -15,7 +15,7 @@ import re
 import time
 import traceback
 from collections import Counter
-
+import pypinyin
 from utils.paddle_ocr_base import run_subtitle_ocr
 
 # 定义全局信号量，限制 fix_logical_scene_info 的最大并发数为 3
@@ -1844,21 +1844,52 @@ def find_boundary_pairs(owner_info_list: list) -> list:
     return boundary_pairs
 
 
+def is_char_match_strict(c1: str, c2: str) -> bool:
+    """
+    严谨的字符匹配规则：追求判断的绝对正确。
+    """
+    # 1. 忽略大小写的精确匹配（解决 BGM vs bgm, 以及数字和标点）
+    if c1.lower() == c2.lower():
+        return True
+
+    # 2. 只有当两个字符都是纯中文字符时，才进行拼音的容错匹配
+    # \u4e00 到 \u9fa5 是基本汉字的 Unicode 范围
+    if not ('\u4e00' <= c1 <= '\u9fa5' and '\u4e00' <= c2 <= '\u9fa5'):
+        return False
+
+    # 3. 获取中文字符的【所有】可能读音（开启多音字全量模式）
+    # style=NORMAL 表示不带声调（比如 '木' -> 'mu'）
+    # 返回结果类似 [['mu']] 或者多音字 [['hang', 'xing']]
+    p1_list = pypinyin.pinyin(c1, style=pypinyin.Style.NORMAL, heteronym=True)
+    p2_list = pypinyin.pinyin(c2, style=pypinyin.Style.NORMAL, heteronym=True)
+
+    if not p1_list or not p2_list:
+        return False
+
+    # 将读音列表转换为集合
+    p1_set = set(p1_list[0])
+    p2_set = set(p2_list[0])
+
+    # 4. 只要两个字的读音集合有交集（哪怕是多音字碰巧有一个音一样），就视为同音匹配
+    return bool(p1_set & p2_set)
+
+
 def find_longest_common_substring(s1: str, s2: str) -> int:
     """
-    计算两个字符串的最长公共子串的长度。
-    这是一个经典的动态规划问题。
+    计算两个字符串的最长公共子串的长度（支持模糊匹配）。
     """
     m = [[0] * (1 + len(s2)) for _ in range(1 + len(s1))]
     longest = 0
+
     for x in range(1, 1 + len(s1)):
         for y in range(1, 1 + len(s2)):
-            if s1[x - 1] == s2[y - 1]:
+            if is_char_match_strict(s1[x - 1], s2[y - 1]):
                 m[x][y] = m[x - 1][y - 1] + 1
                 if m[x][y] > longest:
                     longest = m[x][y]
             else:
                 m[x][y] = 0
+
     return longest
 
 

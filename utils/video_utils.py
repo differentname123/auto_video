@@ -1189,11 +1189,21 @@ def cover_video_area_blur_super_robust(
     enable_expr = _build_enable_expr(time_ranges)
 
     # 6.2 视频模糊参数
-    geo_limit = min(w, h) // 2
+    min_dim = min(w, h)
 
-    luma_radius = min(blur_strength, geo_limit)
-    print(f"Calculated luma_radius: {luma_radius} (based on blur_strength={blur_strength} and geo_limit={geo_limit}) video_path {video_path}")
-    chroma_radius = min(blur_strength, 9)
+    # 【彻底修复内存越界/Segfault】
+    # 模糊核大小为 2*radius+1。为防止越界崩溃，需满足 2*R+1 <= min_dim，即 R <= (min_dim-1)//2。
+    # 追加 -1 作为安全冗余，防止 FFmpeg 底层边界处理 Bug。
+    luma_limit = max(0, (min_dim - 1) // 2 - 1)
+    luma_radius = min(blur_strength, luma_limit)
+    print(
+        f"Calculated luma_radius: {luma_radius} (based on blur_strength={blur_strength} and luma_limit={luma_limit}) video_path {video_path}")
+
+    # 色度平面在 YUV420p 下尺寸减半，应用相同的严谨推导公式
+    chroma_dim = min_dim // 2
+    chroma_limit = max(0, (chroma_dim - 1) // 2 - 1)
+    chroma_radius = min(blur_strength, chroma_limit)
+
     power = 2
     boxblur_params = f"{luma_radius}:{power}:{chroma_radius}:{power}"
 
