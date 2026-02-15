@@ -611,7 +611,8 @@ def build_need_upload_video():
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
     standard_good_video_list = gen_standard_video_info_by_statistic_data(good_video_list)
-
+    # standard_good_video_list = [video_info for video_info in standard_good_video_list if video_info.get('video_type') == 'game']
+    # return standard_good_video_list
     exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
     standard_dig_video_list = gen_standard_video_info_by_dig_data(exist_video_plan_info)
     combined_video_list = standard_good_video_list + standard_dig_video_list
