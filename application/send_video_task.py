@@ -1128,6 +1128,8 @@ def send_good_plan(manager):
 
 
     for video_info in to_upload_video_list:
+        if 'oinb' in str(video_info):
+            continue
         chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info)
         for user_name in chosen_user_list:
             copy_video_info = video_info.copy()
