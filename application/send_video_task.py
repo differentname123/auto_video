@@ -1006,7 +1006,7 @@ def upload_video(manager, video_info, user_detail_upload_info):
     :return:
     """
     final_score = video_info.get('final_score', 0)
-    is_high_score = final_score > 5000
+    is_high_score = final_score > 10000
     dig_type = video_info.get('dig_type', 'exist_video')
     user_name = video_info.get('user_name', 'dahao')
     hot_topic = video_info.get('hot_topic', '')

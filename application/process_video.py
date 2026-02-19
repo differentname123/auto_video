@@ -997,24 +997,27 @@ if __name__ == '__main__':
     #     "status": {"$ne": "666"}
     # }
 
+    query_2 = {
+        # "userName": {"$in": ["jie", "qiqixiao"]},
+        "status": "待投稿"
+    }
+
     # query_2 = {
-    #     "userName": {"$in": ["jie", "qiqixiao"]},
-    #     "status": "失败"
+    #     "upload_params.title": {
+    #         "$regex": "旭旭宝宝"
+    #     }
     # }
-
-    query_2 = {
-        "upload_params.title": {
-            "$regex": "旭旭宝宝"
-        }
-    }
-
-    query_2 = {
-        '_id': ObjectId("6981db70bfaf783377cf4407")
-    }
-    recover_task()
     #
+    # query_2 = {
+    #     '_id': ObjectId("6981db70bfaf783377cf4407")
+    # }
+    recover_task()
+
     # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     # print()
     # for task_info in all_task:
-    #     process_single_task(task_info, manager, gen_video=True)
-    #     break
+    #     upload_info = task_info.get('upload_info', {})
+    #     if '旭旭宝宝' in str(upload_info):
+    #         for value in upload_info:
+    #            value['category_id'] = 1008
+    #         manager.upsert_tasks([task_info])
