@@ -1421,7 +1421,7 @@ def gen_draft_video_script_llm(final_info_list):
                 if random_value < 0.2:
                     # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
                     gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
-                elif random_value < 0.7:
+                elif random_value < 0.9:
                     gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
                     # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
                 else:
