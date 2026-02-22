@@ -558,7 +558,7 @@ def worker_comment_processor():
         process_single_comment_task(valid_video)
 
         # 任务间隔
-        time.sleep(random.uniform(100, 110))
+        time.sleep(random.uniform(200, 210))
 
 
 def get_users_from_comments(bvid):
