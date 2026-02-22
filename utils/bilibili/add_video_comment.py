@@ -364,6 +364,8 @@ def add_replay_comment_for_video(task_info_list, user_name='qiqi'):
                         'property_goods': []
                     })
                     save_json(all_records_file, all_records)
+                # 增加处理的次数
+                record['process_count'] = record.get('process_count', 0) + 1
         except Exception as e:
             print(f"处理视频 {bvid} 时出错: {e}")
             traceback.print_exc()
