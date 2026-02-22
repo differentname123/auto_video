@@ -65,11 +65,13 @@ def gen_final_property_replay(video_info, all_replay_info):
 
     PROMPT_FILE_PATH = r'W:\project\python_project\auto_video\application\prompt\推荐视频b站好片.txt'
     prompt = f"{read_file_to_str(PROMPT_FILE_PATH)}\n输入信息如下:\n{format_video_info}"
-
+    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash"]
     raw = ""
     for attempt in range(1, max_retries + 1):
+
+        model_name = random.choice(model_name_list)
         try:
-            raw = get_llm_content(prompt=prompt, model_name="gemini-flash-latest")
+            raw = get_llm_content(prompt=prompt, model_name=model_name)
             return string_to_object(raw)
         except Exception as e:
             print(f"[ERROR] 生成视频信息失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
