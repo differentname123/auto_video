@@ -507,6 +507,7 @@ def process_single_hudong_task(task_info, commenter_map, uid):
             )
         )
         danmaku_thread.start()
+        set_dm_commond(owner_commenter.total_cookie, owner_commenter.csrf_token, task_info)
         print(f"[{bvid}] [步骤 3/8] 主人弹幕线程已启动。")
     else:
         print(f"[{bvid}] [步骤 3/8] 无主人评论者，跳过启动主人弹幕线程。")
@@ -514,8 +515,6 @@ def process_single_hudong_task(task_info, commenter_map, uid):
     danmu_list = hudong_info.get('danmu_list', [])
     danmu_used_list = hudong_info.get('danmu_used', [])
     danmu_used_list.extend(exist_danmu_text)
-
-    set_dm_commond(owner_commenter.total_cookie, owner_commenter.csrf_token, task_info)
 
     print(f"[{bvid}] [步骤 4/8] 准备启动其他用户弹幕线程...")
     t, stop_event, result = start_send_danmu_background(danmu_list, other_commenters, bvid,
