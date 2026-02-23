@@ -598,7 +598,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             start_time = time.time()
 
             random_value = random.random()
-            if random_value < 0.5:
+            if random_value < 0.7:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
                                                                          model_name="gemini-3.1-pro-preview")
             elif random_value < 1.7:
@@ -720,7 +720,7 @@ def gen_overlays_text_llm(video_path, video_info):
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None  # 达到最大重试次数后返回 None
 
-def check_owner_asr(owner_asr_info, video_duration):
+def check_owner_asr(owner_asr_info, video_duration, check_owner):
     """
         检查生成的asr文本是否正确，第一是验证每个时间是否合理（1.最长跨度不能够超过20s 2.时长的合理性（也就是最快和最慢的语速就能够知道文本对应的时长是否合理） 3.owner语音和本地speaker说话人日志的差异不能够太大）
 
@@ -730,6 +730,8 @@ def check_owner_asr(owner_asr_info, video_duration):
     max_end_time_ms = 0
     error_info = 'asr文本检查通过'
     has_owner = False
+    if not check_owner:
+        has_owner = True
     # 使用 enumerate 获取索引和元素，便于日志记录
     for i, segment in enumerate(owner_asr_info):
         try:
@@ -929,6 +931,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
     """
     通过大模型生成带说话人识别的ASR文本。
     """
+    check_owner = video_info.get('extra_info', {}).get('check_owner', True)
     log_pre = f"{video_path} owner asr 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     base_prompt = gen_base_prompt(video_path, video_info)
     error_info = ""
@@ -968,7 +971,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
 
             # 解析和校验
             owner_asr_info = string_to_object(raw_response)
-            check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms)
+            check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms, check_owner)
             if not check_result:
                 error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
                 raise ValueError(error_info)
