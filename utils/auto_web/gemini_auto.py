@@ -332,9 +332,11 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
                     raw_config = read_json(manager.config_path) or {}
                     usage_streak_limit = raw_config.get('usage_streak_limit', DEFAULT_USAGE_STREAK_LIMIT)
 
+                    # 提前定义 _m_name，避免后续 print 抛出未定义异常
+                    _m_name = model_name or "default_model"
+
                     if account_name in stats and isinstance(stats[account_name], dict):
                         info = stats[account_name]
-                        _m_name = model_name or "default_model"
 
                         # 确保基础结构存在
                         if 'models' not in info:
@@ -358,9 +360,15 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
                         m_info['last_used_time'] = now_str
                         m_info['last_error_info'] = "Remote: rate limit detected"
 
+                        # 【新增逻辑】：及时将账号从对应的 active_pool 中彻底移除
+                        pool_key = f"active_pool_{_m_name}"
+                        if pool_key in stats and isinstance(stats[pool_key], list):
+                            if account_name in stats[pool_key]:
+                                stats[pool_key].remove(account_name)
+
                     save_json(manager.stats_path, stats)
                 print(
-                    f"{log_prefix} 账号 {account_name} 在模型 {_m_name} 检测到 rate limit，已将对应的 current_streak 置为上限。")
+                    f"{log_prefix} 账号 {account_name} 在模型 {_m_name} 检测到 rate limit，已将对应的 current_streak 置为上限并移出活跃池。")
             else:
                 # 常规释放流程
                 manager.release_account(account_name, error_detail)

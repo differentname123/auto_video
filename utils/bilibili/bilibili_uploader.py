@@ -364,7 +364,6 @@ def upload_to_bilibili(
     no_reprint: int = DEFAULT_NO_REPRINT,
     sessdata=SESSDATA,
     bili_jct=BILI_JCT,
-    total_cookie=None,
     human_type2=1002,
     topic_detail={"from_topic_id": 1313687,"from_source": "arc.web.recommend"},
     topic_id: int = 1313687

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from application.video_common_config import TaskStatus, USER_BVID_FILE, ALL_BVID_FILE, COMMENTER_USAFE_FILE, \
     STATISTIC_PLAY_COUNT_FILE, BLOCK_VIDEO_BVID_FILE
 from utils.bilibili.bili_utils import update_bili_user_sign, block_all_author
+from utils.bilibili.bilibili_uploader import send_bilibili_dm_command
 from utils.bilibili.comment import BilibiliCommenter, get_bilibili_archives
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
@@ -387,6 +388,29 @@ def update_play_count(recent_uploaded_tasks, user_bvid_file_data):
     print(f"更新播放量信息，共 {len(need_update_task_list)} 个任务需要更新。 总共平台视频数: {count} 数据库最近记录数量: {len(recent_uploaded_tasks)}")
     return need_update_task_list, recent_uploaded_tasks
 
+def set_dm_commond(total_cookie, BILI_JCT, task_info):
+    """
+    尝试设置投票弹幕
+    :return:
+    """
+
+    try:
+        upload_info_list = task_info.get("upload_info", [])
+        upload_result = task_info.get("upload_result", {})
+        upload_info = upload_info_list[0] if upload_info_list else {}
+        if upload_info:
+            opening_poll = upload_info.get("opening_poll", {})
+            question = opening_poll.get("question", "视频好看吗？")[:12]
+            option_a = opening_poll.get("option_a", "好看")[:6]
+            option_b = opening_poll.get("option_b", "非常好看")[:6]
+            bvid = upload_result.get("bvid")
+            aid = upload_result.get("aid")
+            send_bilibili_dm_command(total_cookie, BILI_JCT, question, 7000, option_a, option_b, bvid, aid)
+
+    except Exception as e:
+        traceback.print_exc()
+        print(f"⚠️ 设置投票弹幕失败：{e}")
+
 
 def process_single_hudong_task(task_info, commenter_map, uid):
     """
@@ -490,6 +514,8 @@ def process_single_hudong_task(task_info, commenter_map, uid):
     danmu_list = hudong_info.get('danmu_list', [])
     danmu_used_list = hudong_info.get('danmu_used', [])
     danmu_used_list.extend(exist_danmu_text)
+
+    set_dm_commond(owner_commenter.total_cookie, owner_commenter.csrf_token, task_info)
 
     print(f"[{bvid}] [步骤 4/8] 准备启动其他用户弹幕线程...")
     t, stop_event, result = start_send_danmu_background(danmu_list, other_commenters, bvid,

@@ -598,7 +598,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             start_time = time.time()
 
             random_value = random.random()
-            if random_value < 0.7:
+            if random_value < 0.5:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
                                                                          model_name="gemini-3.1-pro-preview")
             elif random_value < 1.7:
@@ -1418,10 +1418,10 @@ def gen_draft_video_script_llm(final_info_list):
             gen_error_info = ""
             try:
                 random_value = random.random()
-                if random_value < 0.2:
+                if random_value < 0.4:
                     # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
                     gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
-                elif random_value < 0.9:
+                elif random_value < 0.8:
                     gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
                     # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
                 else:

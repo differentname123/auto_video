@@ -27,7 +27,7 @@ from application.process_video import process_single_task, query_need_process_ta
 from application.video_common_config import TaskStatus, ERROR_STATUS, check_failure_details, build_task_video_paths, \
     SINGLE_DAY_UPLOAD_COUNT, SINGLE_UPLOAD_COUNT, USER_STATISTIC_INFO_PATH, build_video_paths, ALL_BILIBILI_EMOTE_PATH, \
     USER_BVID_FILE
-from utils.bilibili.bilibili_uploader import upload_to_bilibili, send_bilibili_dm_command
+from utils.bilibili.bilibili_uploader import upload_to_bilibili
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json, get_top_comments, \
     extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu
 from utils.mongo_base import gen_db_object
@@ -388,7 +388,6 @@ def build_bilibili_params(video_path, best_script, user_config, userName, video_
         "video_path": video_path,
         "sessdata": config[0],
         "bili_jct": config[1],
-        "total_cookie": config[2],
         "human_type2": human_type2,
         "topic_detail": topic_detail,
         "topic_id": topic_id,
@@ -455,30 +454,6 @@ def statistic_tasks_with_video(tasks_to_upload_list, allowed_user_name_list):
     print(f"总共 {len(tasks_to_upload_list)} 个待投稿任务，其中已有视频 {len(existing_video_tasks)} 个，未生成视频 {len(not_existing_video_tasks)}  已有视频的分布情况：{tobe_upload_video_info_str} 未生成视频的分布情况：{not_existing_video_info_str} 全部任务的分布情况：{all_video_info_str} ")
     return existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info
 
-def set_dm_commond(total_cookie, BILI_JCT, upload_info_list, upload_result, title):
-    """
-    尝试设置投票弹幕
-    :return:
-    """
-
-    try:
-        upload_info = None
-        for temp_upload_info in upload_info_list:
-            if title in temp_upload_info.get("title", ""):
-                upload_info = temp_upload_info
-                break
-        if upload_info:
-            opening_poll = upload_info.get("opening_poll", {})
-            question = opening_poll.get("question", "视频好看吗？")[:12]
-            option_a = opening_poll.get("option_a", "好看")[:6]
-            option_b = opening_poll.get("option_b", "非常好看")[:6]
-            bvid = upload_result.get("bvid")
-            aid = upload_result.get("aid")
-            send_bilibili_dm_command(total_cookie, BILI_JCT, question, 5000, option_a, option_b, bvid, aid)
-
-    except Exception as e:
-        traceback.print_exc()
-        print(f"⚠️ 设置投票弹幕失败：{e}")
 
 def upload_worker(
         upload_params: Dict[str, Any],
@@ -550,9 +525,6 @@ def upload_worker(
         task_info["uploaded_time"] = datetime.now()
         task_info["status"] = TaskStatus.UPLOADED
         manager.upsert_tasks([task_info])
-
-        title = upload_params.get("title", "")
-        set_dm_commond(upload_params.get("total_cookie"), upload_params.get("bili_jct"), task_info.get('upload_info', []), result, title)
 
     else:
         # 上传失败：记录 error_user_map，并把错误信息写到 upload_log
