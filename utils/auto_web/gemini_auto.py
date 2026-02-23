@@ -68,6 +68,10 @@ class SimpleFileLock:
 # 3. 核心：Playwright 账号管理器
 # ==========================================
 
+# ==========================================
+# 3. 核心：Playwright 账号管理器
+# ==========================================
+
 class PlaywrightAccountManager:
     def __init__(self, config_path, stats_path):
         self.config_path = config_path
@@ -77,20 +81,25 @@ class PlaywrightAccountManager:
     def _check_and_reset_stuck_accounts(self, stats_data, timeout_seconds=900):
         """检查并重置长时间处于 using 状态的账号"""
         now = datetime.now()
-        # 【修改点】只检查账号信息，不检查顶级字段
         for name, info in stats_data.items():
-            # 跳过非字典类型的顶级键 (如我们新增的 active_pool)
-            if not isinstance(info, dict):
+            if not isinstance(info, dict) or 'status' not in info:
                 continue
             if info.get('status') == 'using':
-                last_time_str = info.get('last_used_time', '')
+                # 兼容新旧数据结构
+                last_time_str = info.get('account_last_used_time', info.get('last_used_time', ''))
                 if last_time_str:
                     try:
                         last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
                         if (now - last_time).total_seconds() > timeout_seconds:
                             print(f"[Manager] 账号 {name} 'using'状态超时({timeout_seconds}s)，强制重置为'idle'")
                             info['status'] = 'idle'
-                            info['last_error_info'] = "System: Force reset due to timeout"
+                            cur_model = info.get('current_using_model')
+
+                            # 将错误信息精确记录到对应的模型下
+                            if cur_model and 'models' in info and cur_model in info['models']:
+                                info['models'][cur_model]['last_error_info'] = "System: Force reset due to timeout"
+                            else:
+                                info['last_error_info'] = "System: Force reset due to timeout"
                     except ValueError:
                         info['status'] = 'idle'
                         info['last_error_info'] = "System: Force reset due to invalid time format"
@@ -99,8 +108,10 @@ class PlaywrightAccountManager:
     def allocate_account(self, model_name=None):
         """
         分配一个空闲账号。
-        【修复版】引入前置全局并发检查，防止轮换瞬间产生 N+1 个进程。
+        引入多模型维度管理，同一账号的不同 model_name 限流与冷却互不影响。
         """
+        _m_name = model_name or "default_model"
+
         with SimpleFileLock(self.lock_path):
             # 1. 读取配置和统计信息
             raw_config = read_json(self.config_path)
@@ -117,39 +128,48 @@ class PlaywrightAccountManager:
                 for item in config_list if item.get('name') and item.get('user_data_dir')
             }
 
-            # 3.1 基础同步与清理
+            # 3.1 基础同步与清理 (兼容多模型 pool 键)
             for name in list(stats.keys()):
-                if name == 'active_pool': continue
+                if name.startswith('active_pool'): continue
                 if name not in valid_accounts_map: del stats[name]
 
+            # 初始化数据结构，引入 models 子字典
             for name in valid_accounts_map:
                 if name not in stats:
-                    stats[name] = {"status": "idle", "last_used_time": "", "last_error_info": None, "total_usage": 0,
-                                   "current_streak": 0, "last_used_model": None}
+                    stats[name] = {"status": "idle", "account_last_used_time": "", "current_using_model": None,
+                                   "models": {}}
+                if "models" not in stats[name]:
+                    stats[name]["models"] = {}
+                if _m_name not in stats[name]["models"]:
+                    stats[name]["models"][_m_name] = {
+                        "last_used_time": "", "last_error_info": None, "total_usage": 0, "current_streak": 0
+                    }
 
             # 3.2 超时重置
             stats = self._check_and_reset_stuck_accounts(stats)
 
-            # 4. 【核心修复：前置全局并发检查】
-            # 必须先统计全系统正在 status='using' 的总数，达到上限直接返回 None，不执行后续轮换逻辑
+            # 4. 前置全局并发检查 (全局使用中的总数)
             current_using_total = sum(
                 1 for name, info in stats.items() if isinstance(info, dict) and info.get('status') == 'using')
             if current_using_total >= max_concurrency:
                 save_json(self.stats_path, stats)
                 return None, None
 
-            # 5. 维护活跃池 (Active Pool)
+            # 5. 维护该模型专属的活跃池 (Active Pool)
+            pool_key = f"active_pool_{_m_name}"
             exhausted_accounts = set()
             for name, info in stats.items():
-                if isinstance(info, dict) and info.get('current_streak', 0) >= usage_streak_limit:
-                    info['current_streak'] = 0  # 达到上限，准备轮换
-                    exhausted_accounts.add(name)
+                if isinstance(info, dict) and 'models' in info:
+                    m_info = info['models'].get(_m_name, {})
+                    if m_info.get('current_streak', 0) >= usage_streak_limit:
+                        m_info['current_streak'] = 0  # 达到上限，准备轮换
+                        exhausted_accounts.add(name)
 
-            active_pool = stats.get('active_pool', [])
-            # 过滤掉已失效或已用完次数的账号
+            active_pool = stats.get(pool_key, [])
+            # 过滤掉已失效或该模型下已用完次数的账号
             active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
 
-            # 如果池不满，补充新账号（优先选总使用次数最少的，且必须满足30分钟冷却时间）
+            # 如果池不满，补充新账号
             needed = max_concurrency - len(active_pool)
             if needed > 0:
                 # 定义冷却时间 30分钟
@@ -157,43 +177,37 @@ class PlaywrightAccountManager:
                 now_dt = datetime.now()
 
                 def is_cooldown_ready(acc_name):
-                    """检查账号上次使用时间是否在30分钟前"""
-                    last_time_str = stats.get(acc_name, {}).get('last_used_time', '')
+                    """检查该账号在该模型下的上次使用时间是否在30分钟前"""
+                    m_info = stats.get(acc_name, {}).get('models', {}).get(_m_name, {})
+                    last_time_str = m_info.get('last_used_time', '')
                     if not last_time_str:
-                        return True  # 从未使用的账号，直接可用
+                        return True
                     try:
                         last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
-                        # 只有当 (当前时间 - 上次时间) > 30分钟 时才允许被选中进入活跃池
                         return (now_dt - last_time).total_seconds() > COOLDOWN_SECONDS
                     except ValueError:
                         return True
 
-                # 筛选候选人：在有效列表中 + 不在当前活跃池中 + 满足冷却时间
                 candidates = [
                     n for n in valid_accounts_map
                     if n not in active_pool
                        and is_cooldown_ready(n)
                 ]
 
-                # 按总使用次数排序，优先使用少的
-                candidates.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+                # 按该模型的总使用次数排序，优先使用少的
+                candidates.sort(key=lambda n: stats.get(n, {}).get('models', {}).get(_m_name, {}).get('total_usage', 0))
                 active_pool.extend(candidates[:needed])
 
-            stats['active_pool'] = active_pool
+            stats[pool_key] = active_pool
 
-            # 6. 从活跃池中选择一个空闲账号分配
+            # 6. 从活跃池中选择一个空闲账号分配（注意：status=='idle' 是账号级限制，防止多开同一浏览器）
             target_name = None
             idle_in_pool = [n for n in active_pool if stats.get(n, {}).get('status') == 'idle']
 
             if idle_in_pool:
-                idle_in_pool.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
+                idle_in_pool.sort(
+                    key=lambda n: stats.get(n, {}).get('models', {}).get(_m_name, {}).get('total_usage', 0))
                 target_name = idle_in_pool[0]
-            # else:
-            #     # 备选逻辑：如果池内恰好没空位（极其罕见），从池外找一个空闲的
-            #     all_idle = [n for n, info in stats.items() if isinstance(info, dict) and info.get('status') == 'idle']
-            #     if all_idle:
-            #         all_idle.sort(key=lambda n: stats.get(n, {}).get('total_usage', 0))
-            #         target_name = all_idle[0]
 
             if not target_name:
                 save_json(self.stats_path, stats)
@@ -202,28 +216,44 @@ class PlaywrightAccountManager:
             # 7. 更新状态
             target_info = stats[target_name]
             target_info['status'] = 'using'
-            target_info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            target_info['total_usage'] = target_info.get('total_usage', 0) + 1
-            target_info['current_streak'] = target_info.get('current_streak', 0) + 1
-            target_info['last_used_model'] = model_name
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            target_info['account_last_used_time'] = now_str
+            target_info['current_using_model'] = _m_name
+
+            # 模型级状态更新
+            m_info = target_info['models'][_m_name]
+            m_info['last_used_time'] = now_str
+            m_info['total_usage'] = m_info.get('total_usage', 0) + 1
+            m_info['current_streak'] = m_info.get('current_streak', 0) + 1
+
             save_json(self.stats_path, stats)
             return target_name, valid_accounts_map[target_name]
 
     def release_account(self, account_name, error_info=None):
-        """释放账号，重置为 idle。注意：此函数不重置 streak，streak 只在分配时管理。"""
+        """释放账号，重置为 idle，错误信息精确定位到模型。"""
         with SimpleFileLock(self.lock_path):
             stats = read_json(self.stats_path)
 
             if account_name in stats and isinstance(stats[account_name], dict):
                 info = stats[account_name]
                 info['status'] = 'idle'
-                info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                # 记录最后一次错误信息，如果成功则为 None
-                info['last_error_info'] = str(error_info)[:1000] if error_info else None
-                # 如果有错误，可以选择重置连续使用计数，让它有机会被轮换出去
-                if error_info:
-                    print(f"[Manager] 账号 {account_name} 出现错误，重置其连续使用次数。{error_info}")
-                    info['current_streak'] = 0
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                cur_model = info.get('current_using_model')
+                if cur_model and 'models' in info and cur_model in info['models']:
+                    m_info = info['models'][cur_model]
+                    m_info['last_used_time'] = now_str
+                    m_info['last_error_info'] = str(error_info)[:1000] if error_info else None
+                    if error_info:
+                        print(
+                            f"[Manager] 账号 {account_name} 在模型 {cur_model} 出现错误，重置其连续使用次数。{error_info}")
+                        m_info['current_streak'] = 0
+                else:
+                    # 兼容后备逻辑
+                    info['last_error_info'] = str(error_info)[:1000] if error_info else None
+                    if error_info:
+                        print(f"[Manager] 账号 {account_name} 出现错误，重置其连续使用次数。{error_info}")
+                        info['current_streak'] = 0
 
             save_json(self.stats_path, stats)
 
@@ -294,8 +324,7 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
         # 3. 释放账号
         print(f"{log_prefix} 释放账号: {account_name}")
 
-        # 如果返回包含 rate limit 的提示，把该账号的 current_streak 直接提升到上限，
-        # 并相应增加 total_usage，防止短时间内再次选到它。
+        # 如果返回包含 rate limit 的提示，精准惩罚对应的模型配额
         try:
             if result_text and "You've reached your rate limit. Please try again later" in result_text:
                 with SimpleFileLock(manager.lock_path):
@@ -305,20 +334,35 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
 
                     if account_name in stats and isinstance(stats[account_name], dict):
                         info = stats[account_name]
-                        cur = info.get('current_streak', 0)
+                        _m_name = model_name or "default_model"
+
+                        # 确保基础结构存在
+                        if 'models' not in info:
+                            info['models'] = {}
+                        if _m_name not in info['models']:
+                            info['models'][_m_name] = {}
+
+                        m_info = info['models'][_m_name]
+                        cur = m_info.get('current_streak', 0)
+
+                        # 将该模型的 streak 置为上限，惩罚触发轮换和冷却
                         if cur < usage_streak_limit:
                             inc = usage_streak_limit - cur
-                            info['current_streak'] = usage_streak_limit
-                            info['total_usage'] = info.get('total_usage', 0) + inc
-                        # 标记为 idle，记录最后使用时间与错误信息，避免后续 release_account 把 streak 重置
+                            m_info['current_streak'] = usage_streak_limit
+                            m_info['total_usage'] = m_info.get('total_usage', 0) + inc
+
+                        # 解除全局浏览器锁定，但更新模型错误日志
                         info['status'] = 'idle'
-                        info['last_used_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        info['last_error_info'] = "Remote: rate limit detected"
+                        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        info['account_last_used_time'] = now_str
+                        m_info['last_used_time'] = now_str
+                        m_info['last_error_info'] = "Remote: rate limit detected"
+
                     save_json(manager.stats_path, stats)
                 print(
-                    f"{log_prefix} 账号 {account_name} 检测到 rate limit，已将 current_streak 置为上限并增加 total_usage。")
+                    f"{log_prefix} 账号 {account_name} 在模型 {_m_name} 检测到 rate limit，已将对应的 current_streak 置为上限。")
             else:
-                # 常规释放流程（包含可能的 error_detail，会在 release_account 中记录并在有错误时重置 streak）
+                # 常规释放流程
                 manager.release_account(account_name, error_detail)
         except Exception as e:
             # 避免释放流程抛出异常导致上层失败，记录并尝试常规释放一次

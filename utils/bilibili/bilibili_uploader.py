@@ -1,6 +1,7 @@
 import hashlib
 import json
 import random
+import traceback
 
 import requests
 import base64
@@ -9,7 +10,8 @@ import math
 import time
 import urllib.parse
 
-from utils.common_utils import get_config
+from utils.bilibili.get_danmu import get_cid_from_bvid
+from utils.common_utils import get_config, init_config
 
 # --- 配置参数 ---
 SESSDATA = get_config("bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
@@ -362,6 +364,7 @@ def upload_to_bilibili(
     no_reprint: int = DEFAULT_NO_REPRINT,
     sessdata=SESSDATA,
     bili_jct=BILI_JCT,
+    total_cookie=None,
     human_type2=1002,
     topic_detail={"from_topic_id": 1313687,"from_source": "arc.web.recommend"},
     topic_id: int = 1313687
@@ -434,19 +437,85 @@ def get_bili_category_id(cookie_str):
     except ValueError:
         return resp.text
 
+def send_bilibili_dm_command(cookie_str, csrf, question, duration, optionA, optionB, bvid, aid):
+    """
+    """
+
+    try:
+        url = "https://api.bilibili.com/x/v2/dm/command/post"
+        cid = get_cid_from_bvid(bvid)
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Referer": "https://www.bilibili.com/",
+            "Cookie": cookie_str
+        }
+
+        # Prepare the 'data' JSON payload
+        data_payload = {
+            "question": question,
+            "duration": duration,
+            "posX_2": 97,
+            "posY_2": 85,
+            "pub_dynamic": False,
+            "has_self_def": "0",
+            "optionA": optionA,
+            "optionB": optionB
+        }
+        data_str = json.dumps(data_payload, ensure_ascii=False)
+
+        # Form data for the POST request
+        form_data = {
+            "type": "9",
+            "aid": aid,
+            "cid": cid,
+            "progress": "0",
+            "plat": "8",
+            "data": data_str,
+            "csrf": csrf
+        }
+
+        response = requests.post(url, headers=headers, data=form_data)
+        response.raise_for_status()
+        print(f"DM command sent successfully: {response.text}")
+        return response.json()
+    except Exception as e:
+        traceback.print_exc()
+        print(f"Error sending DM command: {e}")
+        return None
+
 
 if __name__ == "__main__":
-    # 读取LLM/TikTokDownloader/metadata_cache.json
-    with open('../../LLM/TikTokDownloader/metadata_cache.json', 'r', encoding='utf-8') as f:
-        metadata_cache = json.load(f)
-    for key, value in metadata_cache.items():
-        video_path = value.get('video_path')
 
-    result = upload_to_bilibili(
-        video_path=video_path,
-        cover_path="inpainted_image.jpg",
-        title="我的AI修复视频与精彩瞬间",
-        description="这是一个使用AI技术修复后的视频，并加入了有趣的音频，希望大家喜欢！",
-        tags="AI修复,视频剪辑,有趣,科技,日常生活",
-    )
-    print(f"投稿成功！AID={result['aid']}, BVID={result['bvid']}")
+    config_map = init_config()
+    user_name = 'mama'
+    target_value = None
+    for uid, value in config_map.items():
+        if value.get('name') == user_name:
+            target_value = value
+            break
+    total_cookie = target_value.get('total_cookie')
+    BILI_JCT = target_value.get('BILI_JCT')
+    send_bilibili_dm_command(total_cookie, BILI_JCT, "这是一个测试问题？", 5000, "选项A", "选项B", "BV1Y6fPBmEvk", "116116487668454")
+
+    #
+    # # 读取LLM/TikTokDownloader/metadata_cache.json
+    # with open('../../LLM/TikTokDownloader/metadata_cache.json', 'r', encoding='utf-8') as f:
+    #     metadata_cache = json.load(f)
+    # for key, value in metadata_cache.items():
+    #     video_path = value.get('video_path')
+    #
+    # result = upload_to_bilibili(
+    #     video_path=video_path,
+    #     cover_path="inpainted_image.jpg",
+    #     title="我的AI修复视频与精彩瞬间",
+    #     description="这是一个使用AI技术修复后的视频，并加入了有趣的音频，希望大家喜欢！",
+    #     tags="AI修复,视频剪辑,有趣,科技,日常生活",
+    # )
+    # print(f"投稿成功！AID={result['aid']}, BVID={result['bvid']}")
