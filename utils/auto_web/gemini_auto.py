@@ -108,7 +108,7 @@ class PlaywrightAccountManager:
     def allocate_account(self, model_name=None):
         """
         分配一个空闲账号。
-        引入多模型维度管理，同一账号的不同 model_name 限流与冷却互不影响。
+        修复：将活跃池维护逻辑提前，防止并发满时池子无法更新。
         """
         _m_name = model_name or "default_model"
 
@@ -128,12 +128,12 @@ class PlaywrightAccountManager:
                 for item in config_list if item.get('name') and item.get('user_data_dir')
             }
 
-            # 3.1 基础同步与清理 (兼容多模型 pool 键)
+            # 3.1 基础同步与清理
             for name in list(stats.keys()):
                 if name.startswith('active_pool'): continue
                 if name not in valid_accounts_map: del stats[name]
 
-            # 初始化数据结构，引入 models 子字典
+            # 初始化数据结构
             for name in valid_accounts_map:
                 if name not in stats:
                     stats[name] = {"status": "idle", "account_last_used_time": "", "current_using_model": None,
@@ -148,14 +148,10 @@ class PlaywrightAccountManager:
             # 3.2 超时重置
             stats = self._check_and_reset_stuck_accounts(stats)
 
-            # 4. 前置全局并发检查 (全局使用中的总数)
-            current_using_total = sum(
-                1 for name, info in stats.items() if isinstance(info, dict) and info.get('status') == 'using')
-            if current_using_total >= max_concurrency:
-                save_json(self.stats_path, stats)
-                return None, None
-
-            # 5. 维护该模型专属的活跃池 (Active Pool)
+            # ==========================================
+            # [MOVED UP] 5. 优先维护该模型专属的活跃池 (Active Pool)
+            # 无论是否能分配，先保证池子是满的
+            # ==========================================
             pool_key = f"active_pool_{_m_name}"
             exhausted_accounts = set()
             for name, info in stats.items():
@@ -170,14 +166,16 @@ class PlaywrightAccountManager:
             active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
 
             # 如果池不满，补充新账号
-            needed = max_concurrency - len(active_pool)
+            # 【优化建议】：池子大小可以设为 max_concurrency + 1 或 2，作为缓冲，避免一人冷却全员停工
+            target_pool_size = max_concurrency
+            needed = target_pool_size - len(active_pool)
+
             if needed > 0:
-                # 定义冷却时间 30分钟
+                # 定义冷却时间 (例如 20分钟)
                 COOLDOWN_SECONDS = 1200
                 now_dt = datetime.now()
 
                 def is_cooldown_ready(acc_name):
-                    """检查该账号在该模型下的上次使用时间是否在30分钟前"""
                     m_info = stats.get(acc_name, {}).get('models', {}).get(_m_name, {})
                     last_time_str = m_info.get('last_used_time', '')
                     if not last_time_str:
@@ -199,8 +197,18 @@ class PlaywrightAccountManager:
                 active_pool.extend(candidates[:needed])
 
             stats[pool_key] = active_pool
+            # ==========================================
 
-            # 6. 从活跃池中选择一个空闲账号分配（注意：status=='idle' 是账号级限制，防止多开同一浏览器）
+            # 4. 后置全局并发检查 (现在即使返回 None，上面的池子也已经更新了)
+            current_using_total = sum(
+                1 for name, info in stats.items() if isinstance(info, dict) and info.get('status') == 'using')
+
+            if current_using_total >= max_concurrency:
+                # 即使无法分配，也要保存刚刚更新的 pool 状态
+                save_json(self.stats_path, stats)
+                return None, None
+
+            # 6. 从活跃池中选择一个空闲账号分配
             target_name = None
             idle_in_pool = [n for n in active_pool if stats.get(n, {}).get('status') == 'idle']
 
@@ -275,7 +283,7 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
     """
     pid = os.getpid()
     tid = threading.get_ident()
-    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path}"
+    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path} {model_name}"
 
     start_time = time.time()
     account_name, user_data_dir = None, None
