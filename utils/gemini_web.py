@@ -307,7 +307,7 @@ if __name__ == "__main__":
 
     prompt = "你是谁"
 
-    for i in range(1):
+    for i in range(5):
         try:
             err, res = generate_gemini_content_managed(
                 prompt=prompt,
