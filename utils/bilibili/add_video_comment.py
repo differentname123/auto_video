@@ -417,10 +417,11 @@ def run_once(username_list):
 
 
 if __name__ == '__main__':
-    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
-    username_list = user_config.get('video_recommend_user_list', [])
+
 
     while True:
+        user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+        username_list = user_config.get('video_recommend_user_list', [])
         start_time = time.time()
         run_once(username_list)
 
