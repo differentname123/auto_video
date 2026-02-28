@@ -105,12 +105,18 @@ class PlaywrightAccountManager:
                         info['last_error_info'] = "System: Force reset due to invalid time format"
         return stats_data
 
-    def allocate_account(self, model_name=None):
+    def allocate_account(self, model_name=None, fallback_model=None):
         """
         分配一个空闲账号。
         修复：将活跃池维护逻辑提前，防止并发满时池子无法更新。
+        新增：支持备用模型(fallback_model)，比较两个模型的active_pool大小，优先选用池子更大的模型进行分配。
         """
         _m_name = model_name or "default_model"
+
+        # 确定需要检查的模型列表
+        models_to_check = [_m_name]
+        if fallback_model and fallback_model != _m_name:
+            models_to_check.append(fallback_model)
 
         with SimpleFileLock(self.lock_path):
             # 1. 读取配置和统计信息
@@ -133,71 +139,84 @@ class PlaywrightAccountManager:
                 if name.startswith('active_pool'): continue
                 if name not in valid_accounts_map: del stats[name]
 
-            # 初始化数据结构
-            for name in valid_accounts_map:
-                if name not in stats:
-                    stats[name] = {"status": "idle", "account_last_used_time": "", "current_using_model": None,
-                                   "models": {}}
-                if "models" not in stats[name]:
-                    stats[name]["models"] = {}
-                if _m_name not in stats[name]["models"]:
-                    stats[name]["models"][_m_name] = {
-                        "last_used_time": "", "last_error_info": None, "total_usage": 0, "current_streak": 0
-                    }
+            # 初始化涉及到的所有模型的数据结构
+            for m_name in models_to_check:
+                for name in valid_accounts_map:
+                    if name not in stats:
+                        stats[name] = {"status": "idle", "account_last_used_time": "", "current_using_model": None,
+                                       "models": {}}
+                    if "models" not in stats[name]:
+                        stats[name]["models"] = {}
+                    if m_name not in stats[name]["models"]:
+                        stats[name]["models"][m_name] = {
+                            "last_used_time": "", "last_error_info": None, "total_usage": 0, "current_streak": 0
+                        }
 
             # 3.2 超时重置
             stats = self._check_and_reset_stuck_accounts(stats)
 
             # ==========================================
-            # [MOVED UP] 5. 优先维护该模型专属的活跃池 (Active Pool)
-            # 无论是否能分配，先保证池子是满的
+            # 5. 优先维护所有待检测模型专属的活跃池 (Active Pool)
             # ==========================================
-            pool_key = f"active_pool_{_m_name}"
-            exhausted_accounts = set()
-            for name, info in stats.items():
-                if isinstance(info, dict) and 'models' in info:
-                    m_info = info['models'].get(_m_name, {})
-                    if m_info.get('current_streak', 0) >= usage_streak_limit:
-                        m_info['current_streak'] = 0  # 达到上限，准备轮换
-                        exhausted_accounts.add(name)
+            pool_sizes = {}
+            active_pools = {}
+            for m_name in models_to_check:
+                pool_key = f"active_pool_{m_name}"
+                exhausted_accounts = set()
+                for name, info in stats.items():
+                    if isinstance(info, dict) and 'models' in info:
+                        m_info = info['models'].get(m_name, {})
+                        if m_info.get('current_streak', 0) >= usage_streak_limit:
+                            m_info['current_streak'] = 0  # 达到上限，准备轮换
+                            exhausted_accounts.add(name)
 
-            active_pool = stats.get(pool_key, [])
-            # 过滤掉已失效或该模型下已用完次数的账号
-            active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
+                active_pool = stats.get(pool_key, [])
+                # 过滤掉已失效或该模型下已用完次数的账号
+                active_pool = [n for n in active_pool if n in valid_accounts_map and n not in exhausted_accounts]
 
-            # 如果池不满，补充新账号
-            # 【优化建议】：池子大小可以设为 max_concurrency + 1 或 2，作为缓冲，避免一人冷却全员停工
-            target_pool_size = max_concurrency
-            needed = target_pool_size - len(active_pool)
+                # 如果池不满，补充新账号
+                target_pool_size = max_concurrency
+                needed = target_pool_size - len(active_pool)
 
-            if needed > 0:
-                # 定义冷却时间 (例如 20分钟)
-                COOLDOWN_SECONDS = 1200
-                now_dt = datetime.now()
+                if needed > 0:
+                    # 定义冷却时间 (例如 20分钟)
+                    COOLDOWN_SECONDS = 1200
+                    now_dt = datetime.now()
 
-                def is_cooldown_ready(acc_name):
-                    m_info = stats.get(acc_name, {}).get('models', {}).get(_m_name, {})
-                    last_time_str = m_info.get('last_used_time', '')
-                    if not last_time_str:
-                        return True
-                    try:
-                        last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
-                        return (now_dt - last_time).total_seconds() > COOLDOWN_SECONDS
-                    except ValueError:
-                        return True
+                    def is_cooldown_ready(acc_name, check_model):
+                        m_info = stats.get(acc_name, {}).get('models', {}).get(check_model, {})
+                        last_time_str = m_info.get('last_used_time', '')
+                        if not last_time_str:
+                            return True
+                        try:
+                            last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S")
+                            return (now_dt - last_time).total_seconds() > COOLDOWN_SECONDS
+                        except ValueError:
+                            return True
 
-                candidates = [
-                    n for n in valid_accounts_map
-                    if n not in active_pool
-                       and is_cooldown_ready(n)
-                ]
+                    candidates = [
+                        n for n in valid_accounts_map
+                        if n not in active_pool
+                           and is_cooldown_ready(n, m_name)
+                    ]
 
-                # 按该模型的总使用次数排序，优先使用少的
-                candidates.sort(key=lambda n: stats.get(n, {}).get('models', {}).get(_m_name, {}).get('total_usage', 0))
-                active_pool.extend(candidates[:needed])
+                    # 按该模型的总使用次数排序，优先使用少的
+                    candidates.sort(
+                        key=lambda n: stats.get(n, {}).get('models', {}).get(m_name, {}).get('total_usage', 0))
+                    active_pool.extend(candidates[:needed])
 
-            stats[pool_key] = active_pool
+                stats[pool_key] = active_pool
+                active_pools[m_name] = active_pool
+                pool_sizes[m_name] = len(active_pool)
             # ==========================================
+
+            # 【新增逻辑】：对比 active_pool 大小，决定最终使用的模型。如果一致，优先选用 model_name
+            chosen_model = _m_name
+            if fallback_model and fallback_model != _m_name:
+                if pool_sizes[fallback_model] > pool_sizes[_m_name]:
+                    chosen_model = fallback_model
+
+            chosen_pool = active_pools[chosen_model]
 
             # 4. 后置全局并发检查 (现在即使返回 None，上面的池子也已经更新了)
             current_using_total = sum(
@@ -206,36 +225,36 @@ class PlaywrightAccountManager:
             if current_using_total >= max_concurrency:
                 # 即使无法分配，也要保存刚刚更新的 pool 状态
                 save_json(self.stats_path, stats)
-                return None, None
+                return None, None, chosen_model
 
-            # 6. 从活跃池中选择一个空闲账号分配
+            # 6. 从选定的活跃池中选择一个空闲账号分配
             target_name = None
-            idle_in_pool = [n for n in active_pool if stats.get(n, {}).get('status') == 'idle']
+            idle_in_pool = [n for n in chosen_pool if stats.get(n, {}).get('status') == 'idle']
 
             if idle_in_pool:
                 idle_in_pool.sort(
-                    key=lambda n: stats.get(n, {}).get('models', {}).get(_m_name, {}).get('total_usage', 0))
+                    key=lambda n: stats.get(n, {}).get('models', {}).get(chosen_model, {}).get('total_usage', 0))
                 target_name = idle_in_pool[0]
 
             if not target_name:
                 save_json(self.stats_path, stats)
-                return None, None
+                return None, None, chosen_model
 
             # 7. 更新状态
             target_info = stats[target_name]
             target_info['status'] = 'using'
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             target_info['account_last_used_time'] = now_str
-            target_info['current_using_model'] = _m_name
+            target_info['current_using_model'] = chosen_model
 
             # 模型级状态更新
-            m_info = target_info['models'][_m_name]
+            m_info = target_info['models'][chosen_model]
             m_info['last_used_time'] = now_str
             m_info['total_usage'] = m_info.get('total_usage', 0) + 1
             m_info['current_streak'] = m_info.get('current_streak', 0) + 1
 
             save_json(self.stats_path, stats)
-            return target_name, valid_accounts_map[target_name]
+            return target_name, valid_accounts_map[target_name], chosen_model
 
     def release_account(self, account_name, error_info=None):
         """释放账号，重置为 idle，错误信息精确定位到模型。"""
@@ -277,21 +296,27 @@ if not CONFIG_FILE.parent.exists():
 manager = PlaywrightAccountManager(str(CONFIG_FILE), str(STATS_FILE))
 
 
-def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600, model_name="gemini-2.5-pro"):
+def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600, model_name="gemini-2.5-pro",
+                                       fallback_model=None):
     """
     使用 Playwright 账号管理器安全地调用 Gemini。
+    新增支持备用模型，池子中可用账号多者优先。
     """
     pid = os.getpid()
     tid = threading.get_ident()
-    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path} {model_name}"
+    # 暂不打印具体模型，稍后视实际分配的模型而定
+    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path}"
 
     start_time = time.time()
-    account_name, user_data_dir = None, None
+    account_name, user_data_dir, actual_model_name = None, None, model_name
 
     no_file_name_list = ['new_taobao6', 'new_taobao9']
     # 1. 循环申请账号
     while time.time() - start_time < wait_timeout:
-        account_name, user_data_dir = manager.allocate_account(model_name=model_name)
+        # 新增解构 actual_model_name 并在入参支持备用模型
+        account_name, user_data_dir, actual_model_name = manager.allocate_account(model_name=model_name,
+                                                                                  fallback_model=fallback_model)
+
         if file_path and user_data_dir and any(x in user_data_dir for x in no_file_name_list):
             account_name, user_data_dir = None, None
         if account_name:
@@ -300,7 +325,8 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
         elapsed = int(time.time() - start_time)
         # 这里把等待日志的频率稍微降低一点，或者简单打印
         if elapsed % 10 == 0:
-            print(f"{log_prefix} 资源繁忙(并发已满或无空闲号)，等待中... (已等待 {elapsed}s / {wait_timeout}s)")
+            print(
+                f"{log_prefix} [{actual_model_name}] 资源繁忙(并发已满或无空闲号)，等待中... (已等待 {elapsed}s / {wait_timeout}s)")
 
         # 随机等待一段时间再重试
         time.sleep(random.uniform(5, 15))
@@ -308,7 +334,9 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
     if not account_name:
         return f"System Busy: 等待 {wait_timeout} 秒后仍无可用资源。", None
 
-    print(f"{log_prefix} 分配账号: {account_name} ({os.path.basename(user_data_dir)}) {model_name} {file_path}")
+    # 用实际分配的模型更新 log_prefix
+    log_prefix = f"[System][PID:{pid},TID:{tid}] {file_path} {actual_model_name}"
+    print(f"{log_prefix} 分配账号: {account_name} ({os.path.basename(user_data_dir)}) {actual_model_name} {file_path}")
 
     error_detail, result_text = None, None
     try:
@@ -319,12 +347,12 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
             elif isinstance(file_path, str):
                 file_to_upload = file_path
 
-        # 2. 调用核心函数
+        # 2. 调用核心函数，传入最终决定的实际模型
         error_detail, result_text = query_google_ai_studio(
             prompt=prompt,
             file_path=file_to_upload,
             user_data_dir=user_data_dir,
-            model_name=model_name
+            model_name=actual_model_name
         )
     except Exception as e:
         error_detail = f"管理器外部发生严重错误: {str(e)}\n\n{traceback.format_exc()}"
@@ -340,8 +368,8 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
                     raw_config = read_json(manager.config_path) or {}
                     usage_streak_limit = raw_config.get('usage_streak_limit', DEFAULT_USAGE_STREAK_LIMIT)
 
-                    # 提前定义 _m_name，避免后续 print 抛出未定义异常
-                    _m_name = model_name or "default_model"
+                    # 惩罚触发限制的是实际执行的模型
+                    _m_name = actual_model_name or "default_model"
 
                     if account_name in stats and isinstance(stats[account_name], dict):
                         info = stats[account_name]
@@ -389,7 +417,6 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
                 print(f"{log_prefix} 尝试常规释放账号时再次失败: {e2}")
 
     return error_detail, result_text
-
 
 def validate_all_accounts():
     """

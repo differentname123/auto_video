@@ -598,12 +598,9 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             start_time = time.time()
 
             random_value = random.random()
-            if random_value < 0.7:
+            if random_value < 0.9:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
-                                                                         model_name="gemini-3.1-pro-preview")
-            elif random_value < 1.7:
-                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
-                                                                         model_name="gemini-3-pro-preview")
+                                                                         model_name="gemini-3.1-pro-preview", fallback_model="gemini-3-pro-preview")
             else:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
                                                                          model_name="gemini-2.5-pro")
@@ -973,7 +970,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
             owner_asr_info = string_to_object(raw_response)
             check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms, check_owner)
             if not check_result:
-                error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
+                error_info = f"asr 检查未通过: {check_info} {raw_response} {check_info} {log_pre}"
                 raise ValueError(error_info)
             # owner_asr_info = correct_owner_timestamps(owner_asr_info, video_duration_ms)
             video_info['owner_asr_info'] = owner_asr_info
@@ -982,7 +979,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
             return error_info, owner_asr_info
         except Exception as e:
             error_str = f"{error_info} {str(e)} {gen_error_info} {log_pre}"
-            print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e} {raw_response} {log_pre}")
+            print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
                 time.sleep(retry_delay)  # 等待一段时间后再重试
@@ -1421,16 +1418,13 @@ def gen_draft_video_script_llm(final_info_list):
             gen_error_info = ""
             try:
                 random_value = random.random()
-                if random_value < 0.4:
-                    # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
-                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
-                elif random_value < 0.8:
-                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview")
-                    # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+                if random_value < 0.8:
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview", fallback_model="gemini-3-pro-preview")
                 else:
                     # model_name = "gemini-2.5-flash"
                     model_name = "gemini-3-flash-preview"
-                    raw_response = get_llm_content(prompt=full_prompt, model_name=model_name)
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name=model_name, fallback_model="gemini-2.5-flash")
+                    # raw_response = get_llm_content(prompt=full_prompt, model_name=model_name)
 
                 draft_video_script_info = string_to_object(raw_response)
 
