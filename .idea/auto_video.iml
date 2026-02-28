@@ -6,7 +6,6 @@
       <excludeFolder url="file://$MODULE_DIR$/videos" />
       <excludeFolder url="file://$MODULE_DIR$/application/Download" />
       <excludeFolder url="file://$MODULE_DIR$/application/Volume" />
-      <excludeFolder url="file://$MODULE_DIR$/third_party/TikTokDownloader" />
       <excludeFolder url="file://$MODULE_DIR$/application/logs" />
       <excludeFolder url="file://$MODULE_DIR$/application/process_locks" />
     </content>

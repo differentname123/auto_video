@@ -21,6 +21,11 @@ class Extractor:
     )
 
     detail_id = compile(r"\b(\d{19})\b")  # 作品 ID
+
+    detail_jingxuan = compile(
+        r"\S*?https://www\.douyin\.com/jingxuan\S*?modal_id=(\d{19})\S*?"
+    )
+
     detail_link = compile(
         r"\S*?https://www\.douyin\.com/(?:video|note|slides)/([0-9]{19})\S*?"
     )  # 作品链接
@@ -134,17 +139,18 @@ class Extractor:
         ]
         return live_link + live_link_self + live_link_share
 
-    def __extract_detail(
-        self,
-        urls: str,
-    ) -> list[str]:
+    def __extract_detail(self, urls: str) -> list[str]:
         link = self.extract_info(self.detail_link, urls, 1)
         share = self.extract_info(self.detail_share, urls, 1)
         account = self.extract_info(self.account_link, urls, 2)
         search = self.extract_info(self.detail_search, urls, 1)
         discover = self.extract_info(self.detail_discover, urls, 1)
         channel = self.extract_info(self.channel_link, urls, 1)
-        return link + share + account + search + discover + channel
+
+        # 新增提取逻辑
+        jingxuan = self.extract_info(self.detail_jingxuan, urls, 1)
+
+        return link + share + account + search + discover + channel + jingxuan
 
     @staticmethod
     def extract_sec_user_id(urls: list[str]) -> list[list]:
