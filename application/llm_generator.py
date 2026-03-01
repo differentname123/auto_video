@@ -697,8 +697,8 @@ def gen_overlays_text_llm(video_path, video_info):
     raw = ""
     for attempt in range(1, max_retries + 1):
         try:
-            model_name = "gemini-2.5-flash"
-            model_name = "gemini-3-flash-preview"
+            model_name_list = ["gemini-2.5-flash", "gemini-3-flash-preview"]
+            model_name = random.choice(model_name_list)
             print(f"正在视频覆盖文字生成 (尝试 {attempt}/{max_retries}) {log_pre}")
             raw = get_llm_content_gemini_flash_video(prompt=full_prompt, video_path=video_path, model_name=model_name)
             video_overlays_text_info = string_to_object(raw)
@@ -1044,8 +1044,8 @@ def gen_hudong_by_llm(video_path, video_info):
     desc = f"\n已有评论列表 (数字表示已获赞数量): {temp_comments}"
     # 模型选择逻辑（与原版保持一致）
     max_duration = 600
-    model_name = "gemini-3-flash-preview"
-    # model_name = "gemini-2.5-flash"
+    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    model_name = random.choices(model_name_list)
 
     if duration > max_duration:
         # 即使超过时长，模型名也没变，但保留打印语句
