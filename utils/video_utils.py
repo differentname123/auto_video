@@ -4304,3 +4304,47 @@ def burn_ocr_subtitles_to_video(
                 os.remove(script_path)
             except PermissionError:
                 pass
+
+
+def format_video_ratio(input_path, output_path, target_ratio, mode="black"):
+    start_time = time.time()
+    ratio = target_ratio.replace(":", "/")
+
+    # 【修复核心1】使用单引号严格包裹数学表达式，避免逗号被 FFmpeg 误判为滤镜分隔符
+    tw = f"'ceil(max(iw,ih*({ratio}))/2)*2'"
+    th = f"'ceil(max(ih,iw/({ratio}))/2)*2'"
+
+    cmd = ["ffmpeg", "-y", "-i", input_path]
+
+    if mode == "blur":
+        # 【修复核心2】在输出端强制指定 DAR (显示长宽比) 锁定为目标比例
+        filter_complex = (
+            f"[0:v]split=2[bg][fg];"
+            f"[bg]scale=w={tw}:h={th}[bg_scaled];"
+            f"[bg_scaled]boxblur=5:5[bg_blur];"
+            f"[bg_blur][fg]overlay=x='(W-w)/2':y='(H-h)/2'[out_tmp];"
+            f"[out_tmp]setdar=dar='{ratio}'[outv]"
+        )
+        cmd.extend(["-filter_complex", filter_complex, "-map", "[outv]", "-map", "0:a?"])
+    else:
+        vf = f"pad=w={tw}:h={th}:x='(ow-iw)/2':y='(oh-ih)/2',setdar=dar='{ratio}'"
+        cmd.extend(["-vf", vf])
+
+    cmd.extend([
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-c:a", "copy",
+        output_path
+    ])
+
+    # 需求1：只打印完整命令
+    print(f"规范视频尺寸 执行命令: {' '.join(cmd)}")
+
+    try:
+        # 需求1&2：将所有标准输出和错误输出丢弃以隐藏日志，且 check=True 配合 except 实现报错不中断
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    except Exception:
+        # 需求2：发生任何错误都不向外抛出，保证调用该函数的外部代码不受影响
+        pass
+    print(f"视频比例调整完成！输出文件: {output_path}  耗时: {time.time() - start_time:.2f}s")

@@ -170,6 +170,9 @@ def build_task_video_paths(task_info):
     video_with_ending_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, str_id, 'ending.mp4')
     video_with_watermark_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, str_id, 'watermark.mp4')
 
+    video_with_format_output_path = os.path.join(VIDEO_TASK_BASE_PATH, video_id_str, str_id, 'format.mp4')
+
+
 
 
     return {
@@ -178,7 +181,8 @@ def build_task_video_paths(task_info):
         'all_scene_video_path': all_scene_video_path,
         'video_with_bgm_output_path': video_with_bgm_output_path,
         'video_with_ending_output_path': video_with_ending_output_path,
-        'video_with_watermark_output_path': video_with_watermark_output_path
+        'video_with_watermark_output_path': video_with_watermark_output_path,
+        'video_with_format_output_path':video_with_format_output_path
     }
 
 

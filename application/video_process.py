@@ -37,7 +37,7 @@ from utils.paddle_ocr_base import run_subtitle_ocr
 from utils.video_utils import clip_video_ms, merge_videos_ffmpeg, probe_duration, cover_subtitle, \
     add_text_overlays_to_video, gen_video, text_image_to_video_with_subtitles, get_frame_at_time_safe, \
     add_text_adaptive_padding, add_bgm_to_video, gen_ending_video, add_transparent_watermark, \
-    save_frames_around_timestamp, save_frames_around_timestamp_ffmpeg, get_scene, extract_audio
+    save_frames_around_timestamp, save_frames_around_timestamp_ffmpeg, get_scene, extract_audio, format_video_ratio
 
 
 def gen_owner_time_range(owner_asr_info, video_duration_ms):
@@ -1065,7 +1065,7 @@ def get_watermark_path(user_name: str) -> str:
     return watermark_path
 
 
-def add_watermark_and_ending(video_path, watermark_path, ending_video_path, voice_info, best_script, user_name,
+def add_watermark_and_ending(video_path, format_ratio, format_path, watermark_path, ending_video_path, voice_info, best_script, user_name,
                              user_type):
     failure_details = {}
     base_dir = os.path.dirname(video_path)
@@ -1076,13 +1076,21 @@ def add_watermark_and_ending(video_path, watermark_path, ending_video_path, voic
                                                                                  "感谢观看本视频，欢迎点赞、评论、关注、投币、分享！")
     start_time = time.time()
     gen_ending_video(ending_text, temp_ending_video_path, origin_ending_video_path, voice_info)
-    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset='medium')
+    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset='ultrafast')
     print(f"生成结尾视频完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {ending_video_path}")
 
     # 尝试生成结尾视频
     if is_valid_target_file_simple(ending_video_path):
         print(f"成功添加片尾视频，输出路径: {ending_video_path}")
         current_video_path = ending_video_path
+
+    if format_ratio:
+        format_video_ratio(current_video_path, format_path, format_ratio, mode="black")
+        if is_valid_target_file_simple(format_path):
+            print(f"成功调整视频格式，输出路径: {format_path}")
+            current_video_path = format_path
+
+
 
     # wm_path = get_watermark_path(user_name)
     # start_time = time.time()
@@ -1144,6 +1152,7 @@ def gen_new_video(task_info, video_info_dict, is_need_narration):
     :return:
     """
     is_need_commentary = task_info.get('creation_guidance_info', {}).get('is_need_commentary', False)
+    format_ratio = task_info.get('creation_guidance_info', {}).get('format_ratio', '')
     failure_details = {}
     all_task_video_path_info = build_task_video_paths(task_info)
     final_output_path = all_task_video_path_info.get('final_output_path')
@@ -1217,6 +1226,7 @@ def gen_new_video(task_info, video_info_dict, is_need_narration):
     # 生成带有标题的视频
     is_need_scene_title = task_info.get('creation_guidance_info', {}).get('is_need_scene_title', True)
     video_with_title_output_path = all_task_video_path_info.get('video_with_title_output_path')
+    video_with_format_output_path = all_task_video_path_info.get('video_with_format_output_path')
     failure_details, current_video_path = gen_title_video(is_need_scene_title, all_scene_video_path,
                                                           all_scene_video_file_list, best_script,
                                                           video_with_title_output_path)
@@ -1234,6 +1244,8 @@ def gen_new_video(task_info, video_info_dict, is_need_narration):
     video_with_ending_output_path = all_task_video_path_info.get('video_with_ending_output_path')
     video_with_watermark_output_path = all_task_video_path_info.get('video_with_watermark_output_path')
     failure_details, current_video_path = add_watermark_and_ending(current_video_path,
+                                                                   format_ratio=format_ratio,
+                                                                   format_path=video_with_format_output_path,
                                                                    watermark_path=video_with_watermark_output_path,
                                                                    ending_video_path=video_with_ending_output_path,
                                                                    voice_info=voice_info, best_script=best_script,
@@ -1325,6 +1337,18 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
     """
     扫描并清理 MP4 文件，同时计算释放的磁盘空间（MB）。
     """
+    mongo_base_instance = gen_db_object()
+    manager = MongoManager(mongo_base_instance)
+    query_2 = {
+        # "userName": {"$in": ["jie", "qiqixiao"]},
+        "status": "待投稿"
+    }
+    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    all_video_id_list = []
+    for task_info in all_task:
+        video_id_list = task_info.get('video_id_list', [])
+        all_video_id_list.extend(video_id_list)
+    all_video_id_list = list(set(all_video_id_list))
     target_dir = Path(directory_path)
     if not target_dir.exists():
         print(f"错误：目录 '{directory_path}' 不存在。")
@@ -1339,9 +1363,10 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
 
     print(f"========== 阶段 1: 扫描目录 ==========")
     print(f"目标路径: {target_dir.absolute()}")
-    print(f"保留策略: {days}天内修改 或 文件名以_origin结尾\n")
+    print(f"保留策略: {days}天内修改 或 文件名以_origin结尾 需要保留的id长度为 {len(all_video_id_list)}")
 
     total_scanned = 0
+    keep_count = 0
     # 使用 rglob 递归扫描所有子文件夹
     for file_path in target_dir.rglob('*.mp4'):
         total_scanned += 1
@@ -1361,6 +1386,12 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
 
         # 既不是最近修改，也不是 origin，加入待删除列表
         if not is_recent and not is_origin:
+            # 还要保证file_path 不包含任何一个待保留的 video_id
+            if any(video_id in str(file_path) for video_id in all_video_id_list):
+                keep_count += 1
+                continue
+
+
             files_to_delete.append({
                 'path': file_path,
                 'size': f_size,
@@ -1372,7 +1403,7 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
     total_size_mb = total_size_bytes / (1024 * 1024)
 
     # 2. 报告扫描结果
-    print(f"扫描完成。共扫描 MP4 文件: {total_scanned} 个")
+    print(f"扫描完成。共扫描 MP4 文件: {total_scanned} 个 保留 {keep_count} 个")
     print(f"符合删除条件的文件: {len(files_to_delete)} 个")
     print(f"预计释放空间: {total_size_mb:.2f} MB")  # 核心修改：打印总大小
 

@@ -241,7 +241,6 @@
                     </div>
                     <div class="form-row">
                         <div class="label-wrap"><label class="option-label">预计投稿日期</label><i class="info-icon">?</i><span class="tooltip-text">设定发布时间，系统会自动进行排期发布。</span></div>
-                        <!-- 日期将由JS生成Radio组 -->
                         <div class="radio-group wide" id="schedule-date-container"></div>
                     </div>
                     <div class="options-grid" style="margin-bottom: 20px; border-top: 1px dashed #eee; padding-top: 20px; grid-template-columns: 1fr;">
@@ -264,6 +263,12 @@
                             <div class="radio-group">
                                 <label class="radio-btn"><input type="radio" name="allow-commentary" value="yes" checked><span>是</span></label>
                                 <label class="radio-btn"><input type="radio" name="allow-commentary" value="no"><span>否</span></label>
+                            </div>
+                        </div>
+                        <div class="option-item" style="flex-direction: row; align-items: center; justify-content: space-between;">
+                            <div class="label-wrap"><span class="option-label">强制视频比例（<span style="color:#d32f2f;font-weight:600">制作耗时将翻倍</span>）</span><i class="info-icon">?</i><span class="tooltip-text">将视频变成规范化的横屏（16:9）或者竖屏（9:16）</span></div>                            <div class="radio-group">
+                                <label class="radio-btn"><input type="radio" name="format-ratio" value="16:9"><span>横屏视频</span></label>
+                                <label class="radio-btn"><input type="radio" name="format-ratio" value="9:16"><span>竖屏视频</span></label>
                             </div>
                         </div>
                     </div>
@@ -390,7 +395,6 @@
                 </div>
             </div>
 
-            <!-- 以下选项已隐藏，但保留默认值传递给后端 -->
             <input type="hidden" class="select-realtime" value="yes">
             <input type="hidden" class="select-text" value="yes">
             <input type="hidden" class="select-emoji" value="yes">
@@ -1234,6 +1238,7 @@
                 is_need_audio_replace: getRadioValue('audio-replace', document.getElementById('advanced-options')) === 'yes',
                 is_need_scene_title: getRadioValue('scene-title', document.getElementById('advanced-options')) === 'yes',
                 is_need_commentary: getRadioValue('allow-commentary', document.getElementById('advanced-options')) === 'yes',
+                format_ratio: getRadioValue('format-ratio', document.getElementById('advanced-options')),
                 schedule_date: getRadioValue('schedule-date', document.getElementById('advanced-options')),
                 creative_guidance: document.getElementById('creative-guidance').value.trim()
             },
