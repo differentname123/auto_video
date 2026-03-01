@@ -477,9 +477,10 @@ def prepare_basic_video_info(video_info_dict):
             origin_video_path = video_path_info['origin_video_path']
             video_url = f"https://www.douyin.com/video/{video_id}"
 
-            # 步骤A: 保证视频文件存在，并清理相关的错误状态
-            if not is_valid_target_file_simple(origin_video_path):
-                print(f"{log_pre} 视频 {video_id} 的原始文件不存在，准备下载...")
+            # 步骤A: 保证视频文件存在，且 metadata 也必须存在
+            # 修改点: 增加了 `or video_info.get('metadata') is None` 校验
+            if not is_valid_target_file_simple(origin_video_path) or video_info.get('metadata') is None:
+                print(f"{log_pre} 视频 {video_id} 的原始文件不存在或元数据(metadata)缺失，准备下载/获取...")
                 result = download_douyin_video_sync(video_url)
 
                 if not result:
@@ -520,11 +521,6 @@ def prepare_basic_video_info(video_info_dict):
                     print(f"{log_pre} 警告: 视频 {video_id} 检测重复时发生异常: {str(e)}，默认设置为非重复。")
                     is_duplicate = False
                 video_info['is_duplicate'] = is_duplicate
-
-
-
-
-
 
         except Exception as e:
             traceback.print_exc()

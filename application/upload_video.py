@@ -300,6 +300,8 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text, id):
     available_cover_path_list = []
     try:
         for video_id, video_info in video_info_dict.items():
+            if not video_info.get('metadata'):
+                continue
             meta_data = video_info.get('metadata')[0]
             is_duplicate = video_info.get('is_duplicate', False)
             if is_duplicate:
@@ -309,7 +311,7 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text, id):
                 available_cover_path_list.append(abs_cover_path)
     except Exception as e:
         traceback.print_exc()
-        print(f"⚠️ 生成封面时发生错误：{e}")
+        print(f"⚠️ 生成封面时发生错误：{e} {id}")
 
     if not available_cover_path_list:
         output_dir = os.path.dirname(final_output_path)
