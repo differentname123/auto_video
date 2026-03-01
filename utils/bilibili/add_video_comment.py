@@ -65,7 +65,7 @@ def gen_final_property_replay(video_info, all_replay_info):
 
     PROMPT_FILE_PATH = r'W:\project\python_project\auto_video\application\prompt\推荐视频b站好片.txt'
     prompt = f"{read_file_to_str(PROMPT_FILE_PATH)}\n输入信息如下:\n{format_video_info}"
-    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-lite-latest"]
     raw = ""
     for attempt in range(1, max_retries + 1):
 

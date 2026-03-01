@@ -1045,7 +1045,7 @@ def gen_hudong_by_llm(video_path, video_info):
     # 模型选择逻辑（与原版保持一致）
     max_duration = 600
     model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash"]
-    model_name = random.choices(model_name_list)
+    model_name = random.choice(model_name_list)
 
     if duration > max_duration:
         # 即使超过时长，模型名也没变，但保留打印语句
