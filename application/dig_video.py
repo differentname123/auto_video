@@ -384,7 +384,7 @@ def gen_hot_video_llm(video_info, hot_video=None):
 
     full_prompt = f"{base_prompt}\n视频素材信息 (Video Materials)如下：\n{video_info}\n\n{last_prompt}"
     model_name = "gemini-2.5-pro"
-    # model_name = "gemini-3-pro-preview"
+    model_name = "gemini-3.1-pro-preview"
     max_retries = 3
     video_content_plans = []
     for attempt in range(1, max_retries + 1):

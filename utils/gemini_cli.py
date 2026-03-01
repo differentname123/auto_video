@@ -43,7 +43,7 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     my_lock = None
 
     # --- 并发控制部分 ---
-    print(f"[进程 {os.getpid()}] 正在尝试获取文件锁许可...")
+    print(f"[进程 {os.getpid()}] 正在尝试获取文件锁许可...{model_name}")
     while my_lock is None:
         for i in range(MAX_CONCURRENT_TASKS):
             try:
@@ -107,7 +107,7 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
         # 无论函数成功还是异常退出，都必须释放锁
         if my_lock:
             my_lock.release()
-            print(f"[进程 {os.getpid()}] 执行完毕，已释放许可 ({my_lock.lock_file})。")
+            print(f"[进程 {os.getpid()}] 执行完毕，已释放许可 ({my_lock.lock_file})。 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 # --- 业务代码 (同样无需修改) ---

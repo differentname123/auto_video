@@ -949,7 +949,7 @@ def recover_task():
         },
         "failure_details": {
             "$not": {
-                "$regex": "禁止|Content blocked"
+                "$regex": "禁止|Content blocked|ASR 文本中未检测到任何"
             }
         }
     }
