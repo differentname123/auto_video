@@ -1591,11 +1591,15 @@ def gen_video_script_llm(task_info, video_info_dict):
             random_value = random.random()
             if random_value < 0.01:
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
-                gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-pro-preview")
+                gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-flash-preview", fallback_model="gemini-2.5-flash")
             else:
                 gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
-
-
+                if gen_error_info:
+                    gen_error_info, raw_response = generate_gemini_content_managed(full_prompt, model_name='gemini-3.0-flash')
+                if gen_error_info:
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None,
+                                                                                      model_name="gemini-3-pro-preview",
+                                                                                      fallback_model="gemini-3-flash-preview")
 
             # 解析和校验
             new_video_script_info = string_to_object(raw_response)
