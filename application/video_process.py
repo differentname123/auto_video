@@ -1425,7 +1425,7 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
             f_path = item['path']
             try:
                 f_path.unlink()
-                print(f"[已删除] {f_path.name}")
+                # print(f"[已删除] {f_path.name}")
                 success_count += 1
             except Exception as e:
                 print(f"[删除失败] {f_path.name} -> {e}")
