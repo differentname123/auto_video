@@ -227,8 +227,8 @@ def send_good_video(manager):
     #     "status": "已投稿"
     # }
     # # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu', 'junda']
-    simple_need_process_users = ['yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'xiaoxiaosu']
+    need_process_users = ['lin', 'dahao', 'zhong', "qizhu", 'mama', 'xiaosu', 'jie', 'qiqixiao', 'yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan', 'junda']
+    simple_need_process_users = ['yang', 'xue', 'danzhu', 'ruruxiao', 'yuhua', 'junyuan']
 
     statistic_play_info = read_json(STATISTIC_PLAY_COUNT_FILE)
     good_video_list = statistic_play_info.get('good_video_list', [])
@@ -1114,7 +1114,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'junda', 'mama', 'xue', 'danzhu', 'xiaoxiaosu', 'qiuru', 'nana','shun', 'ping', 'zhong', 'liuzhu', 'qizhu', 'xiaocai', 'xiaoxue', 'ningtao']
+    need_process_users = ['hong', 'dahao', 'junda', 'mama', 'xue', 'danzhu', 'qiuru', 'nana', 'shun', 'ping', 'zhong', 'liuzhu', 'qizhu', 'xiaocai', 'xiaoxue', 'ningtao']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 

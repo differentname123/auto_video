@@ -14,8 +14,9 @@ from utils.bilibili.get_danmu import get_cid_from_bvid
 from utils.common_utils import get_config, init_config
 
 # --- 配置参数 ---
-SESSDATA = get_config("bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
-BILI_JCT = get_config("bilibili_csrf_token")
+SESSDATA = get_config("xiaoxiaosu_bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
+BILI_JCT = get_config("xiaoxiaosu_bilibili_csrf_token")
+
 
 # 默认投稿设置
 DEFAULT_COPYRIGHT = 1       # 1: 自制, 2: 转载
@@ -378,11 +379,11 @@ def upload_to_bilibili(
 
     sess = get_session(sessdata, bili_jct)
     cover_url = upload_cover(sess, cover_path, bili_jct=bili_jct)
-    time.sleep(random.uniform(1, 10))  # 模拟人类操作，等待1-3秒
+    # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
     pre = preupload_video(sess, video_path)
     biz_id = pre["biz_id"]
     filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
-    time.sleep(random.uniform(1, 10))  # 模拟人类操作，等待1-3秒
+    # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
     meta = post_video_meta(sess, pre, video_path)
     parts = upload_chunks(sess, video_path, pre, meta)
     finalize_upload(sess, pre, meta, parts)
@@ -492,16 +493,16 @@ def send_bilibili_dm_command(cookie_str, csrf, question, duration, optionA, opti
 
 if __name__ == "__main__":
 
-    config_map = init_config()
-    user_name = 'mama'
-    target_value = None
-    for uid, value in config_map.items():
-        if value.get('name') == user_name:
-            target_value = value
-            break
-    total_cookie = target_value.get('total_cookie')
-    BILI_JCT = target_value.get('BILI_JCT')
-    send_bilibili_dm_command(total_cookie, BILI_JCT, "这是一个测试问题？", 5000, "选项A", "选项B", "BV1Y6fPBmEvk", "116116487668454")
+    # config_map = init_config()
+    # user_name = 'mama'
+    # target_value = None
+    # for uid, value in config_map.items():
+    #     if value.get('name') == user_name:
+    #         target_value = value
+    #         break
+    # total_cookie = target_value.get('total_cookie')
+    # BILI_JCT = target_value.get('BILI_JCT')
+    # send_bilibili_dm_command(total_cookie, BILI_JCT, "这是一个测试问题？", 5000, "选项A", "选项B", "BV1Y6fPBmEvk", "116116487668454")
 
     #
     # # 读取LLM/TikTokDownloader/metadata_cache.json
@@ -510,11 +511,13 @@ if __name__ == "__main__":
     # for key, value in metadata_cache.items():
     #     video_path = value.get('video_path')
     #
-    # result = upload_to_bilibili(
-    #     video_path=video_path,
-    #     cover_path="inpainted_image.jpg",
-    #     title="我的AI修复视频与精彩瞬间",
-    #     description="这是一个使用AI技术修复后的视频，并加入了有趣的音频，希望大家喜欢！",
-    #     tags="AI修复,视频剪辑,有趣,科技,日常生活",
-    # )
+    start_time = time.time()
+    result = upload_to_bilibili(
+        video_path=r"W:\project\python_project\auto_video\utils\test1.mp4",
+        cover_path=r'W:\project\python_project\auto_video\utils\test.jpg',
+        title="我的AI修复视频与精彩瞬间",
+        description="这是一个使用AI技术修复后的视频，并加入了有趣的音频，希望大家喜欢！",
+        tags="AI修复,视频剪辑,有趣,科技,日常生活",
+    )
+    print(f"总耗时: {time.time() - start_time:.2f}秒")
     # print(f"投稿成功！AID={result['aid']}, BVID={result['bvid']}")
