@@ -1076,7 +1076,7 @@ def add_watermark_and_ending(video_path, format_ratio, format_path, watermark_pa
                                                                                  "感谢观看本视频，欢迎点赞、评论、关注、投币、分享！")
     start_time = time.time()
     gen_ending_video(ending_text, temp_ending_video_path, origin_ending_video_path, voice_info)
-    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset='ultrafast')
+    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset='medium')
     print(f"生成结尾视频完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {ending_video_path}")
 
     # 尝试生成结尾视频
@@ -1333,7 +1333,7 @@ def save_frame_demo():
     print()
 
 
-def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
+def batch_cleanup_mp4(directory_path, days=3, dry_run=True):
     """
     扫描并清理 MP4 文件，同时计算释放的磁盘空间（MB）。
     """
@@ -1346,8 +1346,8 @@ def batch_cleanup_mp4(directory_path, days=7, dry_run=True):
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     all_video_id_list = []
     for task_info in all_task:
-        video_id_list = task_info.get('video_id_list', [])
-        all_video_id_list.extend(video_id_list)
+        video_id_list = task_info.get('_id', [])
+        all_video_id_list.append(str(task_info.get('_id', 'N/A')))
     all_video_id_list = list(set(all_video_id_list))
     target_dir = Path(directory_path)
     if not target_dir.exists():
