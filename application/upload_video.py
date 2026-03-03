@@ -948,32 +948,49 @@ def fix_user_name(tasks, user_config, manager):
             task_info['userName'] = random.choice(["nana"])
     manager.upsert_tasks(tasks)
 
+
+
+global_config_lock = threading.Lock()
+
+def get_safe_configs():
+    """
+    线程安全地获取最新配置，防止读写冲突
+    """
+    with global_config_lock:
+        config_m = build_user_config()
+        user_conf = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+        return config_m, user_conf
+
+
 def auto_upload(manager):
     """
-    进行单次循环的投稿
-    :return:
+    【投稿流】只负责把现成的视频投出去。
+    单轮内通过 already_upload_users 防重，并在最后死等所有投稿完成。
     """
+    # 1. 线程安全地获取配置
+    config_map, user_config = get_safe_configs()
+
     already_upload_users = []
     current_time = datetime.now()
-    config_map = build_user_config()
     allowed_user_name_list = list(config_map.keys())
-    user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+
     stop_flag = user_config.get('stop_flag', False)
     if stop_flag:
-        print("检测到停止投稿开关已开启，暂停本轮投稿。")
-        return
-    processed_task_ids = set()
+        print(f"检测到停止投稿开关已开启，暂停本轮投稿。 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return 0
 
+    processed_task_ids = set()
     start_time = time.time()
     all_task = []
     exist_id_list = []
     filter_task_list = []
     tasks_to_process = query_need_process_tasks()
 
-    # 1. 获取并统计任务
+    # 获取并统计任务
     tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED, TaskStatus.TO_UPLOADED])
     all_task.extend(tasks_to_upload)
     all_task.extend(tasks_to_process)
+
     for task in all_task:
         id_str = str(task.get('_id'))
         if id_str in exist_id_list:
@@ -985,41 +1002,41 @@ def auto_upload(manager):
         exist_id_list.append(id_str)
         filter_task_list.append(task)
 
-    print(f"找到 {len(tasks_to_upload)} 个待投稿任务，开始处理...耗时 {time.time() - start_time:.2f} 秒")
     existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload, allowed_user_name_list)
 
     futures: List[concurrent.futures.Future] = []
 
     now = datetime.now()
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    # 查询今日已投稿的任务
     uploaded_tasks_today = manager.find_tasks_after_time_with_status(today_midnight, [TaskStatus.UPLOADED])
     user_upload_info = gen_user_upload_info(uploaded_tasks_today)
 
-    sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks,
-                                                                                                not_existing_video_tasks,
-                                                                                                tobe_upload_video_info)
-    # fix_user_name(sort_tasks_to_upload, user_config, manager)
-    # return
+    sort_tasks_to_upload, sort_existing_video_tasks, sort_not_existing_video_tasks = sort_tasks(
+        existing_video_tasks,
+        not_existing_video_tasks,
+        tobe_upload_video_info
+    )
 
-    # 2. 循环提交上传任务
-    for task_info in sort_tasks_to_upload:
-        check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config,
-                                         config_map)
-
+    # 2. 核心：遍历已有视频的任务，触发上传
+    for task_info in sort_existing_video_tasks:
+        # 使用 already_upload_users 完美限制单轮单用户的重复投稿
+        check_result = check_need_upload(task_info, user_upload_info, current_time, already_upload_users, user_config, config_map)
+        # 检测 状态 是否为 TaskStatus.TO_UPLOADED
+        if task_info.get('status') != TaskStatus.TO_UPLOADED:
+            continue
         if not check_result:
             continue
+
         user_name = task_info.get('userName')
 
-        failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config,
-                                                                                   manager)
-        print(upload_params)
+        failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config, manager)
         if check_failure_details(failure_details):
-            print(f"❌ 生成视频失败，跳过上传 {task_info.get('video_id_list', [])} 用户 {user_name} ")
+            print(f"❌ 获取视频信息失败，跳过上传 {task_info.get('video_id_list', [])} 用户 {user_name} ")
             continue
 
         clean_files, keep_files = gen_all_files_to_cleanup(task_info)
         account_executor = account_executors[user_name]
+
         future = account_executor.submit(
             upload_worker,
             upload_params,
@@ -1031,38 +1048,123 @@ def auto_upload(manager):
         )
         futures.append(future)
         processed_task_ids.add(str(task_info.get('_id')))
+
+        # 记录本轮已投用户
         already_upload_users.append(user_name)
 
-    # 3. 【重构点】利用上传间隙，处理未生成视频的任务
-    process_idle_tasks(
-        tasks=sort_not_existing_video_tasks,
-        tobe_upload_video_info=tobe_upload_video_info,
-        futures=futures,
-        config_map=config_map,
-        user_config=user_config,
-        manager=manager,
-        processed_task_ids=processed_task_ids
-    )
-
-    # 4. 收尾与统计
-    print(
-        f"等待所有等待后台上传完成... 本轮投稿数量 {len(already_upload_users)}  用户{already_upload_users}  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} {error_user_map}")
-    need_process_tasks = query_need_process_tasks()
-
-    # 注意：tobe_upload_video_info 在 process_idle_tasks 中可能被修改，这里使用修改后的值，逻辑正确
+    # 收尾与统计
     gen_all_statistic_info(already_upload_users, user_upload_info, filter_task_list, tobe_upload_video_info, allowed_user_name_list)
-    concurrent.futures.wait(futures, timeout=None)
-    return len(sort_not_existing_video_tasks)
+
+    # 3. 【恢复原样】：死等所有上传任务完成，锁住大循环节奏
+    if futures:
+        print(f"⏳ 等待 {len(futures)} 个后台投稿任务完成...")
+        concurrent.futures.wait(futures, timeout=None)
+        print("✅ 本轮后台投稿任务全部完成！")
+
+    return len(already_upload_users)
+
+
+def auto_produce(manager, max_produce_count=2):
+    """
+    【制作流】一个没有感情的渲染机器，恢复并发能力，做完一批接一批
+    """
+    # 1. 线程安全地获取配置
+    config_map, user_config = get_safe_configs()
+    allowed_user_name_list = list(config_map.keys())
+
+    stop_flag = user_config.get('stop_flag', False)
+    if stop_flag:
+        print(f"检测到停止制作开关已开启，暂停本轮制作。 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+        return 0
+
+    tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED, TaskStatus.TO_UPLOADED])
+    existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload, allowed_user_name_list)
+
+    _, _, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info)
+
+    candidate_tasks = []
+    used_video_id_list = []
+
+    # 筛选任务
+    for task_info in sort_not_existing_video_tasks:
+        user_name = task_info.get('userName')
+        if user_name not in config_map:
+            continue
+
+        bvid = task_info.get('bvid', '')
+        status = task_info.get('status')
+        video_id_list = task_info.get('video_id_list', [])
+
+        if bvid or status == TaskStatus.UPLOADED:
+            continue
+
+        if any(vid in used_video_id_list for vid in video_id_list):
+            continue
+
+        used_video_id_list.extend(video_id_list)
+        candidate_tasks.append(task_info)
+
+        if len(candidate_tasks) >= max_produce_count:
+            break
+
+    if not candidate_tasks:
+        return 0
+
+    # 定义并行的 Worker
+    def produce_worker(task):
+        u_name = task.get('userName')
+        v_list = task.get('video_id_list', [])
+
+        print(f"\n🎬 [并行制作流] 开始为 {u_name} 独立渲染制作视频 {v_list} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        failure_details, _, _, _ = gen_video(task, config_map, user_config, manager)
+
+        if check_failure_details(failure_details):
+            print(f"❌ [并行制作流] 制作失败 {v_list} 用户 {u_name}")
+        else:
+            print(f"✅ [并行制作流] 制作成功，随时可被投稿流接管 {v_list} 用户 {u_name}")
+
+    # 并行渲染
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_produce_count) as executor:
+        futures = [executor.submit(produce_worker, t) for t in candidate_tasks]
+        # 等待这批视频渲染完毕，再开启下一轮循环去取新任务
+        concurrent.futures.wait(futures, timeout=None)
+
+    return len(candidate_tasks)
+
+
+def upload_loop(manager):
+    """主线程循环：永不停歇的调度中心"""
+    while True:
+        exist_count = auto_upload(manager)
+        if exist_count == 0:
+            time.sleep(60)
+        else:
+            time.sleep(5)
+
+
+def produce_loop(manager):
+    """后台线程循环：永不停歇的生产车间"""
+    while True:
+        produced_count = auto_produce(manager, max_produce_count=2)
+        if produced_count == 0:
+            time.sleep(60)
+        else:
+            time.sleep(1)
 
 
 if __name__ == "__main__":
+    from utils.mongo_base import gen_db_object
+    from utils.mongo_manager import MongoManager
+
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    while True:
-        exist_count = auto_upload(manager)
-        print(f"本轮投稿处理完成，等待下一轮...当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        if exist_count == 0:
-            time.sleep(60)  # 每分钟运行一次
-        else:
-            time.sleep(1)  # 每分钟运行一次
-            print("检测到本轮还有未生成视频的任务，马上进行下一轮投稿处理...")
+
+    print("🚀 启动独立双流模式：[投稿流] 与 [并行制作流] 已建立...")
+
+    # 1. 启动制作流的独立后台线程 (daemon=True 保证脚本结束时自动清理)
+    produce_thread = threading.Thread(target=produce_loop, args=(manager,), daemon=True, name="ProduceThread")
+    produce_thread.start()
+
+    # 2. 将投稿流挂载在主线程上运行
+    upload_loop(manager)
