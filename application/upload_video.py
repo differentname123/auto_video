@@ -201,7 +201,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
     schedule_date = creation_guidance_info.get('schedule_date', '2026-01-05')
     is_future = datetime.strptime(schedule_date, '%Y-%m-%d').date() > datetime.now().date()
     if is_future:
-        print(f"还没到计划的投稿时间，跳过 {log_pre}")
+        # print(f"还没到计划的投稿时间，跳过 {log_pre}")
         return False
 
 
@@ -236,7 +236,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
     if user_name not in right_now_user_list:
         if not (5 <= datetime.now().hour < 24):
             cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
-            print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
+            # print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
             return False
 
         need_waite_minutes = get_wait_minutes()
@@ -650,7 +650,8 @@ def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_
 
     # 只保留allowed_user_name_list中的用户
     user_statistic_info = {k: v for k, v in user_statistic_info.items() if k in allowed_user_name_list}
-
+    print(
+        f"等待所有等待后台上传完成... 本轮投稿数量 {len(already_upload_users)}  用户{already_upload_users}  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} {error_user_map}")
     print_simple_stats(user_statistic_info)
     return user_statistic_info
 
@@ -1078,6 +1079,7 @@ def auto_produce(manager, max_produce_count=2):
         return 0
 
     tasks_to_upload = manager.find_tasks_by_status([TaskStatus.PLAN_GENERATED, TaskStatus.TO_UPLOADED])
+    # 这里拿到了 tobe_upload_video_info，也就是每个用户"已生成数量"的统计字典
     existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info = statistic_tasks_with_video(tasks_to_upload, allowed_user_name_list)
 
     _, _, sort_not_existing_video_tasks = sort_tasks(existing_video_tasks, not_existing_video_tasks, tobe_upload_video_info)
@@ -1104,34 +1106,53 @@ def auto_produce(manager, max_produce_count=2):
         used_video_id_list.extend(video_id_list)
         candidate_tasks.append(task_info)
 
-        if len(candidate_tasks) >= max_produce_count:
-            break
+        # if len(candidate_tasks) >= max_produce_count:
+        #     break
 
-    if not candidate_tasks:
+    total_candidates = len(candidate_tasks)
+    if total_candidates == 0:
         return 0
 
-    # 定义并行的 Worker
-    def produce_worker(task):
-        u_name = task.get('userName')
-        v_list = task.get('video_id_list', [])
+    candidate_tasks = candidate_tasks[:max_produce_count * 2]
 
-        print(f"\n🎬 [并行制作流] 开始为 {u_name} 独立渲染制作视频 {v_list} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+    # 定义并行的 Worker，增加 index, total, tobe_upload_video_info 参数
+    def produce_worker(task, index, total, tobe_info):
+        user_name = task.get('userName')
+        v_list = task.get('video_id_list', [])
+        start_time = time.time()
+        # 完美植入你期望的进度日志
+        print(
+            f"🚀 [并行] 开始处理用户 {user_name} 的任务 {v_list} "
+            f"(进度: {index}/{total}) 已生成数量: {tobe_info.get(user_name, 0)} "
+            f"当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+        )
 
         failure_details, _, _, _ = gen_video(task, config_map, user_config, manager)
-
+        cost_time = time.time() - start_time
         if check_failure_details(failure_details):
-            print(f"❌ [并行制作流] 制作失败 {v_list} 用户 {u_name}")
+            print(
+                f"❌ [并行制作流] 制作失败 任务 {v_list} 用户 {user_name} "
+                f"(进度: {index}/{total}) 耗时: {cost_time:.2f} 秒 "
+                f"当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+            )
         else:
-            print(f"✅ [并行制作流] 制作成功，随时可被投稿流接管 {v_list} 用户 {u_name}")
+            print(
+                f"✅ [并行制作流] 制作成功，随时可被投稿流接管！任务 {v_list} 用户 {user_name} "
+                f"(进度: {index}/{total}) 耗时: {cost_time:.2f} 秒 "
+                f"当前时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+            )
 
     # 并行渲染
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_produce_count) as executor:
-        futures = [executor.submit(produce_worker, t) for t in candidate_tasks]
+        # 使用 enumerate 生成从 1 开始的 index，配合列表推导式提交任务
+        futures = [
+            executor.submit(produce_worker, t, idx, total_candidates, tobe_upload_video_info)
+            for idx, t in enumerate(candidate_tasks, 1)
+        ]
         # 等待这批视频渲染完毕，再开启下一轮循环去取新任务
         concurrent.futures.wait(futures, timeout=None)
 
-    return len(candidate_tasks)
-
+    return total_candidates
 
 def upload_loop(manager):
     """主线程循环：永不停歇的调度中心"""
