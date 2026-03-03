@@ -245,7 +245,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         time_diff = (current_time - latest_upload_time).total_seconds() / 60
 
         if time_diff < need_waite_minutes:
-            print(f"{user_name} 距离上次投稿仅 {time_diff:.2f} 分钟，一共需等待 {need_waite_minutes} 分钟，跳过 {log_pre}")
+            # print(f"{user_name} 距离上次投稿仅 {time_diff:.2f} 分钟，一共需等待 {need_waite_minutes} 分钟，跳过 {log_pre}")
             return False
 
     platform_upload_count = user_upload_info.get(user_name, {}).get('platform_upload_count', 0)
