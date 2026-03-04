@@ -284,10 +284,9 @@ def process_single_user(uid, all_video_info, max_hour=24):
     return -1
 
 
-def process_single_tag(tag, max_hour=24):
+def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
     all_user_file = r'W:\project\python_project\auto_video\config\all_user_info.json'
-    all_user_info = read_json(all_user_file)
 
     exist_video_info = all_user_info.get(str(tag), {})
     video_info_list = exist_video_info.get('video_info_list', [])
@@ -316,6 +315,22 @@ def process_single_tag(tag, max_hour=24):
         print(f"搜索标签 {tag} 没有得到数据，可能被风控了，等待10秒后再试...")
         time.sleep(10)
 
+def load_pure_user_info():
+    all_user_file = r'W:\project\python_project\auto_video\config\all_user_info.json'
+    all_user_info = read_json(all_user_file)
+
+    need_filed_list = ['author', 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
+    for tag, video_info in all_user_info.items():
+        video_info_list = video_info.get('video_info_list', [])
+        if not video_info_list:
+            return []
+        # 只保留必要的字段，多余字段删除
+        for v in video_info_list:
+            for key in list(v.keys()):
+                if key not in need_filed_list:
+                    del v[key]
+    save_json(all_user_file, all_user_info)
+    return all_user_info
 
 
 def search_good_user():
@@ -335,8 +350,7 @@ def search_good_user():
         sorted_tags = dict(sorted(combined_tags.items(), key=lambda item: item[1], reverse=True))
         result_hot_tags[video_type] = sorted_tags
 
-
-
+    all_user_info = load_pure_user_info()
     index_count = 0
     for video_type, sorted_tags in result_hot_tags.items():
         print(f"视频类型: {video_type}")
@@ -344,7 +358,9 @@ def search_good_user():
             index_count += 1
             print(f"\n\n标签: {tag}, 出现次数: {count} 进度: {index_count} / {len(sorted_tags)}")
             # 可以在这里对每个标签进行搜索，获取相关视频和用户信息
-            process_single_tag(tag)
+            process_single_tag(tag, all_user_info)
+
+
 def load_pure_video_info():
     all_video_file = r'W:\project\python_project\auto_video\config\all_bili_video.json'
     all_video_info = read_json(all_video_file)
@@ -444,5 +460,5 @@ if __name__ == "__main__":
         except Exception as e:
             traceback.print_exc()
             print(f"主循环发生异常: {e}")
-            print("等待30秒后重试...")
-            time.sleep(30)
+        print("等待30秒后重试...")
+        time.sleep(30)
