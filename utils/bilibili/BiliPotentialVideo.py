@@ -1,4 +1,7 @@
+import functools
 import math
+import os
+import traceback
 from datetime import datetime
 
 import requests
@@ -15,7 +18,7 @@ from hashlib import md5
 from application.dig_video import get_need_dig_video_list
 from application.video_common_config import ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
 from utils.bilibili.bili_utils import fetch_from_search
-from utils.common_utils import read_json, save_json
+from utils.common_utils import read_json, save_json, time_to_ms
 
 # 准备几个常见的 User-Agent
 USER_AGENTS = [
@@ -24,6 +27,21 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 ]
+
+def with_proxy(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
+        os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if 'HTTP_PROXY' in os.environ:
+                del os.environ['HTTP_PROXY']
+            if 'HTTPS_PROXY' in os.environ:
+                del os.environ['HTTPS_PROXY']
+
+    return wrapper
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
@@ -153,16 +171,22 @@ import math
 
 
 def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
-    need_filed_list = ['created', 'play', 'comment', 'title', 'bvid']
-
+    need_filed_list = ['created', 'play', 'comment', 'title', 'bvid', 'author', 'mid', 'length']
     if not video_list:
         return []
+
+    # 计算平均每天投递视频数（总发布数 / 时间跨度天数）
+    # 计算最近3天的平均每天投递视频数
+    three_days_seconds = 3 * 24 * 3600
+    recent_video_count = sum(1 for v in video_list if v['created'] >= current_timestamp - three_days_seconds)
+    avg_daily_videos = recent_video_count / 3.0
 
     # 只保留必要的字段，多余字段删除
     for v in video_list:
         for key in list(v.keys()):
             if key not in need_filed_list:
                 del v[key]
+        v['duration'] = time_to_ms(v.get('length', '0:00')) / 1000.0  # 转换为秒，方便后续分析
 
     # 1. 计算基础指标：存活时间、每分钟播放速率、时间归一化后的绝对分
     for v in video_list:
@@ -181,6 +205,10 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
         window_avgs[w] = sum(rates_in_window) / len(rates_in_window) if rates_in_window else 0.0
 
     # 3. 计算多周期比较得分及最终总分
+    # 引入平滑系数，避免分母极小时导致 comp_score 爆炸
+    # 设为 1.0 表示“每小时额外1个播放量”的保底基准，可根据实际业务水位调整
+    smooth_factor = 1.0
+
     for v in video_list:
         ratios = []
         v['window_ratios'] = {}  # 记录中间过程，方便排查和分析数据
@@ -192,7 +220,10 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
                 continue
 
             avg_rate = window_avgs[w]
-            ratio = v['play_rate'] / avg_rate if avg_rate > 0 else 1.0
+
+            # 使用拉普拉斯平滑计算倍率
+            ratio = (v['play_rate'] + smooth_factor) / (avg_rate + smooth_factor)
+
             ratios.append(ratio)
             v['window_ratios'][f'{w}h_ratio'] = ratio
 
@@ -200,12 +231,16 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
         v['comp_score'] = sum(ratios)
 
         # 最终综合得分：绝对爆发力 + 相对表现力
-        v['score'] = v['abs_score'] + v['comp_score']
+        v['score'] = v['abs_score'] * v['comp_score']
+
+        # 增加平均每天发布视频数量信息
+        v['avg_daily_videos'] = avg_daily_videos
+        # 增加'current_time_str'
+        v['current_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
     # 按照综合得分排序，得分高的排在前面
     video_list.sort(key=lambda x: x['score'], reverse=True)
     return video_list
-
 
 def process_single_user(uid, max_hour=24):
     """
@@ -222,7 +257,7 @@ def process_single_user(uid, max_hour=24):
     # 如果在1天内更新就不拉取新数据了
     if time.time() - update_time < max_hour * 3600:
         print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
-        return
+        return True
 
 
     videos = get_user_videos_public(mid=uid, desired_count=40)
@@ -246,6 +281,8 @@ def process_single_user(uid, max_hour=24):
 
         all_video_info[str(uid)] = exist_video_info
         save_json(all_video_file, all_video_info)
+        return True
+    return False
 
 
 def process_single_tag(tag, max_hour=24):
@@ -254,12 +291,13 @@ def process_single_tag(tag, max_hour=24):
     all_user_info = read_json(all_user_file)
 
     exist_video_info = all_user_info.get(str(tag), {})
+    video_info_list = exist_video_info.get('video_info_list', [])
     update_time = exist_video_info.get('update_time', 0)
-    if time.time() - update_time < max_hour * 3600:
+    if time.time() - update_time < max_hour * 3600 and video_info_list:
         print(f"用户 {tag} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
         return
 
-    videos = fetch_from_search(tag)
+    videos = fetch_from_search(tag, recent_days=2)
     exist_user_list = videos
     need_filed_list = ['author', 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
     for v in videos:
@@ -268,11 +306,16 @@ def process_single_tag(tag, max_hour=24):
                 del v[key]
 
     print(f"搜索标签 {tag} 得到 {len(videos)} 个相关视频。 耗时 {time.time() - start_time:.2f} 秒。 当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    exist_video_info['video_info_list'] = exist_user_list
-    exist_video_info['update_time'] = int(time.time())
-    all_user_info[str(tag)] = exist_video_info
+    if exist_user_list:
+        exist_video_info['video_info_list'] = exist_user_list
+        exist_video_info['update_time'] = int(time.time())
+        all_user_info[str(tag)] = exist_video_info
 
-    save_json(all_user_file, all_user_info)
+        save_json(all_user_file, all_user_info)
+    else:
+        # 没有数据就说明被风控了，等待10s
+        print(f"搜索标签 {tag} 没有得到数据，可能被风控了，等待10秒后再试...")
+        time.sleep(10)
 
 
 
@@ -305,14 +348,77 @@ def search_good_user():
             process_single_tag(tag)
 
 
+def get_all_user_video_info():
+    """
+    获取所有用户的视频信息
+    :return:
+    """
+    all_user_file = r'W:\project\python_project\auto_video\config\all_user_info.json'
+    all_user_info = read_json(all_user_file)
+    all_mid_list = []
+    for tag, video_info in all_user_info.items():
+        video_info_list = video_info.get('video_info_list', [])
+        for video in video_info_list:
+            pubdate = video.get('pubdate', 0)
+            # 只保留最近两天的视频
+            if time.time() - pubdate < 2 * 24 * 3600:
+                all_mid_list.append(video.get('mid'))
 
+    success_count = 0
+    fail_count = 0
+    all_mid_list = list(set(all_mid_list))
+    print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
+    for index, mid in enumerate(all_mid_list):
+        try:
+            print(f"\n\n正在处理用户 mid: {mid} 进度: {index + 1} / {len(all_mid_list)} 当前失败和成功数量: {fail_count} / {success_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            result = process_single_user(mid)
+            if result:
+                success_count += 1
+            else:
+                fail_count += 1
+        except Exception as e:
+            traceback.print_exc()
+            print(f"处理用户 mid: {mid} 发生异常: {e}")
+            fail_count += 1
+            continue
+
+def filter_good_user():
+    """
+    筛选得到高频更新的用户，以及计算每个视频的得分
+    :return:
+    """
+    all_video_file = r'W:\project\python_project\auto_video\config\all_bili_video.json'
+    all_video_info = read_json(all_video_file)
+    all_video_score_list = []
+    process_count = 0
+    for uid, exist_video_info in all_video_info.items():
+        exist_video_list = exist_video_info.get('video_list', [])
+        update_time = exist_video_info.get('update_time', 0)
+        # 判断是否在一天内更新过了，如果没有更新过了就说明这个用户可能不活跃了，或者被风控了，就不计算分数了
+        if time.time() - update_time > 24 * 3600:
+            continue
+
+        video_score_list = calculate_video_scores(exist_video_list, current_timestamp=update_time)
+        process_count += 1
+        all_video_score_list.extend(video_score_list)
+    print(f"共处理了 {process_count} 个用户的视频数据，计算得到 {len(all_video_score_list)} 个视频的分数。")
+
+    # 保留'avg_daily_videos' 大于1的视频，说明这个用户最近三天平均每天发布了超过1个视频，比较活跃
+    all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
+
+    # 只保留duration 小于10分钟的视频，说明这个视频比较短，更容易爆发
+    all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
+
+
+    # 按照分数排序，得分高的排在前面
+    all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
+    print()
 
 
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    # 以影视飓风 (mid: 946974) 为例，获取最新 5 个视频
-    # test_mid = 149425572
-    # process_single_user(test_mid)
+    # filter_good_user()
 
-    search_good_user()
+    get_all_user_video_info()
+    # search_good_user()

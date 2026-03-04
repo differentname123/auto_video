@@ -308,7 +308,7 @@ import requests
 from urllib.parse import quote_plus, urlencode
 
 
-def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, proxies: dict = None) -> list:
+def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, proxies: dict = None, recent_days: int = None) -> list:
     """
     从 B 站综合搜索接口获取视频数据（结合 WBI 签名与精准数量控制）
 
@@ -317,6 +317,7 @@ def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, 
         target_count (int): 目标获取的视频数量
         timeout (int): 请求超时（秒）
         proxies (dict): 代理配置
+        recent_days (int): 筛选最近几天发布的视频，默认为 None
 
     Returns:
         list: 纯净的视频信息列表
@@ -380,6 +381,13 @@ def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, 
     fetched = 0
     page_size = 42  # B站网页端综合搜索单页标准是 42
 
+    # 计算时间范围参数（如果在翻页循环内计算，可能会导致翻页间隙的时间戳不一致，因此提取到外部）
+    pubtime_begin_s = None
+    pubtime_end_s = None
+    if recent_days is not None:
+        pubtime_end_s = int(time.time())
+        pubtime_begin_s = pubtime_end_s - (recent_days * 24 * 3600)
+
     print(f"开始搜索关键字: '{key_word}'，目标数量: {target_count}...")
 
     while fetched < target_count:
@@ -401,6 +409,11 @@ def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, 
             "ad_resource": 5646,
             "source_tag": 3,
         }
+
+        # 如果指定了最近几天，则注入时间参数
+        if recent_days is not None:
+            unsigned_params["pubtime_begin_s"] = pubtime_begin_s
+            unsigned_params["pubtime_end_s"] = pubtime_end_s
 
         signed_params = sign_params_for_wbi(unsigned_params, img_key, sub_key)
 
