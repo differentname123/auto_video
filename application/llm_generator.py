@@ -622,6 +622,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
 
             return None, logical_scene_info, cost_time_info
         except Exception as e:
+            traceback.print_exc()
             error_str = f"{error_info} {str(e)} {log_pre}"
             print(f"生成逻辑性场景划分失败 (尝试 {attempt}/{max_retries}): {error_str} {log_pre} {gen_error_info}")
             if attempt < max_retries:

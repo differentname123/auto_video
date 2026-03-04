@@ -1153,6 +1153,10 @@ def gen_new_video(task_info, video_info_dict, is_need_narration):
     """
     is_need_commentary = task_info.get('creation_guidance_info', {}).get('is_need_commentary', False)
     format_ratio = task_info.get('creation_guidance_info', {}).get('format_ratio', '')
+    user_name = task_info.get('userName', 'user')
+    if user_name == 'dahao':
+        print(f"检测到用户 {user_name}，自动开启横屏比例")
+        format_ratio = '16:9'
     failure_details = {}
     all_task_video_path_info = build_task_video_paths(task_info)
     final_output_path = all_task_video_path_info.get('final_output_path')
