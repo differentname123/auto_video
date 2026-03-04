@@ -21,7 +21,18 @@ from utils.gemini import get_llm_content
 
 URL_MODIFY_RELATION = "https://api.bilibili.com/x/relation/modify"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+import requests
+import urllib.parse
+import time
+import random
+from hashlib import md5
 
+# 准备几个常见的 User-Agent
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
+]
 
 base_prompt = """
             # 角色
@@ -297,97 +308,150 @@ import requests
 from urllib.parse import quote_plus, urlencode
 
 
-def fetch_from_search(key_word, target_count=20, timeout=10, page_size=20):
+def fetch_from_search(key_word: str, target_count: int = 42, timeout: int = 10, proxies: dict = None) -> list:
     """
-    从 B 站关键词搜索接口获取视频数据（不带 Cookie 版本）
+    从 B 站综合搜索接口获取视频数据（结合 WBI 签名与精准数量控制）
 
     Args:
         key_word (str): 搜索关键词
-        target_count (int): 目标数量
+        target_count (int): 目标获取的视频数量
         timeout (int): 请求超时（秒）
-        page_size (int): 每页数量（B 站默认 20）
+        proxies (dict): 代理配置
 
     Returns:
-        list: 视频信息列表（可能少于 target_count）
+        list: 纯净的视频信息列表
     """
     if not key_word:
         print("[提示] 未提供关键词。")
         return []
 
-    url = "https://api.bilibili.com/x/web-interface/search/type"
-    referer = f"https://search.bilibili.com/all?keyword={quote_plus(key_word)}"
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        ),
-        "Accept": "application/json, text/plain, */*",
+    # 使用 Session 维持连接和潜在的底层访客 Cookie
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": random.choice(USER_AGENTS),
+        "Referer": f"https://search.bilibili.com/all?keyword={urllib.parse.quote(key_word)}",
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Origin": "https://www.bilibili.com",
-        "Referer": referer,
-        "Connection": "keep-alive",
-        "Cookie": get_config("nana_bilibili_total_cookie"),  # 不带 Cookie
-    }
+    })
 
-    video_list, current_page, fetched = [], 1, 0
+    # ================= 核心：WBI 签名逻辑 =================
+    def get_mixin_key(orig: str) -> str:
+        mixin_key_enc_tab = [
+            46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+            33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+            61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+            36, 20, 34, 44, 52
+        ]
+        return ''.join([orig[i] for i in mixin_key_enc_tab])[:32]
+
+    def get_wbi_keys() -> tuple:
+        resp = session.get("https://api.bilibili.com/x/web-interface/nav", proxies=proxies, timeout=timeout)
+        resp.raise_for_status()
+        json_content = resp.json()
+        img_url = json_content['data']['wbi_img']['img_url']
+        sub_url = json_content['data']['wbi_img']['sub_url']
+        return img_url.rsplit('/', 1)[1].split('.')[0], sub_url.rsplit('/', 1)[1].split('.')[0]
+
+    def sign_params_for_wbi(params: dict, img_key: str, sub_key: str) -> dict:
+        mixin_key = get_mixin_key(img_key + sub_key)
+        params['wts'] = round(time.time())
+        sorted_params = dict(sorted(params.items()))
+
+        encoded_parts = []
+        for k, v in sorted_params.items():
+            filtered_value = ''.join(filter(lambda chr: chr not in "!'()*", str(v)))
+            encoded_parts.append(f"{k}={urllib.parse.quote(filtered_value, safe='')}")
+
+        wbi_sign = md5(('&'.join(encoded_parts) + mixin_key).encode()).hexdigest()
+        params['w_rid'] = wbi_sign
+        return params
+
+    # ======================================================
+
+    try:
+        img_key, sub_key = get_wbi_keys()
+    except Exception as e:
+        print(f"[错误] 初始化 WBI Keys 失败: {e}")
+        return []
+
+    search_url = "https://api.bilibili.com/x/web-interface/wbi/search/all/v2"
+    video_list = []
+    current_page = 1
+    fetched = 0
+    page_size = 42  # B站网页端综合搜索单页标准是 42
+
+    print(f"开始搜索关键字: '{key_word}'，目标数量: {target_count}...")
 
     while fetched < target_count:
-        time.sleep(random.uniform(1.2, 2.2))  # 延时，防止触发风控
+        if current_page > 1:
+            # 继承你之前的随机休眠逻辑，防止翻页过快被风控
+            time.sleep(random.uniform(1.2, 2.5))
 
-        params = {
-            "search_type": "video",
-            "keyword": key_word,
-            "order": "pubdate",
+        unsigned_params = {
+            "context": "",
             "page": current_page,
-            "ps": page_size
+            "page_size": page_size,
+            "order": "",  # 留空代表综合排序，对齐网页端
+            "from_source": "",
+            "from_spmid": "333.337",
+            "platform": "pc",
+            "highlight": 1,
+            "single_column": 0,
+            "keyword": key_word,
+            "ad_resource": 5646,
+            "source_tag": 3,
         }
 
-        try:
-            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
-            if resp.status_code == 412:
-                print("[错误] 触发 412 Precondition Failed（无 Cookie 可能被拦截）。")
-                break
+        signed_params = sign_params_for_wbi(unsigned_params, img_key, sub_key)
 
+        try:
+            resp = session.get(search_url, params=signed_params, timeout=timeout, proxies=proxies)
+            if resp.status_code == 412:
+                print("[错误] 触发 412 Precondition Failed (被风控拦截)。")
+                break
             resp.raise_for_status()
             data = resp.json()
 
         except requests.exceptions.RequestException as e:
             print(f"[错误] 网络请求失败: {e}")
             break
-        except ValueError:
-            print(f"[错误] JSON 解析失败，响应片段: {resp.text[:200]!r}")
-            break
 
-        if data.get("code", 0) != 0:
+        if data.get("code") != 0:
             print(f"[警告] API 返回错误: code={data.get('code')}, message={data.get('message')}")
             break
 
-        payload = data.get("data", {})
-        search_results = payload.get("result", [])
-        if not isinstance(search_results, list):
-            search_results = payload.get("result", {}).get("video", [])
-
-        if not search_results:
+        # 提取综合搜索结果
+        results = data.get("data", {}).get("result", [])
+        if not results:
+            print("[提示] 搜索结果已到底。")
             break
 
         page_added = 0
-        for item in search_results:
-            if item.get("type") == "video" and "bvid" in item:
-                if "title" in item:
-                    item["title"] = item["title"].replace('<em class="keyword">', '').replace('</em>', '')
-                item["_source_strategy"] = "search"
-                video_list.append(item)
-                fetched += 1
-                page_added += 1
-                if fetched >= target_count:
-                    break
+        for item in results:
+            # 综合搜索包含番剧、用户等，我们需要精准过滤出视频
+            if item.get("result_type") == "video":
+                videos = item.get("data", [])
 
-        if page_added < min(page_size, target_count - (fetched - page_added)):
+                for v in videos:
+                    if fetched >= target_count:
+                        break
+
+                    # 继承你的高亮标签清洗逻辑
+                    if "title" in v:
+                        v["title"] = v["title"].replace('<em class="keyword">', '').replace('</em>', '')
+
+                    v["_source_strategy"] = "search"
+                    video_list.append(v)
+                    fetched += 1
+                    page_added += 1
+
+        if page_added == 0:
+            # 本页没有提取到任何视频（可能是只有其他类型结果），防止死循环
             break
 
         current_page += 1
 
+    print(f"[成功] 搜索结束，共获取到 {len(video_list)} 个视频。")
     return video_list
 
 def check_duplicate_video(meta_data):

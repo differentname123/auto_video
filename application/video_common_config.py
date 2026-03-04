@@ -471,6 +471,7 @@ SNAPSHOT_CACHE_DIR = r'W:\project\python_project\auto_video\videos\snapshot_cach
 
 ALL_TARGET_TAGS_INFO_FILE = r'W:\project\python_project\auto_video\config\true_tags.json'
 
+RECENT_HOT_TAGS_FILE = r'W:\project\python_project\auto_video\config\recent_hot_tags.json'
 
 def is_contain_owner_speaker(owner_asr_info):
     """

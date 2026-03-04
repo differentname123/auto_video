@@ -12,6 +12,9 @@ import time
 import random
 from hashlib import md5
 
+from application.dig_video import get_need_dig_video_list
+from application.video_common_config import ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
+from utils.bilibili.bili_utils import fetch_from_search
 from utils.common_utils import read_json, save_json
 
 # 准备几个常见的 User-Agent
@@ -149,7 +152,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 import math
 
 
-def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48)):
+def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
     need_filed_list = ['created', 'play', 'comment', 'title', 'bvid']
 
     if not video_list:
@@ -184,13 +187,17 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
 
         # 将当前视频的速率与每个周期的平均速率分别比较
         for w in windows:
+            # 要求视频必须在该窗口内才有资格比较，否则就不计算这个周期的得分了（因为不公平）
+            if v['alive_hours'] > w:
+                continue
+
             avg_rate = window_avgs[w]
             ratio = v['play_rate'] / avg_rate if avg_rate > 0 else 1.0
             ratios.append(ratio)
             v['window_ratios'][f'{w}h_ratio'] = ratio
 
         # 比较得分：所有周期表现比例的平均值
-        v['comp_score'] = sum(ratios) / len(ratios)
+        v['comp_score'] = sum(ratios)
 
         # 最终综合得分：绝对爆发力 + 相对表现力
         v['score'] = v['abs_score'] + v['comp_score']
@@ -211,7 +218,7 @@ def process_single_user(uid, max_hour=24):
     exist_video_info = all_video_info.get(str(uid), {})
     exist_video_list = exist_video_info.get('video_list', [])
     update_time = exist_video_info.get('update_time', 0)
-    calculate_video_scores(exist_video_list, current_timestamp=update_time)
+    # calculate_video_scores(exist_video_list, current_timestamp=update_time)
     # 如果在1天内更新就不拉取新数据了
     if time.time() - update_time < max_hour * 3600:
         print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
@@ -241,12 +248,71 @@ def process_single_user(uid, max_hour=24):
         save_json(all_video_file, all_video_info)
 
 
+def process_single_tag(tag, max_hour=24):
+    start_time = time.time()
+    all_user_file = r'W:\project\python_project\auto_video\config\all_user_info.json'
+    all_user_info = read_json(all_user_file)
+
+    exist_video_info = all_user_info.get(str(tag), {})
+    update_time = exist_video_info.get('update_time', 0)
+    if time.time() - update_time < max_hour * 3600:
+        print(f"用户 {tag} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
+        return
+
+    videos = fetch_from_search(tag)
+    exist_user_list = videos
+    need_filed_list = ['author', 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
+    for v in videos:
+        for key in list(v.keys()):
+            if key not in need_filed_list:
+                del v[key]
+
+    print(f"搜索标签 {tag} 得到 {len(videos)} 个相关视频。 耗时 {time.time() - start_time:.2f} 秒。 当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    exist_video_info['video_info_list'] = exist_user_list
+    exist_video_info['update_time'] = int(time.time())
+    all_user_info[str(tag)] = exist_video_info
+
+    save_json(all_user_file, all_user_info)
+
+
+
+def search_good_user():
+    """
+    按照热门关键词进行搜索得到很多用户
+    :return:
+    """
+    hot_tags_info = read_json(RECENT_HOT_TAGS_FILE)
+    result_hot_tags = {}
+    for video_type, tag_info_list in hot_tags_info.items():
+        combined_tags = {}
+        # 1. 遍历并累加同名标签的值
+        for tag_dict in tag_info_list:
+            for tag, count in tag_dict.items():
+                # 如果键不存在默认给 0，然后再加 count
+                combined_tags[tag] = combined_tags.get(tag, 0) + count
+        sorted_tags = dict(sorted(combined_tags.items(), key=lambda item: item[1], reverse=True))
+        result_hot_tags[video_type] = sorted_tags
+
+
+
+    index_count = 0
+    for video_type, sorted_tags in result_hot_tags.items():
+        print(f"视频类型: {video_type}")
+        for tag, count in sorted_tags.items():
+            index_count += 1
+            print(f"\n\n标签: {tag}, 出现次数: {count} 进度: {index_count} / {len(sorted_tags)}")
+            # 可以在这里对每个标签进行搜索，获取相关视频和用户信息
+            process_single_tag(tag)
+
+
+
+
+
+
 # --- 测试代码 ---
 if __name__ == "__main__":
     # 以影视飓风 (mid: 946974) 为例，获取最新 5 个视频
-    test_mid = 149425572
-    process_single_user(test_mid)
-    #
-    # videos = get_user_videos_public(mid=test_mid, desired_count=40)
-    # for v in videos:
-    #     print(f"标题: {v.get('title')[:20]}... | BVID: {v.get('bvid')} | 播放量: {v.get('play')}")
+    # test_mid = 149425572
+    # process_single_user(test_mid)
+
+    search_good_user()

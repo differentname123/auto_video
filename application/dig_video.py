@@ -16,7 +16,7 @@ import traceback
 
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
     DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content, \
-    BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, ALL_TARGET_TAGS_INFO_FILE
+    BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
 from utils.common_utils import read_json, save_json, has_long_common_substring, read_file_to_str, string_to_object, \
     gen_true_type_and_tags, get_user_type
 from utils.gemini_cli import ask_gemini
@@ -782,7 +782,6 @@ def find_good_plan(manager):
     save_json(DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, archive_video_plan_info)
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
-
     exist_video_plan_info, video_id_avg_score_map = update_exist_dig_data(exist_video_plan_info, good_video_list)
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
@@ -797,6 +796,8 @@ def find_good_plan(manager):
     all_video_info = query_all_material_videos(manager, is_need_refresh)
     all_target_tags_new = update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh)
 
+    # === 【新增】初始化用于汇总本轮使用 tags 的字典，按 video_type 归类 ===
+    collected_target_tags = {}
 
     # 依次的进行挖掘
     for selected_video_info in all_dig_video_list:
@@ -820,14 +821,21 @@ def find_good_plan(manager):
             tag_key = '_'.join(target_tags_list)
             target_tags = all_target_tags_new.get(tag_key, target_tags)
 
+            # === 【修改】以 target_video_type 为 key，将 target_tags 汇总入列表 ===
+            if target_video_type not in collected_target_tags:
+                collected_target_tags[target_video_type] = []
+            if target_tags not in collected_target_tags[target_video_type]:
+                collected_target_tags[target_video_type].append(target_tags)
+
             final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
             video_data = build_prompt_data(final_good_video_list, target_video_type)
-            print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+            print(
+                f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             video_content_plans, full_prompt = gen_hot_video_llm(video_data, hot_video)
             exist_video_plan_info[hot_video].extend(video_content_plans)
 
         for plan in exist_video_plan_info[hot_video]:
-            creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
+            creative_guidance = f"视频主题: {plan.get('video_theme')}, {plan.get('story_outline')}"
             plan['video_type'] = target_video_type
             plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.5
             plan['dig_type'] = "exist_video_dig"
@@ -835,9 +843,9 @@ def find_good_plan(manager):
             plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
             plan['creative_guidance'] = creative_guidance
 
-
         save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
-        print(f"完成视频方案挖掘，当前热门视频主题: {hot_video}，新挖掘数量: {len(exist_video_plan_info[hot_video]) - exist_count}，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+        print(
+            f"完成视频方案挖掘，当前热门视频主题: {hot_video}，新挖掘数量: {len(exist_video_plan_info[hot_video]) - exist_count}，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
 
     # free_dig_info_path = r'W:\project\python_project\auto_video\config\free_dig_info.json'
     # free_dig_info = read_json(free_dig_info_path)
@@ -861,9 +869,18 @@ def find_good_plan(manager):
 
         tag_key = '_'.join(target_tags_list)
         target_tags = all_target_tags_new.get(tag_key, target_tags)
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100,blacklist=blacklist)
+
+        # === 【修改】以 target_video_type 为 key，将 target_tags 汇总入列表 ===
+        if target_video_type not in collected_target_tags:
+            collected_target_tags[target_video_type] = []
+        if target_tags not in collected_target_tags[target_video_type]:
+            collected_target_tags[target_video_type].append(target_tags)
+
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,
+                                                 top_n=100, blacklist=blacklist)
         video_data = build_prompt_data(final_good_video_list, target_video_type)
-        print(f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+        print(
+            f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
         timestamp = int(time.time())
         # if len(video_content_plans) > 0:
@@ -888,7 +905,7 @@ def find_good_plan(manager):
                 # 计算平均值
                 if len(temp_score_list) > 0:
                     final_score = sum(temp_score_list) / len(temp_score_list) + final_score
-                creative_guidance = f"视频主题: {plan.get("video_theme")}, {plan.get("story_outline")}"
+                creative_guidance = f"视频主题: {plan.get('video_theme')}, {plan.get('story_outline')}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
                 plan['dig_type'] = "free_dig_new"
@@ -897,7 +914,10 @@ def find_good_plan(manager):
                 plan['creative_guidance'] = creative_guidance
         save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
-        print(f"完成视频方案挖掘，当前自由挖掘类型: {target_video_type}，新挖掘数量: {len(video_content_plans)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+        print(
+            f"完成视频方案挖掘，当前自由挖掘类型: {target_video_type}，新挖掘数量: {len(video_content_plans)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+
+    save_json(RECENT_HOT_TAGS_FILE, collected_target_tags)
 
 
 
