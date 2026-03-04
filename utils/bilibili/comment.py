@@ -862,7 +862,7 @@ class BilibiliCommenter:
 
         collected_videos = []
         current_page = 1
-        page_size = 25
+        page_size = 40
 
         while len(collected_videos) < desired_count:
             print(f"正在获取第 {current_page} 页...")
