@@ -28,28 +28,26 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
 ]
 
-def with_proxy(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        os.environ['HTTP_PROXY'] = 'http://127.0.0.1:7890'
-        os.environ['HTTPS_PROXY'] = 'http://127.0.0.1:7890'
-        try:
-            return func(*args, **kwargs)
-        finally:
-            if 'HTTP_PROXY' in os.environ:
-                del os.environ['HTTP_PROXY']
-            if 'HTTPS_PROXY' in os.environ:
-                del os.environ['HTTPS_PROXY']
-
-    return wrapper
-
-
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
-                           proxies: dict = None) -> list:
+                           use_proxy: bool = False, proxies: dict = None) -> list:
     """
     独立且免(登录)Cookie的B站用户视频获取函数 - 增强防风控版
     """
 
+    # 新增代理控制逻辑：如果开启了 use_proxy 并且没有单独指定 proxies 字典，则使用默认的本地代理
+    if use_proxy and proxies is None:
+        proxies_list = [{
+            "http": "http://127.0.0.1:7890",
+            "https": "http://127.0.0.1:7890"
+        },
+            {
+                "http": "http://115.190.54.74:8888",
+                "https": "http://115.190.54.74:8888"
+            }
+
+
+        ]
+        proxies = random.choice(proxies_list)
     # 使用局部 Session 来自动维持访客状态 (如 buvid3 等跟踪 cookie)
     # 这不需要你输入任何账号信息，仅仅是为了模拟浏览器行为
     session = requests.Session()
@@ -102,7 +100,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         return params
 
     # --- 主爬取逻辑 ---
-    print(f"准备匿名查询用户 mid={mid} 的视频，目标数量: {desired_count}...")
+    print(f"准备匿名查询用户 mid={mid} 的视频，目标数量: {desired_count}... use_proxy={use_proxy} {proxies}")
 
     try:
         img_key, sub_key = get_wbi_keys()
@@ -242,25 +240,26 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
     video_list.sort(key=lambda x: x['score'], reverse=True)
     return video_list
 
-def process_single_user(uid, max_hour=24):
+def process_single_user(uid, all_video_info, max_hour=24):
     """
     单个用户的处理，拉取数据并且打分
     :param uid:
     :return:
     """
     all_video_file = r'W:\project\python_project\auto_video\config\all_bili_video.json'
-    all_video_info = read_json(all_video_file)
+
     exist_video_info = all_video_info.get(str(uid), {})
     exist_video_list = exist_video_info.get('video_list', [])
     update_time = exist_video_info.get('update_time', 0)
     # calculate_video_scores(exist_video_list, current_timestamp=update_time)
     # 如果在1天内更新就不拉取新数据了
+
     if time.time() - update_time < max_hour * 3600:
         print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
-        return True
+        return 0
 
-
-    videos = get_user_videos_public(mid=uid, desired_count=40)
+    use_proxy = random.choice([True, False])  # 随机决定是否使用代理，增加多样性，降低被风控风险
+    videos = get_user_videos_public(mid=uid, desired_count=40, use_proxy=use_proxy)
     min_created_timestamp = 1000000000000
     if videos:
         for video_info in videos:
@@ -281,8 +280,8 @@ def process_single_user(uid, max_hour=24):
 
         all_video_info[str(uid)] = exist_video_info
         save_json(all_video_file, all_video_info)
-        return True
-    return False
+        return 1
+    return -1
 
 
 def process_single_tag(tag, max_hour=24):
@@ -346,6 +345,22 @@ def search_good_user():
             print(f"\n\n标签: {tag}, 出现次数: {count} 进度: {index_count} / {len(sorted_tags)}")
             # 可以在这里对每个标签进行搜索，获取相关视频和用户信息
             process_single_tag(tag)
+def load_pure_video_info():
+    all_video_file = r'W:\project\python_project\auto_video\config\all_bili_video.json'
+    all_video_info = read_json(all_video_file)
+
+    need_filed_list = ['created', 'play', 'comment', 'title', 'bvid', 'author', 'mid', 'length']
+    for uid, exist_video_info in all_video_info.items():
+        exist_video_list = exist_video_info.get('video_list', [])
+        if not exist_video_list:
+            return []
+        # 只保留必要的字段，多余字段删除
+        for v in exist_video_list:
+            for key in list(v.keys()):
+                if key not in need_filed_list:
+                    del v[key]
+    save_json(all_video_file, all_video_info)
+    return all_video_info
 
 
 def get_all_user_video_info():
@@ -368,13 +383,16 @@ def get_all_user_video_info():
     fail_count = 0
     all_mid_list = list(set(all_mid_list))
     print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
+    all_video_info = load_pure_video_info()
+
+
     for index, mid in enumerate(all_mid_list):
         try:
             print(f"\n\n正在处理用户 mid: {mid} 进度: {index + 1} / {len(all_mid_list)} 当前失败和成功数量: {fail_count} / {success_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            result = process_single_user(mid)
-            if result:
+            result = process_single_user(mid, all_video_info)
+            if result == 1:
                 success_count += 1
-            else:
+            elif result == -1:
                 fail_count += 1
         except Exception as e:
             traceback.print_exc()
@@ -419,6 +437,12 @@ def filter_good_user():
 # --- 测试代码 ---
 if __name__ == "__main__":
     # filter_good_user()
-
-    get_all_user_video_info()
-    # search_good_user()
+    while True:
+        try:
+            # get_all_user_video_info()
+            search_good_user()
+        except Exception as e:
+            traceback.print_exc()
+            print(f"主循环发生异常: {e}")
+            print("等待30秒后重试...")
+            time.sleep(30)
