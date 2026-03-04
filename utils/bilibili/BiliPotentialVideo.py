@@ -379,8 +379,8 @@ if __name__ == "__main__":
     # filter_good_user()
     while True:
         try:
-            # get_all_user_video_info()
-            search_good_user()
+            get_all_user_video_info()
+            # search_good_user()
         except Exception as e:
             traceback.print_exc()
             print(f"主循环发生异常: {e}")
