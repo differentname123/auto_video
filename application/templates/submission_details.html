@@ -107,6 +107,19 @@
             opacity: 1;
         }
 
+        /* --- 新增：视频分数样式 --- */
+        .video-score {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 45px;
+            color: var(--primary-color);
+            font-weight: bold;
+            font-size: 0.95rem;
+            margin-right: 10px;
+            margin-top: 3px;
+        }
+
         /* --- 今日投稿：极致紧凑+滑动适配样式 --- */
         .table-wrapper {
             max-height: 300px;
@@ -283,13 +296,12 @@
                     // 对 title 进行编码以避免引号等破坏 HTML 结构
                     const encodedTitle = encodeURIComponent(titleStr);
 
+                    // --- 新增：处理 score，保留两位小数 ---
+                    const scoreNum = parseFloat(video.score);
+                    const scoreStr = isNaN(scoreNum) ? '--' : scoreNum.toFixed(2);
+
                     div.innerHTML = `
-                        <a href="${video.url}" target="_blank" class="icon-link" aria-label="播放">
-                            <svg class="play-circle-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <circle cx="12" cy="12" r="10"></circle>
-                                <polygon points="10 8 16 12 10 16"></polygon>
-                            </svg>
-                        </a>
+                        <div class="video-score">${scoreStr}</div>
                         <a href="${video.url}" target="_blank" class="video-link">${titleStr}</a>
                         <button class="copy-title-btn" onclick="handleCopyTitle(this, '${encodedTitle}')">复制标题</button>
                     `;
