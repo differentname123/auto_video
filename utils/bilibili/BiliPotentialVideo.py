@@ -432,6 +432,8 @@ def filter_good_user():
 
     all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
+    # all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 36]
+
 
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
@@ -440,20 +442,21 @@ def filter_good_user():
     save_json(ALL_GOOD_USER_FILE, unique_uids)
     # 优化：原代码末尾只是 print()，补充返回排序结果
     print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=20, max_hour=1)
+    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
 
     return all_video_score_list
 
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    filter_good_user()
-    # while True:
-    #     try:
-    #         get_all_user_video_info()
-    #         # search_good_user()
-    #     except Exception as e:
-    #         traceback.print_exc()
-    #         print(f"主循环发生异常: {e}")
-    #     print("等待30秒后重试...")
-    #     time.sleep(30)
+    while True:
+        try:
+            filter_good_user()
+
+            # get_all_user_video_info()
+            # search_good_user()
+        except Exception as e:
+            traceback.print_exc()
+            print(f"主循环发生异常: {e}")
+        print("等待30秒后重试...")
+        time.sleep(30)
