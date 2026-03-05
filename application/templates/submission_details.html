@@ -16,33 +16,55 @@
         *, *::before, *::after { box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 0; background-color: var(--bg-color); padding: 20px 0; color: var(--text-main); }
 
-        /* 容器响应式调整 */
-        .container { background: var(--card-bg); padding: 30px; border-radius: 16px; box-shadow: var(--shadow-soft); width: 90%; max-width: 640px; margin: 0 auto; min-height: 80vh; }
+        /* 容器响应式调整：大幅减小 padding 节省空间 */
+        .container { background: var(--card-bg); padding: 15px 20px; border-radius: 16px; box-shadow: var(--shadow-soft); width: 90%; max-width: 640px; margin: 0 auto; min-height: 80vh; }
         @media (max-width: 600px) {
-            body { padding: 10px 0; }
-            .container { width: 96%; padding: 20px 15px; }
+            body { padding: 5px 0; }
+            .container { width: 98%; padding: 12px 10px; }
         }
 
-        .header { display: flex; align-items: center; margin-bottom: 25px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); }
-        .back-btn { background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--text-sub); margin-right: 15px; padding: 5px; }
+        /* 头部空间极致压缩 */
+        .header { display: flex; align-items: center; margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border-color); }
+        .back-btn { background: none; border: none; font-size: 1.1rem; cursor: pointer; color: var(--text-sub); margin-right: 10px; padding: 2px 5px; }
         .back-btn:hover { color: var(--primary-color); }
-        .page-title { font-size: 1.2rem; font-weight: 700; color: #2c3e50; margin: 0; }
+        .page-title { font-size: 1.1rem; font-weight: 700; color: #2c3e50; margin: 0; }
 
-        /* 通用区块样式 */
-        .section-box { margin-bottom: 30px; }
-        .section-title { font-size: 1rem; font-weight: 600; color: #333; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+        /* 通用区块样式调整：减小区块底部间距 */
+        .section-box { margin-bottom: 15px; }
+        .section-title { font-size: 1rem; font-weight: 600; color: #333; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
         .section-title::before { content: ""; display: block; width: 4px; height: 16px; background: var(--primary-color); border-radius: 2px; }
 
-        /* --- 新增：热门视频分类 Tabs 样式 --- */
-        .video-tabs { display: flex; gap: 10px; margin-bottom: 12px; }
-        .video-tab-btn { padding: 6px 14px; background-color: #f0f0f0; color: #666; border: 1px solid #dcdcdc; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; outline: none; user-select: none; }
+        /* --- 新增：热门视频表头布局 --- */
+        .video-list-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 0 8px; /* 匹配列表项的左右内边距，确保完美对齐 */
+        }
+        .header-label {
+            font-size: 0.8rem;
+            color: var(--text-sub);
+            font-weight: 600;
+        }
+        .score-label {
+            min-width: 38px; /* 与 .video-score 宽度完全一致以保证对齐 */
+            text-align: center;
+            margin-right: 8px; /* 与 .video-score 的 margin 保持一致 */
+        }
+        .copy-label {
+            margin-left: auto; /* 利用 flex 特性推到最右侧 */
+        }
+
+        /* 热门视频分类 Tabs 样式调整 */
+        .video-tabs { display: flex; gap: 10px; flex: 1; }
+        .video-tab-btn { padding: 4px 12px; background-color: #f0f0f0; color: #666; border: 1px solid #dcdcdc; border-radius: 20px; font-size: 0.8rem; cursor: pointer; transition: all 0.2s; outline: none; user-select: none; }
         .video-tab-btn.active { background-color: #e6f7ff; color: var(--primary-color); border-color: #91d5ff; font-weight: 600; }
         .video-tab-btn:active { transform: scale(0.95); }
 
-        /* 热门视频列表样式 */
-        .hot-video-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; }
+        /* 热门视频列表样式：利用 vh 动态扩大高度占比 */
+        .hot-video-list { max-height: 60vh; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; }
 
-        .hot-video-item { display: flex; align-items: flex-start; padding: 12px 8px; border-bottom: 1px solid #eee; transition: background 0.2s; }
+        .hot-video-item { display: flex; align-items: flex-start; padding: 10px 8px; border-bottom: 1px solid #eee; transition: background 0.2s; }
         .hot-video-item:last-child { border-bottom: none; }
         .hot-video-item:hover { background: #fff; }
 
@@ -57,20 +79,20 @@
             -webkit-line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
-            line-height: 1.5;
+            line-height: 1.4;
             word-break: break-all;
         }
         .video-link:hover { color: var(--primary-color); text-decoration: underline; }
 
-        /* --- 新增：复制标题按钮样式 --- */
+        /* 极简复制按钮 */
         .copy-title-btn {
-            margin-left: 10px;
-            padding: 4px 10px;
+            margin-left: 8px;
+            padding: 3px 8px;
             background-color: #fff;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             color: var(--text-sub);
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             cursor: pointer;
             transition: all 0.2s;
             white-space: nowrap;
@@ -107,22 +129,23 @@
             opacity: 1;
         }
 
-        /* --- 新增：视频分数样式 --- */
+        /* 弱化视频分数，突出标题 */
         .video-score {
             display: flex;
             align-items: center;
             justify-content: center;
-            min-width: 45px;
+            min-width: 38px;
             color: var(--primary-color);
             font-weight: bold;
-            font-size: 0.95rem;
-            margin-right: 10px;
-            margin-top: 3px;
+            font-size: 0.85rem;
+            margin-right: 8px;
+            margin-top: 2px;
+            opacity: 0.8;
         }
 
         /* --- 今日投稿：极致紧凑+滑动适配样式 --- */
         .table-wrapper {
-            max-height: 300px;
+            max-height: 250px;
             overflow-y: auto;
             overflow-x: auto;
             border: 1px solid var(--border-color);
@@ -136,7 +159,7 @@
 
         .custom-table {
             width: 100%;
-            min-width: 460px; /* 极简的最小宽度，确保手机上一行不会换行 */
+            min-width: 460px;
             border-collapse: collapse;
             table-layout: fixed;
             font-size: 0.85rem;
@@ -176,7 +199,7 @@
         .detail-link { color: var(--primary-color); text-decoration: none; }
         .detail-link:hover { text-decoration: underline; }
 
-        /* --- 新增：可点击复制的单元格样式 --- */
+        /* --- 可点击复制的单元格样式 --- */
         .clickable-cell {
             cursor: pointer;
             transition: all 0.2s;
@@ -211,10 +234,13 @@
 
 <template id="tpl-section-hot-videos">
     <div class="section-box">
-        <div class="section-title">热门视频推荐</div>
-        <div class="video-tabs">
-            <button class="video-tab-btn active" data-type="trending">热门趋势</button>
-            <button class="video-tab-btn" data-type="high_score">高分视频</button>
+        <div class="video-list-header">
+            <div class="header-label score-label">得分</div>
+            <div class="video-tabs">
+                <button class="video-tab-btn active" data-type="trending">热门趋势</button>
+                <button class="video-tab-btn" data-type="high_score">高分视频</button>
+            </div>
+            <div class="header-label copy-label">复制标题</div>
         </div>
         <div class="hot-video-list" id="hot-videos-container"></div>
     </div>
@@ -234,7 +260,7 @@
                     </tr>
                 </thead>
                 <tbody id="today-videos-body">
-                    </tbody>
+                </tbody>
             </table>
         </div>
     </div>
@@ -296,14 +322,14 @@
                     // 对 title 进行编码以避免引号等破坏 HTML 结构
                     const encodedTitle = encodeURIComponent(titleStr);
 
-                    // --- 新增：处理 score，保留两位小数 ---
+                    // --- 处理 score，保留两位小数 ---
                     const scoreNum = parseFloat(video.score);
-                    const scoreStr = isNaN(scoreNum) ? '--' : scoreNum.toFixed(2);
+                    const scoreStr = isNaN(scoreNum) ? '--' : scoreNum.toFixed(1);
 
                     div.innerHTML = `
                         <div class="video-score">${scoreStr}</div>
                         <a href="${video.url}" target="_blank" class="video-link">${titleStr}</a>
-                        <button class="copy-title-btn" onclick="handleCopyTitle(this, '${encodedTitle}')">复制标题</button>
+                        <button class="copy-title-btn" onclick="handleCopyTitle(this, '${encodedTitle}')">复制</button>
                     `;
                     container.appendChild(div);
                 });
@@ -438,7 +464,7 @@
         });
     }
 
-    // --- 新增：复制视频标题专用函数 ---
+    // --- 复制视频标题专用函数 ---
     function handleCopyTitle(btnElement, encodedTitle) {
         const titleText = decodeURIComponent(encodedTitle);
 

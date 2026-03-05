@@ -644,21 +644,29 @@ def get_good_video(video_type=None):
     # 2. 统一按照分数降序排序 (确保无论有无 video_type，输出的都是最高分)
     target_video_list.sort(key=lambda x: x.get('score', 0), reverse=True)
 
-    trending_videos = []  # 最近蹿升（一天内）
-    high_score_videos = []  # 高分视频（一天前）
+    trending_videos = []
+    high_score_videos = []
 
     current_time = time.time()
-    one_day_seconds = 24 * 60 * 60  # 一天的秒数
+    one_day_seconds = 2 * 60 * 60
 
     # 3. 遍历视频进行时间筛选和封装
     for video in target_video_list:
         # 性能优化：如果两个列表都收集满 100 个了，直接提前结束循环
         if len(trending_videos) >= 100 and len(high_score_videos) >= 100:
             break
-        score = video.get('score', 0)
+
+        alive_hours = video.get('alive_hours', 0)
+        score = round(video.get('score', 0) * video.get('score', 0) * video.get('score', 0), 1)
         title = video.get('title', '')
         bvid = video.get('bvid', '')
         created = video.get('created', 0)
+
+        # 通过created和当前时间计算出视频发布的小时数
+        alive_hours_new = (current_time - created) / 3600.0
+        if alive_hours_new > 2 * alive_hours:
+            continue
+
 
         if not (title and bvid):
             continue
