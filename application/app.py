@@ -13,6 +13,7 @@ from flask import Flask, request, jsonify, render_template, Response
 
 from application.process_video import query_need_process_tasks, _task_process_worker, _task_producer_worker, \
     check_task_queue
+from utils.bilibili.BiliPotentialVideo import get_good_video
 from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target, get_user_type, \
     is_valid_target_file_simple
 from utils.video_utils import create_snapshot_from_video
@@ -781,66 +782,12 @@ def process_video_data(data: dict, video_type: str, user_name) -> dict:
         # 取排序后的前 5 个元素的 key (tag名字)
         tags = [item[0] for item in sorted_tags[:10]]
 
-    # --- 2. 处理 hot_videos 字段 ---
-    hot_videos = []
-    if "good_video_list" in data:
-        filtered_videos = [
-            v for v in data["good_video_list"]
-            if v.get("video_type") == video_type
-        ]
-        filtered_videos.sort(
-            key=lambda x: len(x.get("choose_reason", [])),
-            reverse=True
-        )
-        user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
-        self_user_list = user_config.get('self_user_list', [])
-
-        # 过滤掉final_good_task_list中userName在self_user_list中的任务
-
-        results = []
-        for task_info in filtered_videos:
-            dig_type = task_info.get('creation_guidance_info', {}).get('dig_type', "exist")
-            temp_user_name = task_info.get('userName', '')
-
-            # 1. 豁免权检查：如果有 dig，无视黑名单，直接通过
-            if "free_dig" in dig_type:
-                results.append(task_info)
-                continue
-
-            # 2. 常规检查：没有 dig 的情况下，必须不在黑名单里
-            if temp_user_name not in self_user_list:
-                results.append(task_info)
-
-        filtered_videos = results
-
-        filtered_videos.sort(
-            key=lambda x: len(x.get("choose_reason", [])),
-            reverse=True
-        )
-
-        filtered_videos = [task_info for task_info in filtered_videos if task_info.get('final_score', 0) > 100]
-
-        # 第三步：取前 5 个，并提取 title 和 bvid
-        for video in filtered_videos[:5]:
-            title = ""
-            # 尝试获取标题：优先从 upload_params 获取（通常是最终标题）
-            if "upload_params" in video and "title" in video["upload_params"]:
-                title = video["upload_params"]["title"]
-            # 备选：从 upload_info 列表的第一个元素获取
-            elif "upload_info" in video and isinstance(video["upload_info"], list) and len(video["upload_info"]) > 0:
-                title = video["upload_info"][0].get("title", "")
-
-            hot_videos.append({
-                "title": title,
-                "url": f"https://www.bilibili.com/video/{video.get("bvid", "")}"
-            })
-
+    hot_videos = get_good_video(video_type)
     # --- 3. 处理 today_videos 字段 ---
     today_videos = build_today_videos(user_name)
 
     # --- 返回结果 ---
     return {
-        "tags": tags,
         "hot_videos": hot_videos,
         "today_videos": today_videos
     }

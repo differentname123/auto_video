@@ -1009,11 +1009,11 @@ if __name__ == '__main__':
     # }
     recover_task()
 
-    # all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
-    # print()
-    # for task_info in all_task:
-    #     upload_info = task_info.get('upload_info', {})
-    #     if '旭旭宝宝' in str(upload_info):
-    #         for value in upload_info:
-    #            value['category_id'] = 1008
-    #         manager.upsert_tasks([task_info])
+    all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
+    print()
+    for task_info in all_task:
+        upload_info = task_info.get('upload_info', {})
+        if '旭旭宝宝' in str(upload_info):
+            for value in upload_info:
+               value['category_id'] = 1008
+            manager.upsert_tasks([task_info])

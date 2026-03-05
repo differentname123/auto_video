@@ -33,12 +33,11 @@
         .section-title { font-size: 1rem; font-weight: 600; color: #333; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
         .section-title::before { content: ""; display: block; width: 4px; height: 16px; background: var(--primary-color); border-radius: 2px; }
 
-        /* 热门标签 */
-        .tags-wrapper { overflow-x: auto; white-space: nowrap; padding-bottom: 10px; -webkit-overflow-scrolling: touch; display: flex; gap: 10px; }
-        .tags-wrapper::-webkit-scrollbar { height: 6px; }
-        .tags-wrapper::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
-        .tag-pill { display: inline-block; padding: 6px 14px; background-color: #e6f7ff; color: var(--primary-color); border: 1px solid #91d5ff; border-radius: 20px; font-size: 0.85rem; cursor: pointer; user-select: none; transition: all 0.2s; }
-        .tag-pill:active { transform: scale(0.95); background-color: #bae7ff; }
+        /* --- 新增：热门视频分类 Tabs 样式 --- */
+        .video-tabs { display: flex; gap: 10px; margin-bottom: 12px; }
+        .video-tab-btn { padding: 6px 14px; background-color: #f0f0f0; color: #666; border: 1px solid #dcdcdc; border-radius: 20px; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; outline: none; user-select: none; }
+        .video-tab-btn.active { background-color: #e6f7ff; color: var(--primary-color); border-color: #91d5ff; font-weight: 600; }
+        .video-tab-btn:active { transform: scale(0.95); }
 
         /* 热门视频列表样式 */
         .hot-video-list { max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: #fafafa; padding: 5px; }
@@ -62,6 +61,24 @@
             word-break: break-all;
         }
         .video-link:hover { color: var(--primary-color); text-decoration: underline; }
+
+        /* --- 新增：复制标题按钮样式 --- */
+        .copy-title-btn {
+            margin-left: 10px;
+            padding: 4px 10px;
+            background-color: #fff;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-sub);
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+            height: fit-content;
+            align-self: center;
+        }
+        .copy-title-btn:hover { color: var(--primary-color); border-color: var(--primary-color); }
+        .copy-title-btn.copied { background-color: #f6ffed; border-color: #b7eb8f; color: #52c41a; }
 
         /* 图标样式调整 */
         .icon-link {
@@ -179,23 +196,17 @@
     </div>
 </div>
 
-<!-- 模板：热门标签区域 -->
-<template id="tpl-section-tags">
-    <div class="section-box">
-        <div class="section-title">热门标签</div>
-        <div class="tags-wrapper" id="tags-container"></div>
-    </div>
-</template>
-
-<!-- 模板：热门视频区域 -->
 <template id="tpl-section-hot-videos">
     <div class="section-box">
         <div class="section-title">热门视频推荐</div>
+        <div class="video-tabs">
+            <button class="video-tab-btn active" data-type="trending">热门趋势</button>
+            <button class="video-tab-btn" data-type="high_score">高分视频</button>
+        </div>
         <div class="hot-video-list" id="hot-videos-container"></div>
     </div>
 </template>
 
-<!-- 模板：今日投稿区域 -->
 <template id="tpl-section-today">
     <div class="section-box">
         <div class="section-title">今日投稿记录(只会显示有创作指导的数据)</div>
@@ -210,8 +221,7 @@
                     </tr>
                 </thead>
                 <tbody id="today-videos-body">
-                    <!-- JS插入数据 -->
-                </tbody>
+                    </tbody>
             </table>
         </div>
     </div>
@@ -247,45 +257,62 @@
     function renderPage(data) {
         contentArea.innerHTML = '';
 
-        // 1. 渲染热门标签
-        if (data.tags && data.tags.length > 0) {
-            const tpl = document.getElementById('tpl-section-tags').content.cloneNode(true);
-            const container = tpl.getElementById('tags-container');
-            data.tags.forEach(tag => {
-                const span = document.createElement('span');
-                span.className = 'tag-pill';
-                span.textContent = tag;
-                span.onclick = function() {
-                    copyTextToClipboard(tag, span);
-                };
-                container.appendChild(span);
-            });
-            contentArea.appendChild(tpl);
-        }
-
-        // 2. 渲染热门视频
-        if (data.hot_videos && data.hot_videos.length > 0) {
+        // 1. 渲染热门视频 (支持 trending 和 high_score 切换)
+        if (data.hot_videos && (data.hot_videos.trending || data.hot_videos.high_score)) {
             const tpl = document.getElementById('tpl-section-hot-videos').content.cloneNode(true);
             const container = tpl.getElementById('hot-videos-container');
-            data.hot_videos.forEach(video => {
-                const div = document.createElement('div');
-                div.className = 'hot-video-item';
+            const tabs = tpl.querySelectorAll('.video-tab-btn');
 
-                div.innerHTML = `
-                    <a href="${video.url}" target="_blank" class="icon-link" aria-label="播放">
-                        <svg class="play-circle-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polygon points="10 8 16 12 10 16"></polygon>
-                        </svg>
-                    </a>
-                    <a href="${video.url}" target="_blank" class="video-link">${video.title || '无标题视频'}</a>
-                `;
-                container.appendChild(div);
+            const hotVideosData = data.hot_videos;
+
+            // 提取渲染列表为独立函数，方便切换时调用
+            const renderVideoList = (type) => {
+                container.innerHTML = ''; // 清空当前列表
+                const list = hotVideosData[type] || [];
+
+                if (list.length === 0) {
+                    container.innerHTML = '<div class="empty-tip">暂无相关视频</div>';
+                    return;
+                }
+
+                list.forEach(video => {
+                    const div = document.createElement('div');
+                    div.className = 'hot-video-item';
+
+                    const titleStr = video.title || '无标题视频';
+                    // 对 title 进行编码以避免引号等破坏 HTML 结构
+                    const encodedTitle = encodeURIComponent(titleStr);
+
+                    div.innerHTML = `
+                        <a href="${video.url}" target="_blank" class="icon-link" aria-label="播放">
+                            <svg class="play-circle-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polygon points="10 8 16 12 10 16"></polygon>
+                            </svg>
+                        </a>
+                        <a href="${video.url}" target="_blank" class="video-link">${titleStr}</a>
+                        <button class="copy-title-btn" onclick="handleCopyTitle(this, '${encodedTitle}')">复制标题</button>
+                    `;
+                    container.appendChild(div);
+                });
+            };
+
+            // 绑定Tab切换事件
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    tabs.forEach(t => t.classList.remove('active'));
+                    this.classList.add('active');
+                    renderVideoList(this.getAttribute('data-type'));
+                });
             });
+
+            // 默认渲染热门趋势
+            renderVideoList('trending');
+
             contentArea.appendChild(tpl);
         }
 
-        // 3. 渲染今日投稿 (表格逻辑)
+        // 2. 渲染今日投稿 (表格逻辑)
         if (data.today_videos && data.today_videos.length > 0) {
             const tpl = document.getElementById('tpl-section-today').content.cloneNode(true);
             const tbody = tpl.getElementById('today-videos-body');
@@ -365,7 +392,7 @@
         }
     }
 
-    // --- 新增：通用复制处理函数 ---
+    // --- 通用复制处理函数 ---
     function handleCopy(element) {
         // 1. 获取完整文本
         const rawData = element.getAttribute('data-full');
@@ -399,20 +426,22 @@
         });
     }
 
-    // 辅助函数：用于标签复制的简单封装（保留原逻辑）
-    function copyTextToClipboard(text, element) {
-        navigator.clipboard.writeText(text).then(() => {
-            const originalText = element.textContent;
-            element.textContent = '已复制';
-            element.style.backgroundColor = '#d9f7be';
-            element.style.color = '#389e0d';
-            element.style.borderColor = '#b7eb8f';
+    // --- 新增：复制视频标题专用函数 ---
+    function handleCopyTitle(btnElement, encodedTitle) {
+        const titleText = decodeURIComponent(encodedTitle);
+
+        navigator.clipboard.writeText(titleText).then(() => {
+            const originalText = btnElement.textContent;
+            btnElement.textContent = '已复制';
+            btnElement.classList.add('copied');
+
             setTimeout(() => {
-                element.textContent = originalText;
-                element.style.backgroundColor = '';
-                element.style.color = '';
-                element.style.borderColor = '';
+                btnElement.textContent = originalText;
+                btnElement.classList.remove('copied');
             }, 1000);
+        }).catch(err => {
+            console.error('复制失败', err);
+            alert('复制失败，请手动复制');
         });
     }
 </script>

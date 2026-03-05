@@ -12,13 +12,18 @@ import threading  # 新增：用于共享资源的线程锁保护
 # 移除未使用和重复的导入
 from application.video_common_config import ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
 from utils.bilibili.bili_utils import fetch_from_search
-from utils.common_utils import read_json, save_json, time_to_ms
+from utils.common_utils import read_json, save_json, time_to_ms, read_file_to_str, string_to_object
+from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 
 # === 优化：提取公共文件路径配置 ===
 ALL_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_bili_video.json'
 ALL_USER_FILE = r'W:\project\python_project\auto_video\config\all_user_info.json'
 
 ALL_GOOD_USER_FILE = r'W:\project\python_project\auto_video\config\all_good_user_info.json'
+
+ALL_USER_TYPE_MAP_FILE = r'W:\project\python_project\auto_video\config\all_user_type_map.json'
+ALL_GOOD_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_good_video.json'
+
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
@@ -53,7 +58,8 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
     if use_proxy and proxies is None:
         proxies = random.choice([
             {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
-            {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"}
+            {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"},
+            None
         ])
 
     # 随机抽取一个身份档案进行请求伪装
@@ -123,7 +129,8 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             result = response.json()
 
             if result.get("code") != 0:
-                print(f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')}")
+                print(
+                    f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')} proxies {proxies}")
                 break
 
             data = result.get("data")
@@ -198,7 +205,9 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
         v['comp_score'] = sum(ratios) if ratios else 0
         v['score'] = math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
         v['avg_daily_videos'] = avg_daily_videos
-        v['current_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        v['update_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        v['update_time'] = current_timestamp
+
 
     video_list.sort(key=lambda x: x['score'], reverse=True)
     return video_list
@@ -218,8 +227,8 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
         # print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
         return 0
 
-    use_proxy = random.choice([True, False])
-    videos = get_user_videos_public(mid=uid, desired_count=40, use_proxy=use_proxy)
+    # use_proxy = random.choice([True, False])
+    videos = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True)
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -298,7 +307,8 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         with data_lock:
             save_json(ALL_VIDEO_FILE, all_video_info)
         print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
-    print(f"\n--- 多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
+    print(
+        f"\n--- 多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
 
 
 def process_single_tag(tag, all_user_info, max_hour=24):
@@ -412,8 +422,132 @@ def get_all_user_video_info():
     process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20)
 
 
-def filter_good_user():
+def gen_uid_type_llm(uid_info_list):
+    """
+    批量获取uid的类型
+    """
+    log_pre = f"批量获取uid的类型 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+
+    retry_delay = 10
+    max_retries = 5
+    prompt_file_path = r'W:\project\python_project\auto_video\application\prompt\视频作者类型判断.txt'
+    prompt = read_file_to_str(prompt_file_path)
+    full_prompt = f'{prompt}'
+    full_prompt += f'\n{uid_info_list}'
+    raw = ""
+    for attempt in range(1, max_retries + 1):
+        try:
+            model_name_list = ["gemini-2.5-flash", "gemini-3-flash-preview"]
+            model_name = random.choice(model_name_list)
+            print(f"批量获取uid的类型 (尝试 {attempt}/{max_retries}) {log_pre}")
+            raw = get_llm_content(prompt=full_prompt, model_name=model_name)
+
+            type_result_dict = string_to_object(raw)
+            check_result, check_info = True, ""
+            if not check_result:
+                error_info = f"优化方案检查未通过: {check_info} {raw} {log_pre} {check_info}"
+                raise ValueError(error_info)
+            return type_result_dict
+        except Exception as e:
+            error_str = f"{str(e)} {log_pre}"
+            print(f"批量获取uid的类型 (尝试 {attempt}/{max_retries}): {e} {raw} {log_pre}")
+            if attempt < max_retries:
+                print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
+                time.sleep(retry_delay)  # 等待一段时间后再重试
+            else:
+                print(f"达到最大重试次数，失败. {log_pre}")
+                return None  # 达到最大重试次数后返回 None
+
+
+def update_uid_type():
+    """
+    进行用户类型的更新，主要是依据最近发的视频然后分为 sport game 和 fun
+    """
+    start_time = time.time()
+    all_video_score_list, all_video_info = get_sorted_high_score_videos()
+
+    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
+    # 确保字典存在
+    if not isinstance(all_user_type_info, dict):
+        all_user_type_info = {}
+
     all_video_info = load_pure_video_info()
+    unique_uids = set(v['mid'] for v in all_video_score_list)
+
+    # 找到unique_uids中不在all_user_type_info中的uid，进行类型更新
+    new_uids = [uid for uid in unique_uids if str(uid) not in all_user_type_info]
+
+    if not new_uids:
+        print("没有检测到需要更新类型的新用户UID。")
+        return
+
+    print(f"检测到 {len(new_uids)} 个新用户需要更新类型...")
+
+    # 1. 对每个new_uids的uid保留最新 5 个视频的title，新建 dict
+    uid_latest_titles_dict = {}
+    for uid in new_uids:
+        uid_str = str(uid)
+        if uid_str in all_video_info:
+            video_list = all_video_info[uid_str].get('video_list', [])
+            # 按创建时间 (created) 降序排序，保证最前面的是最新视频
+            sorted_videos = sorted(video_list, key=lambda x: x.get('created', 0), reverse=True)
+            # 截取前 5 个视频的 title
+            latest_5_titles = [v.get('title', '') for v in sorted_videos[:5]]
+            uid_latest_titles_dict[uid_str] = latest_5_titles
+
+    # 2. 对新dict进行batch_size分组，默认为100，每一组都加入batch_list
+    batch_size = 50
+    batch_list = []
+    current_batch = {}
+
+    for uid, titles in uid_latest_titles_dict.items():
+        current_batch[uid] = titles
+        if len(current_batch) == batch_size:
+            batch_list.append(current_batch)
+            current_batch = {}  # 重置当前批次
+
+    # 将最后不满 100 的剩余数据加入 batch_list
+    if current_batch:
+        batch_list.append(current_batch)
+
+    # 3 & 4. 遍历batch_list，调用 get_type 并保存
+    for index, batch in enumerate(batch_list):
+        batch_start_time = time.time()
+        try:
+            # 3. 对每一个batch调用 get_type(batch), 得到 dict {uid: type}
+            # 假设外部已导入或定义好 get_type 函数
+            print(
+                f"\n\n正在处理第 {index + 1} 批次，共 {len(batch_list)} 批次，当前批次包含 {len(batch)} 个用户... 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            type_result_dict = gen_uid_type_llm(batch)
+
+            if type_result_dict:
+                # 4. 每一个batch执行后都需要更新all_user_type_info并且保存
+                for uid, v_type in type_result_dict.items():
+                    if v_type in ["体育", "游戏", "娱乐"]:
+                        all_user_type_info[str(uid)] = v_type
+
+                # 覆盖保存 JSON
+                save_json(ALL_USER_TYPE_MAP_FILE, all_user_type_info)
+                print(
+                    f"Batch {index + 1}/{len(batch_list)} 更新完毕并保存，本批次处理 {len(type_result_dict)} 个用户。 耗时 {time.time() - batch_start_time:.2f} 秒。")
+            else:
+                print(f"Batch {index + 1}/{len(batch_list)} get_type 返回为空，跳过保存。")
+
+        except Exception as e:
+            # 加入异常捕获防阻断，一个批次失败不影响下一个批次
+            print(f"Batch {index + 1}/{len(batch_list)} 调用 get_type 或保存时发生异常: {e}")
+            traceback.print_exc()
+
+    print(
+        f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(new_uids)} 个新用户的类型。 批次数量: {len(batch_list)}。")
+
+
+def get_sorted_high_score_videos(max_hour=24):
+    """
+    处理视频信息：计算得分、根据条件过滤并按得分降序排序。
+    """
+    all_video_info = load_pure_video_info()
+
     all_video_score_list = []
     process_count = 0
 
@@ -421,7 +555,7 @@ def filter_good_user():
         exist_video_list = exist_video_info.get('video_list', [])
         update_time = exist_video_info.get('update_time', 0)
 
-        if time.time() - update_time > 24 * 3600:
+        if time.time() - update_time > max_hour * 3600:
             continue
 
         video_score_list = calculate_video_scores(exist_video_list, current_timestamp=update_time)
@@ -430,33 +564,140 @@ def filter_good_user():
 
     print(f"共处理了 {process_count} 个用户的视频数据，计算得到 {len(all_video_score_list)} 个视频的分数。")
 
+    # 基础过滤条件
     all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
-    # all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 36]
+    all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 72]
+    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
 
+    for v in all_video_score_list:
+        uid = str(v['mid'])
+        v['video_type'] = all_user_type_info.get(uid, "未知")
 
+    # 按分数降序排序
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
-    # 获取不重复的uid
+
+    good_video_count = 1000
+    type_count_map = {}
+    pure_all_video_score_list = []
+    need_filed_list = ['play', 'title', 'created', 'alive_hours', 'abs_score', 'comp_score', 'score', 'bvid', 'video_type']
+
+    for v in all_video_score_list:
+        video_type = v.get('video_type', '未知')
+        if video_type not in type_count_map:
+            type_count_map[video_type] = 0
+        type_count_map[video_type] += 1
+        if type_count_map[video_type] > good_video_count:
+            continue
+        # pure_video_info = {k: v[k] for k in need_filed_list if k in v}
+        pure_video_info = v.copy()
+
+        pure_all_video_score_list.append(pure_video_info)
+
+
+    save_json(ALL_GOOD_VIDEO_FILE, pure_all_video_score_list)
+
+    return all_video_score_list, all_video_info
+
+
+def update_good_user_video():
+    """
+    主流程：加载数据 -> 获取高分视频 -> 提取用户 -> 更新用户视频
+    """
+
+    # 1. 调用独立出来的函数获取处理后的排序列表
+    all_video_score_list, all_video_info = get_sorted_high_score_videos()
+
+    # 2. 获取不重复的uid (注：如果是自带的json库，直接存set可能会报错，建议转为list，如 list(unique_uids))
     unique_uids = set(v['mid'] for v in all_video_score_list)
-    save_json(ALL_GOOD_USER_FILE, unique_uids)
-    # 优化：原代码末尾只是 print()，补充返回排序结果
-    print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
+    save_json(ALL_GOOD_USER_FILE, list(unique_uids))
+    print(
+        f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
+    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=2)
 
     return all_video_score_list
 
 
+def get_good_video(video_type=None):
+    """
+    获取好的视频，包含video_type等信息，按照时间和分数分类，用于前端展示
+    :return: dict 包含 trending (最近蹿升) 和 high_score (高分视频)
+    """
+    type_cn_map = {
+        "fun": "娱乐",
+        "game": "游戏",
+        "sport": "体育",
+    }
+    if video_type:
+        video_type = type_cn_map.get(video_type, video_type)
+
+    # 假设 read_json 是你已经定义好的函数
+    all_video_score_list = read_json(ALL_GOOD_VIDEO_FILE)
+
+    # 1. 直接获取目标视频列表（比原来先全量分组更节省性能）
+    if video_type:
+        target_video_list = [v for v in all_video_score_list if v.get('video_type', '娱乐') == video_type]
+    else:
+        target_video_list = all_video_score_list
+
+    # 2. 统一按照分数降序排序 (确保无论有无 video_type，输出的都是最高分)
+    target_video_list.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+    trending_videos = []  # 最近蹿升（一天内）
+    high_score_videos = []  # 高分视频（一天前）
+
+    current_time = time.time()
+    one_day_seconds = 24 * 60 * 60  # 一天的秒数
+
+    # 3. 遍历视频进行时间筛选和封装
+    for video in target_video_list:
+        # 性能优化：如果两个列表都收集满 100 个了，直接提前结束循环
+        if len(trending_videos) >= 100 and len(high_score_videos) >= 100:
+            break
+        score = video.get('score', 0)
+        title = video.get('title', '')
+        bvid = video.get('bvid', '')
+        created = video.get('created', 0)
+
+        if not (title and bvid):
+            continue
+
+        video_data = {
+            "score": score,
+            "title": title,
+            "url": f"https://www.bilibili.com/video/{bvid}"
+        }
+
+        # 4. 判断创建时间距离现在的秒数（注：这里假设你的 created 是10位数的秒级时间戳）
+        is_recent = (current_time - created) <= one_day_seconds
+
+        if is_recent and len(trending_videos) < 100:
+            trending_videos.append(video_data)
+        elif not is_recent and len(high_score_videos) < 100:
+            high_score_videos.append(video_data)
+
+    return {
+        "trending": trending_videos,
+        "high_score": high_score_videos
+    }
+
+
 # --- 测试代码 ---
 if __name__ == "__main__":
-    while True:
-        try:
-            filter_good_user()
+    get_good_video()
 
-            # get_all_user_video_info()
-            # search_good_user()
-        except Exception as e:
-            traceback.print_exc()
-            print(f"主循环发生异常: {e}")
-        print("等待30秒后重试...")
-        time.sleep(30)
+    #
+    # update_uid_type()
+    #
+    # while True:
+    #     try:
+    #         update_good_user_video()
+    #
+    #         # get_all_user_video_info()
+    #         # search_good_user()
+    #     except Exception as e:
+    #         traceback.print_exc()
+    #         print(f"主循环发生异常: {e}")
+    #     print("等待30秒后重试...")
+    #     time.sleep(30)
