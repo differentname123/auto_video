@@ -6,6 +6,8 @@ import requests
 import urllib.parse
 import time
 from hashlib import md5
+import concurrent.futures  # 新增：用于多线程并发
+import threading  # 新增：用于共享资源的线程锁保护
 
 # 移除未使用和重复的导入
 from application.video_common_config import ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
@@ -74,7 +76,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         resp.raise_for_status()
         wbi_img = resp.json().get('data', {}).get('wbi_img', {})
         return wbi_img.get('img_url', '').rsplit('/', 1)[1].split('.')[0], \
-        wbi_img.get('sub_url', '').rsplit('/', 1)[1].split('.')[0]
+            wbi_img.get('sub_url', '').rsplit('/', 1)[1].split('.')[0]
 
     def sign_params_for_wbi(params: dict, img_key: str, sub_key: str) -> dict:
         mixin_key = get_mixin_key(img_key + sub_key)
@@ -202,10 +204,15 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
     return video_list
 
 
-def process_single_user(uid, all_video_info, max_hour=24):
-    exist_video_info = all_video_info.get(str(uid), {})
-    exist_video_list = exist_video_info.get('video_list', [])
-    update_time = exist_video_info.get('update_time', 0)
+def process_single_user(uid, all_video_info, data_lock, max_hour=24):
+    """
+    修改点：引入 data_lock 保护读取；移除内部 save_json，交由外层调度器批量轻量保存
+    """
+    with data_lock:
+        # 使用 .copy() 防御性复制，避免与主线程中 json.dumps 循环遍历时发生修改冲突
+        exist_video_info = all_video_info.get(str(uid), {}).copy()
+        exist_video_list = exist_video_info.get('video_list', [])
+        update_time = exist_video_info.get('update_time', 0)
 
     if time.time() - update_time < max_hour * 3600:
         print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
@@ -228,11 +235,65 @@ def process_single_user(uid, all_video_info, max_hour=24):
         exist_video_info['update_time'] = int(time.time())
         exist_video_info['update_time_str'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        all_video_info[str(uid)] = exist_video_info
-        # 使用常量替换硬编码
-        save_json(ALL_VIDEO_FILE, all_video_info)
+        with data_lock:
+            all_video_info[str(uid)] = exist_video_info
+        # 移除 save_json，极大地提升单次处理速度
         return 1
     return -1
+
+
+def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20):
+    """
+    新增功能函数：多线程提取逻辑 & 批量落盘机制
+    """
+    success_count = 0
+    fail_count = 0
+    total_mids = len(all_mid_list)
+    processed_since_save = 0
+
+    # 建立全局锁，用于保护共享大字典及写文件的安全性
+    data_lock = threading.Lock()
+
+    print(f"\n--- 开始多线程处理，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 批量向线程池提交任务
+        future_to_mid = {
+            executor.submit(process_single_user, mid, all_video_info, data_lock): mid
+            for mid in all_mid_list
+        }
+
+        # as_completed 只要有完成的就会 yield 输出，完美解决多线程下计数器竞态的问题
+        for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
+            mid = future_to_mid[future]
+            try:
+                result = future.result()
+                if result == 1:
+                    success_count += 1
+                    processed_since_save += 1
+                elif result == -1:
+                    fail_count += 1
+
+                print(
+                    f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+                # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
+                if processed_since_save >= save_interval:
+                    with data_lock:
+                        save_json(ALL_VIDEO_FILE, all_video_info)
+                    print(f"\n>>>> 触发批量定时保存：最新 {processed_since_save} 个用户数据已落盘 <<<<\n")
+                    processed_since_save = 0
+
+            except Exception as e:
+                traceback.print_exc()
+                print(f"处理用户 mid: {mid} 发生异常: {e}")
+                fail_count += 1
+
+    # 处理结束扫尾工作：如果还有积攒未保存的新数据，进行最终兜底落盘
+    if processed_since_save > 0:
+        with data_lock:
+            save_json(ALL_VIDEO_FILE, all_video_info)
+        print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
 
 def process_single_tag(tag, all_user_info, max_hour=24):
@@ -324,6 +385,9 @@ def load_pure_video_info():
 
 
 def get_all_user_video_info():
+    """
+    修改点：旧代码直接循环遍历进行串行处理，现在交接给新提取的 process_mid_list_concurrently 进行多并发。
+    """
     all_user_info = read_json(ALL_USER_FILE)
     all_mid_list = []
 
@@ -334,26 +398,13 @@ def get_all_user_video_info():
             if time.time() - pubdate < 2 * 24 * 3600:
                 all_mid_list.append(video.get('mid'))
 
-    success_count = 0
-    fail_count = 0
     all_mid_list = list(set(all_mid_list))
     print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
     all_video_info = load_pure_video_info()
 
-    for index, mid in enumerate(all_mid_list):
-        try:
-            print(
-                f"\n\n正在处理用户 mid: {mid} 进度: {index + 1} / {len(all_mid_list)} 当前失败和成功数量: {fail_count} / {success_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            result = process_single_user(mid, all_video_info)
-            if result == 1:
-                success_count += 1
-            elif result == -1:
-                fail_count += 1
-        except Exception as e:
-            traceback.print_exc()
-            print(f"处理用户 mid: {mid} 发生异常: {e}")
-            fail_count += 1
-            continue
+    # 调用提取出来的多线程调度器
+    # max_workers 可以根据你的代理池稳定度适当调增（默认设 5 防高频风控），save_interval 就是批量保存的阈值
+    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20)
 
 
 def filter_good_user():
@@ -379,8 +430,6 @@ def filter_good_user():
 
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
-
-
     # 获取不重复的uid
     unique_uids = set(v['mid'] for v in all_video_score_list)
     save_json(ALL_GOOD_USER_FILE, unique_uids)
@@ -392,7 +441,7 @@ def filter_good_user():
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    # filter_good_user()
+    filter_good_user()
     while True:
         try:
             get_all_user_video_info()
