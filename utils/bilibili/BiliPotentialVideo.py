@@ -16,6 +16,9 @@ from utils.common_utils import read_json, save_json, time_to_ms
 ALL_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_bili_video.json'
 ALL_USER_FILE = r'W:\project\python_project\auto_video\config\all_user_info.json'
 
+ALL_GOOD_USER_FILE = r'W:\project\python_project\auto_video\config\all_good_user_info.json'
+
+
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
                            use_proxy: bool = False, proxies: dict = None) -> list:
     """
@@ -376,14 +379,20 @@ def filter_good_user():
 
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
+
+
+    # 获取不重复的uid
+    unique_uids = set(v['mid'] for v in all_video_score_list)
+    save_json(ALL_GOOD_USER_FILE, unique_uids)
     # 优化：原代码末尾只是 print()，补充返回排序结果
-    print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。")
+    print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
+
     return all_video_score_list
 
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    # filter_good_user()
+    filter_good_user()
     while True:
         try:
             get_all_user_video_info()
