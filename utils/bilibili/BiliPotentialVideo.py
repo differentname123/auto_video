@@ -16,34 +16,46 @@ from utils.common_utils import read_json, save_json, time_to_ms
 ALL_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_bili_video.json'
 ALL_USER_FILE = r'W:\project\python_project\auto_video\config\all_user_info.json'
 
-# 准备几个常见的 User-Agent
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15"
-]
-
-
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
                            use_proxy: bool = False, proxies: dict = None) -> list:
     """
-    独立且免(登录)Cookie的B站用户视频获取函数 - 增强防风控版
+    独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
     """
+
+    # 【核心优化】：身份池。将配套的 UA、Headers、Cookie 和 显卡指纹强绑定
+    # 警告：高并发时，请务必将 Profile 2 和 3 中的 Cookie 替换为您从无痕浏览器中抓取的真实有效 Cookie
+    PROFILES = [
+        {
+            # 身份 1：Windows Chrome 145 (您的原生抓包数据)
+            "headers": {
+                "accept": "*/*", "accept-language": "zh-CN,zh;q=0.9", "origin": "https://space.bilibili.com",
+                "priority": "u=1, i", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+                "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+                "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                "cookie": "buvid3=A3C5C7F7-CE22-2319-1BF1-5A12667F16F681690infoc; b_nut=1772599781; _uuid=828F87AF-9108E-7BDB-BFD6-1F749476181182401infoc; home_feed_column=5; browser_resolution=1862-925; buvid4=CCC31F1C-EBCF-9C0D-9306-7D78D3D3BBDD82499-026030412-C733j3GbXXTp8uVzKptMqg%3D%3D; buvid_fp=02a64a5530e27a720f537b223dbf6381; sid=6uas0qcc; CURRENT_QUALITY=0; rpdid=|(k))kmuk|RY0J'u~~klmm)~|; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzI4ODM3ODYsImlhdCI6MTc3MjYyNDUyNiwicGx0IjotMX0.eg7x6QGwKAc_lBgDT7tTVViek_I9b7y8fI4_eoa0OO4; bili_ticket_expires=1772883726; PVID=1; LIVE_BUVID=AUTO7417726245881683; CURRENT_FNVAL=2000; b_lsid=ED43E64E_19CBAB38E4B"
+            },
+            "dm_params": {
+                "platform": "web", "web_location": "333.1387", "dm_img_list": "[]",
+                "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
+                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDIwODAgVGkgKDB4MDAwMDFFMDcpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEpR29vZ2xlIEluYy4gKE5WSURJQS",
+                "dm_img_inter": '{"ds":[],"wh":[4004,2418,100],"of":[157,314,157]}'
+            }
+        }
+    ]
+
     if use_proxy and proxies is None:
-        proxies_list = [
+        proxies = random.choice([
             {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
             {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"}
-        ]
-        proxies = random.choice(proxies_list)
+        ])
 
+    # 随机抽取一个身份档案进行请求伪装
+    profile = random.choice(PROFILES)
     session = requests.Session()
-    current_ua = random.choice(USER_AGENTS)
-    session.headers.update({
-        "User-Agent": current_ua,
-        "Referer": f"https://space.bilibili.com/{mid}/video",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    })
+    session.headers.update(profile["headers"])
+    session.headers["referer"] = f"https://space.bilibili.com/{mid}/upload/video"
 
     def get_mixin_key(orig: str) -> str:
         mixin_key_enc_tab = [
@@ -55,39 +67,32 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         return ''.join([orig[i] for i in mixin_key_enc_tab])[:32]
 
     def get_wbi_keys() -> tuple:
-        resp = session.get("https://api.bilibili.com/x/web-interface/nav", proxies=proxies)
+        resp = session.get("https://api.bilibili.com/x/web-interface/nav", proxies=proxies, timeout=5)
         resp.raise_for_status()
-        json_content = resp.json()
-        img_url = json_content['data']['wbi_img']['img_url']
-        sub_url = json_content['data']['wbi_img']['sub_url']
-        img_key = img_url.rsplit('/', 1)[1].split('.')[0]
-        sub_key = sub_url.rsplit('/', 1)[1].split('.')[0]
-        return img_key, sub_key
+        wbi_img = resp.json().get('data', {}).get('wbi_img', {})
+        return wbi_img.get('img_url', '').rsplit('/', 1)[1].split('.')[0], \
+        wbi_img.get('sub_url', '').rsplit('/', 1)[1].split('.')[0]
 
     def sign_params_for_wbi(params: dict, img_key: str, sub_key: str) -> dict:
         mixin_key = get_mixin_key(img_key + sub_key)
-        curr_time = round(time.time())
-        params['wts'] = curr_time
+        params['wts'] = round(time.time())
         sorted_params = dict(sorted(params.items()))
 
         encoded_parts = []
         for k, v in sorted_params.items():
-            v = str(v)
-            filtered_value = ''.join(filter(lambda chr: chr not in "!'()*", v))
-            encoded_value = urllib.parse.quote(filtered_value, safe='')
-            encoded_parts.append(f"{k}={encoded_value}")
+            filtered_value = ''.join(filter(lambda chr: chr not in "!'()*", str(v)))
+            encoded_parts.append(f"{k}={urllib.parse.quote(filtered_value, safe='')}")
 
         query = '&'.join(encoded_parts)
-        wbi_sign = md5((query + mixin_key).encode()).hexdigest()
-        params['w_rid'] = wbi_sign
+        params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
         return params
 
-    print(f"准备匿名查询用户 mid={mid} 的视频，目标数量: {desired_count}... use_proxy={use_proxy} {proxies}")
+    print(f"准备查询用户 mid={mid} 的视频，目标数量: {desired_count}... proxy: {use_proxy}")
 
     try:
         img_key, sub_key = get_wbi_keys()
     except Exception as e:
-        print(f"初始化 WBI Keys 失败，可能 IP 已被风控: {e}")
+        print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e}")
         return []
 
     collected_videos = []
@@ -96,15 +101,19 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
     while len(collected_videos) < desired_count:
         print(f"正在获取第 {current_page} 页数据...")
+
+        # 将动态参数与当前 profile 绑定的显卡指纹参数合并 (使用 ** 字典解包，使代码极其简洁)
         unsigned_params = {
-            'mid': mid, 'order': order, 'tid': 0,
-            'keyword': keyword, 'pn': current_page, 'ps': page_size,
+            'pn': current_page, 'ps': page_size, 'tid': 0, 'special_type': '',
+            'order': order, 'mid': mid, 'index': 0, 'keyword': keyword, 'order_avoided': 'true',
+            **profile["dm_params"]
         }
+
         signed_params = sign_params_for_wbi(unsigned_params, img_key, sub_key)
 
         try:
             url = "https://api.bilibili.com/x/space/wbi/arc/search"
-            response = session.get(url, params=signed_params, proxies=proxies)
+            response = session.get(url, params=signed_params, proxies=proxies, timeout=10)
             response.raise_for_status()
             result = response.json()
 
@@ -113,8 +122,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
                 break
 
             data = result.get("data")
-            if not data:
-                break
+            if not data: break
 
             new_videos = data.get('list', {}).get('vlist', [])
             if not new_videos:
@@ -123,15 +131,14 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
             collected_videos.extend(new_videos)
 
-            total_server_count = data.get('page', {}).get('count', 0)
-            if len(collected_videos) >= total_server_count:
+            if len(collected_videos) >= data.get('page', {}).get('count', 0):
                 print("已获取该用户所有公开视频。")
                 break
 
             current_page += 1
-            sleep_time = random.uniform(2.5, 4.5)
-            print(f"获取成功，随机休眠 {sleep_time:.2f} 秒，模拟人类行为...")
-            time.sleep(sleep_time)
+            # sleep_time = random.uniform(2.5, 4.5)
+            # print(f"获取成功，随机休眠 {sleep_time:.2f} 秒，模拟人类行为...")
+            # time.sleep(sleep_time)
 
         except Exception as e:
             print(f"查询请求发生网络或未知错误: {e}")
@@ -184,7 +191,7 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
             v['window_ratios'][f'{w}h_ratio'] = ratio
 
         v['comp_score'] = sum(ratios) if ratios else 0
-        v['score'] = v['abs_score'] * v['comp_score']
+        v['score'] = math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
         v['avg_daily_videos'] = avg_daily_videos
         v['current_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -297,7 +304,7 @@ def search_good_user():
 
 def load_pure_video_info():
     all_video_info = read_json(ALL_VIDEO_FILE)
-    need_filed_list = ['created', 'play', 'comment', 'title', 'bvid', 'author', 'mid', 'length']
+    need_filed_list = ['created', 'play', 'title', 'bvid', 'author', 'mid', 'length']
 
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
