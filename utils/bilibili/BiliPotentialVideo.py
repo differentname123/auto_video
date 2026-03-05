@@ -419,7 +419,7 @@ def get_all_user_video_info():
 
     # 调用提取出来的多线程调度器
     # max_workers 可以根据你的代理池稳定度适当调增（默认设 5 防高频风控），save_interval 就是批量保存的阈值
-    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20)
+    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=100)
 
 
 def gen_uid_type_llm(uid_info_list):
@@ -648,7 +648,7 @@ def get_good_video(video_type=None):
     high_score_videos = []
 
     current_time = time.time()
-    one_day_seconds = 2 * 60 * 60
+    one_day_seconds = 4 * 60 * 60
 
     # 3. 遍历视频进行时间筛选和封装
     for video in target_video_list:
@@ -693,19 +693,21 @@ def get_good_video(video_type=None):
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    get_good_video()
+    # get_good_video()
 
-    #
+
     # update_uid_type()
-    #
-    # while True:
-    #     try:
-    #         update_good_user_video()
-    #
-    #         # get_all_user_video_info()
-    #         # search_good_user()
-    #     except Exception as e:
-    #         traceback.print_exc()
-    #         print(f"主循环发生异常: {e}")
-    #     print("等待30秒后重试...")
-    #     time.sleep(30)
+
+    while True:
+        try:
+
+            search_good_user()
+            get_all_user_video_info()
+            update_good_user_video()
+
+
+        except Exception as e:
+            traceback.print_exc()
+            print(f"主循环发生异常: {e}")
+        print("等待30秒后重试...")
+        time.sleep(30)
