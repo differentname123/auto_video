@@ -92,7 +92,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
         return params
 
-    print(f"准备查询用户 mid={mid} 的视频，目标数量: {desired_count}... proxy: {use_proxy}")
+    # print(f"准备查询用户 mid={mid} 的视频，目标数量: {desired_count}... proxy: {use_proxy}")
 
     try:
         img_key, sub_key = get_wbi_keys()
@@ -105,7 +105,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
     page_size = 40
 
     while len(collected_videos) < desired_count:
-        print(f"正在获取第 {current_page} 页数据...")
+        # print(f"正在获取第 {current_page} 页数据...")
 
         # 将动态参数与当前 profile 绑定的显卡指纹参数合并 (使用 ** 字典解包，使代码极其简洁)
         unsigned_params = {
@@ -123,7 +123,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             result = response.json()
 
             if result.get("code") != 0:
-                print(f"接口报错，错误码: {result.get('code')}, 信息: {result.get('message')}")
+                print(f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')}")
                 break
 
             data = result.get("data")
@@ -131,13 +131,13 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
             new_videos = data.get('list', {}).get('vlist', [])
             if not new_videos:
-                print("当前页没有更多视频，已到底部。")
+                print(f"mid :{mid} 当前页没有更多视频，已到底部。")
                 break
 
             collected_videos.extend(new_videos)
 
             if len(collected_videos) >= data.get('page', {}).get('count', 0):
-                print("已获取该用户所有公开视频。")
+                print(f"mid :{mid} 已获取该用户所有公开视频。")
                 break
 
             current_page += 1
@@ -150,7 +150,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             break
 
     final_result = collected_videos[:desired_count]
-    print(f"获取完成，共收集到 {len(final_result)} 个视频。")
+    # print(f"获取完成，共收集到 {len(final_result)} 个视频。")
     return final_result
 
 
@@ -215,7 +215,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
         update_time = exist_video_info.get('update_time', 0)
 
     if time.time() - update_time < max_hour * 3600:
-        print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
+        # print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
         return 0
 
     use_proxy = random.choice([True, False])
@@ -242,12 +242,14 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
     return -1
 
 
-def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20):
+def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24):
     """
     新增功能函数：多线程提取逻辑 & 批量落盘机制
     """
+    start_time = time.time()
     success_count = 0
     fail_count = 0
+    jump_count = 0
     total_mids = len(all_mid_list)
     processed_since_save = 0
 
@@ -259,7 +261,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # 批量向线程池提交任务
         future_to_mid = {
-            executor.submit(process_single_user, mid, all_video_info, data_lock): mid
+            executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour): mid
             for mid in all_mid_list
         }
 
@@ -273,9 +275,11 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                     processed_since_save += 1
                 elif result == -1:
                     fail_count += 1
+                else:
+                    jump_count += 1
 
                 print(
-                    f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
                 # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
                 if processed_since_save >= save_interval:
@@ -294,6 +298,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         with data_lock:
             save_json(ALL_VIDEO_FILE, all_video_info)
         print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
+    print(f"\n--- 多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
 
 
 def process_single_tag(tag, all_user_info, max_hour=24):
@@ -408,7 +413,7 @@ def get_all_user_video_info():
 
 
 def filter_good_user():
-    all_video_info = read_json(ALL_VIDEO_FILE)
+    all_video_info = load_pure_video_info()
     all_video_score_list = []
     process_count = 0
 
@@ -435,6 +440,7 @@ def filter_good_user():
     save_json(ALL_GOOD_USER_FILE, unique_uids)
     # 优化：原代码末尾只是 print()，补充返回排序结果
     print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
+    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=20, max_hour=1)
 
     return all_video_score_list
 
@@ -442,12 +448,12 @@ def filter_good_user():
 # --- 测试代码 ---
 if __name__ == "__main__":
     filter_good_user()
-    while True:
-        try:
-            get_all_user_video_info()
-            # search_good_user()
-        except Exception as e:
-            traceback.print_exc()
-            print(f"主循环发生异常: {e}")
-        print("等待30秒后重试...")
-        time.sleep(30)
+    # while True:
+    #     try:
+    #         get_all_user_video_info()
+    #         # search_good_user()
+    #     except Exception as e:
+    #         traceback.print_exc()
+    #         print(f"主循环发生异常: {e}")
+    #     print("等待30秒后重试...")
+    #     time.sleep(30)
