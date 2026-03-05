@@ -392,7 +392,7 @@ def filter_good_user():
 
 # --- 测试代码 ---
 if __name__ == "__main__":
-    filter_good_user()
+    # filter_good_user()
     while True:
         try:
             get_all_user_video_info()
