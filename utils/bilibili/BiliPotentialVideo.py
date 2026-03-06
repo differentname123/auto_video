@@ -247,6 +247,10 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
         exist_video_list = [v for v in exist_video_list if v.get('created', 0) < min_created_timestamp]
         exist_video_list.extend(videos)
 
+        # 新增修改点：按时间戳降序排序（最新的在前），并只保留前100条
+        exist_video_list.sort(key=lambda x: x.get('created', 0), reverse=True)
+        exist_video_list = exist_video_list[:100]
+
         exist_video_info['video_list'] = exist_video_list
         exist_video_info['update_time'] = int(time.time())
         exist_video_info['update_time_str'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -622,7 +626,7 @@ def update_good_user_video():
     save_json(ALL_GOOD_USER_FILE, list(unique_uids))
     print(
         f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=2)
+    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
 
     return all_video_score_list
 
@@ -706,7 +710,7 @@ if __name__ == "__main__":
 
     # update_uid_type()
 
-    counter = 1  # 初始化计数器
+    counter = 0  # 初始化计数器
 
     while True:
         try:
