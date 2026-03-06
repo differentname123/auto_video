@@ -865,5 +865,5 @@ if __name__ == "__main__":
             traceback.print_exc()
             print(f"主循环发生异常: {e}")
 
-        print("等待30秒后重试...")
+        print(f"等待30秒后重试..counter  {counter} finish_streak {finish_streak} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         time.sleep(30)
