@@ -353,7 +353,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     # 建立全局锁，用于保护共享大字典及写文件的安全性
     data_lock = threading.Lock()
     max_retries = 5
-
+    fail_count = 200
     for attempt in range(1, max_retries + 1):
         start_time = time.time()
         success_count = 0
@@ -444,6 +444,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 time.sleep(10)  # 稍微睡眠避嫌，防止高频触发风控
             else:
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
+    return fail_count < 200
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
@@ -748,9 +749,9 @@ def update_good_user_video():
     save_json(ALL_GOOD_USER_FILE, list(unique_uids))
     print(
         f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
+    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
 
-    return all_video_score_list
+    return is_finish
 
 
 def get_good_video(video_type=None):
@@ -827,28 +828,40 @@ def get_good_video(video_type=None):
 # --- 测试代码 ---
 if __name__ == "__main__":
     # get_good_video()
-
     # update_uid_type()
 
-    counter = 1  # 初始化计数器
+    counter = 0  # 总循环计数器
+    finish_streak = 0  # 连续完成（is_finish=True）的计数器
 
     while True:
         try:
-            # 当 counter 为 0，或者达到 100 的倍数时，执行前三个函数
-            if counter % 100 == 0:
+            # 1. 每次循环都执行这个函数
+            is_finish = update_good_user_video()
+
+            # 2. 更新计数器
+            counter += 1
+
+            if is_finish:
+                finish_streak += 1
+            else:
+                finish_streak = 0  # 如果中途有一词为 False，连续计数重置为 0
+
+            # 3. 判断是否满足触发条件：
+            # 条件A：总循环达到 100 次
+            # 条件B：连续 10 次 is_finish 为 True
+            if counter >= 100 or finish_streak >= 10:
+                print(f"触发更新条件: counter={counter}, finish_streak={finish_streak}")
+
+                # 执行另外三个函数
                 search_good_user()
                 get_all_user_video_info()
                 update_uid_type()
 
-            # 每次循环都执行这个函数
-            update_good_user_video()
-
-            # 执行完毕后计数器 +1
-            counter += 1
+                # 4. 执行完毕后重置所有计数器
+                counter = 0
+                finish_streak = 0
 
         except Exception as e:
-            import traceback
-
             traceback.print_exc()
             print(f"主循环发生异常: {e}")
 
