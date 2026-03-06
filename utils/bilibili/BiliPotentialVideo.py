@@ -26,7 +26,7 @@ ALL_GOOD_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_good_vid
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
-                           use_proxy: bool = False, proxies: dict = None) -> list:
+                           use_proxy: bool = False, proxies: dict = None) -> tuple: # 修改点：改变了返回提示符为 tuple
     """
     独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
     """
@@ -186,7 +186,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         img_key, sub_key = get_wbi_keys()
     except Exception as e:
         print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e}")
-        return []
+        return [], random_index  # 修改点：异常直接返回元组，包含空列表和生成的 index
 
     collected_videos = []
     current_page = 1
@@ -240,7 +240,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
     final_result = collected_videos[:desired_count]
     # print(f"获取完成，共收集到 {len(final_result)} 个视频。")
-    return final_result
+    return final_result, random_index  # 修改点：返回视频结果与所用的 index
 
 
 def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
@@ -303,7 +303,8 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
 
 def process_single_user(uid, all_video_info, data_lock, max_hour=24):
     """
-    修改点：引入 data_lock 保护读取；移除内部 save_json，交由外层调度器批量轻量保存
+    修改点：引入 data_lock 保护读取；移除内部 save_json，交由外层调度器批量轻量保存。
+    同时接收并抛出 profile_index 状态以便于外层做失败统计。
     """
     with data_lock:
         # 使用 .copy() 防御性复制，避免与主线程中 json.dumps 循环遍历时发生修改冲突
@@ -313,10 +314,10 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
 
     if time.time() - update_time < max_hour * 3600:
         # print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
-        return 0
+        return 0, -1  # 修改点：返回 0 (跳过)，且 index 返回 -1 表示未分配
 
-    # use_proxy = random.choice([True, False])
-    videos = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True)
+    # 修改点：解包接收 videos 以及所使用的 index
+    videos, used_index = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True)
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -339,14 +340,14 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
         with data_lock:
             all_video_info[str(uid)] = exist_video_info
         # 移除 save_json，极大地提升单次处理速度
-        return 1
-    return -1
+        return 1, used_index  # 修改点：一并返回 index
+    return -1, used_index     # 修改点：失败时也返回 index
 
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24):
     """
     新增功能函数：多线程提取逻辑 & 批量落盘机制
-    调整点：增加了超过200失败时最高进行5次重试的防跳过机制。
+    调整点：增加了超过200失败时最高进行5次重试的防跳过机制，并在每轮汇总打印 Profiles index 统计。
     """
     total_mids = len(all_mid_list)
     # 建立全局锁，用于保护共享大字典及写文件的安全性
@@ -359,6 +360,9 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         fail_count = 0
         jump_count = 0
         processed_since_save = 0
+
+        # 修改点：新增字典用于按轮次统计具体 index 的使用与失败情况
+        profile_stats = {}
 
         print(
             f"\n--- 开始多线程处理 (第 {attempt}/{max_retries} 轮)，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
@@ -374,12 +378,23 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
                 mid = future_to_mid[future]
                 try:
-                    result = future.result()
+                    # 修改点：解包接收两个返回值
+                    result, used_index = future.result()
+
+                    # 修改点：归档统计使用情况
+                    if used_index != -1:
+                        if used_index not in profile_stats:
+                            profile_stats[used_index] = {'used': 0, 'failed': 0}
+                        profile_stats[used_index]['used'] += 1
+
                     if result == 1:
                         success_count += 1
                         processed_since_save += 1
                     elif result == -1:
                         fail_count += 1
+                        # 修改点：失败时增加对应 index 的失败计数
+                        if used_index != -1:
+                            profile_stats[used_index]['failed'] += 1
                     else:
                         jump_count += 1
 
@@ -407,6 +422,18 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         print(
             f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
 
+        # 修改点：每轮执行完后，打印 Profile 详细统计
+        print(">>> 📊 本轮 PROFILES (Index) 详细统计 <<<")
+        if profile_stats:
+            for idx in sorted(profile_stats.keys()):
+                stats = profile_stats[idx]
+                fail_rate = (stats['failed'] / stats['used']) * 100 if stats['used'] > 0 else 0
+                print(
+                    f"  Profile Index [{idx}]: 尝试次数: {stats['used']:<4} | 失败次数: {stats['failed']:<4} | 失败率: {fail_rate:.2f}%")
+        else:
+            print("  本轮没有使用任何 Profile (可能是用户数据都在未过期跳过范围内)。")
+        print(">>> -------------------------------------- <<<\n")
+
         # 检查重试机制
         if fail_count <= 200:
             print(f"失败数量({fail_count})在可接受范围内(<=200)，无需重试，正常结束本阶段处理。")
@@ -417,7 +444,6 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 time.sleep(10)  # 稍微睡眠避嫌，防止高频触发风控
             else:
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
-
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
