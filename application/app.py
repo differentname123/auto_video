@@ -12,7 +12,7 @@ from typing import Optional, List, Tuple, Dict, Any, Set
 from flask import Flask, request, jsonify, render_template, Response
 
 from application.process_video import query_need_process_tasks, _task_process_worker, _task_producer_worker, \
-    check_task_queue
+    check_task_queue, recover_task
 from utils.bilibili.BiliPotentialVideo import get_good_video
 from utils.common_utils import read_json, save_json, check_timestamp, delete_files_in_dir_except_target, get_user_type, \
     is_valid_target_file_simple
@@ -850,9 +850,17 @@ def _monitor_processes():
     """
     global producer_p, consumers, task_queue, running_task_ids
     print("👀 进程监控线程已启动...")
+    recover_task()
+    last_recover_time = time.time()  # 记录首次执行 recover_task 的时间
 
     while True:
         try:
+            # 0. 每4小时执行一次 recover_task()
+            current_time = time.time()
+            if current_time - last_recover_time >= 14400:  # 4 * 60 * 60 = 14400 秒
+                recover_task()
+                last_recover_time = current_time
+
             # 1. 监控消费者
             for i in range(len(consumers)):
                 p = consumers[i]
@@ -880,6 +888,7 @@ def _monitor_processes():
         except Exception as e:
             print(f"监控线程发生错误: {e}")
             time.sleep(60)
+
 
 @app.route('/get_good_video', methods=['GET'])
 def get_good_video_info():
