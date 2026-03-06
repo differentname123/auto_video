@@ -850,7 +850,7 @@ def _monitor_processes():
     """
     global producer_p, consumers, task_queue, running_task_ids
     print("👀 进程监控线程已启动...")
-    recover_task()
+    recover_task(mongo_manager)
     last_recover_time = time.time()  # 记录首次执行 recover_task 的时间
 
     while True:
@@ -858,7 +858,7 @@ def _monitor_processes():
             # 0. 每4小时执行一次 recover_task()
             current_time = time.time()
             if current_time - last_recover_time >= 14400:  # 4 * 60 * 60 = 14400 秒
-                recover_task()
+                recover_task(mongo_manager)
                 last_recover_time = current_time
 
             # 1. 监控消费者

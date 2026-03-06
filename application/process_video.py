@@ -938,7 +938,7 @@ def update_narration_key(data_list):
         # 发生异常，直接返回传入的原始列表
         return data_list
 
-def recover_task():
+def recover_task(manager):
     query_2 = {
         "create_time": {
             # 当前时间减去 12 小时
@@ -1007,7 +1007,7 @@ if __name__ == '__main__':
     # query_2 = {
     #     '_id': ObjectId("6981db70bfaf783377cf4407")
     # }
-    recover_task()
+    recover_task(manager)
 
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
     print()
