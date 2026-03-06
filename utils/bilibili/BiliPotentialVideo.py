@@ -25,7 +25,6 @@ ALL_USER_TYPE_MAP_FILE = r'W:\project\python_project\auto_video\config\all_user_
 ALL_GOOD_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_good_video.json'
 
 
-
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
                            use_proxy: bool = False, proxies: dict = None) -> list:
     """
@@ -79,7 +78,37 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             }
         },
         {
-            # 身份 3：ad3
+            # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Origin": "https://space.bilibili.com",
+                "Sec-GPC": "1",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "Priority": "u=4",
+                "TE": "trailers",  # 补充了抓包中存在的 TE 头
+                # 使用 curl 中完全一致的 Cookie
+                "Cookie": "buvid3=26370685-F7D5-7985-9016-10FADE22B0D575328infoc; b_nut=1772772275; __at_once=907977295708651421; buvid4=68ADC892-0AE5-E3FC-9B0B-41599A2B83BE76184-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzE0NzYsImlhdCI6MTc3Mjc3MjIxNiwicGx0IjotMX0.bNzKK01FWT7cIwli-O377Dhh-JytjJ45yiUkkygsQ9s; bili_ticket_expires=1773031416; buvid_fp=5ce8c95d90333611d4b197f1a9f09267"
+            },
+            "dm_params": {
+                "platform": "web",
+                "web_location": "333.1387",
+                # 还原真实的鼠标/按键轨迹数据
+                "dm_img_list": '[{"x":2026,"y":-1822,"z":0,"timestamp":7,"k":94,"type":0}]',
+                "dm_img_str": "V2ViR0wgMS",
+                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+                # 还原真实的页面交互和环境特征数据
+                "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[267,89,89],"s":[52,7236,5696]}],"wh":[5487,7489,99],"of":[146,292,146]}'
+            }
+        },
+
+        {
+            # 身份 4：ad3
             "headers": {
                 "accept": "*/*",
                 "accept-language": "zh-CN,zh;q=0.9",
@@ -267,7 +296,6 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
         v['avg_daily_videos'] = avg_daily_videos
         v['update_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         v['update_time'] = current_timestamp
-
 
     video_list.sort(key=lambda x: x['score'], reverse=True)
     return video_list
@@ -658,11 +686,11 @@ def get_sorted_high_score_videos(max_hour=24):
     # 按分数降序排序
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
-
     good_video_count = 1000
     type_count_map = {}
     pure_all_video_score_list = []
-    need_filed_list = ['play', 'title', 'created', 'alive_hours', 'abs_score', 'comp_score', 'score', 'bvid', 'video_type']
+    need_filed_list = ['play', 'title', 'created', 'alive_hours', 'abs_score', 'comp_score', 'score', 'bvid',
+                       'video_type']
 
     for v in all_video_score_list:
         video_type = v.get('video_type', '未知')
@@ -675,7 +703,6 @@ def get_sorted_high_score_videos(max_hour=24):
         pure_video_info = v.copy()
 
         pure_all_video_score_list.append(pure_video_info)
-
 
     save_json(ALL_GOOD_VIDEO_FILE, pure_all_video_score_list)
 
@@ -748,7 +775,6 @@ def get_good_video(video_type=None):
         if alive_hours_new > 2 * alive_hours:
             continue
 
-
         if not (title and bvid):
             continue
 
@@ -775,7 +801,6 @@ def get_good_video(video_type=None):
 # --- 测试代码 ---
 if __name__ == "__main__":
     # get_good_video()
-
 
     # update_uid_type()
 
