@@ -178,10 +178,17 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
         v['duration'] = time_to_ms(v.get('length', '0:00')) / 1000.0
 
     for v in video_list:
-        alive_minutes = max((current_timestamp - v['created']) / 60.0, 1.0)
-        v['alive_hours'] = alive_minutes / 60.0
-        v['play_rate'] = v['play'] / v['alive_hours']
-        v['abs_score'] = math.log(v['play_rate'] + 1)
+        try:
+            alive_minutes = max((current_timestamp - v['created']) / 60.0, 1.0)
+            v['alive_hours'] = alive_minutes / 60.0
+            v['play_rate'] = v['play'] / v['alive_hours']
+            v['abs_score'] = math.log(v['play_rate'] + 1)
+        except Exception as e:
+            traceback.print_exc()
+            print(f"计算视频 {v.get('bvid', '未知')} 的分数时发生错误: {e}")
+            v['alive_hours'] = 0
+            v['play_rate'] = 0
+            v['abs_score'] = 0
 
     window_avgs = {}
     for w in windows:
@@ -372,12 +379,13 @@ def search_good_user():
         result_hot_tags[video_type] = sorted_tags
 
     all_user_info = load_pure_user_info()
+    all_tag_count = sum(len(tags) for tags in result_hot_tags.values())
     index_count = 0
     for video_type, sorted_tags in result_hot_tags.items():
         print(f"视频类型: {video_type}")
         for tag, count in sorted_tags.items():
             index_count += 1
-            print(f"\n\n标签: {tag}, 出现次数: {count} 进度: {index_count} / {len(sorted_tags)}")
+            print(f"\n\n标签: {tag}, 出现次数: {count} 进度: {index_count} / {all_tag_count}")
             process_single_tag(tag, all_user_info)
 
 
@@ -698,16 +706,27 @@ if __name__ == "__main__":
 
     # update_uid_type()
 
+    counter = 1  # 初始化计数器
+
     while True:
         try:
+            # 当 counter 为 0，或者达到 100 的倍数时，执行前三个函数
+            if counter % 100 == 0:
+                search_good_user()
+                get_all_user_video_info()
+                update_uid_type()
 
-            search_good_user()
-            get_all_user_video_info()
+            # 每次循环都执行这个函数
             update_good_user_video()
 
+            # 执行完毕后计数器 +1
+            counter += 1
 
         except Exception as e:
+            import traceback
+
             traceback.print_exc()
             print(f"主循环发生异常: {e}")
+
         print("等待30秒后重试...")
         time.sleep(30)
