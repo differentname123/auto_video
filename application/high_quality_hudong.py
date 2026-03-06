@@ -985,9 +985,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    # config_map = init_config()
-    # mid_list = config_map.keys()
-    # block_all_author(mid_list, action_type=6)
+    config_map = init_config()
+    mid_list = config_map.keys()
+    block_all_author(mid_list, action_type=6)
 
     # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
 

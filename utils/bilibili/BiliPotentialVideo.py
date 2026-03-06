@@ -77,6 +77,32 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
                 "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
                 "dm_img_inter": '{"ds":[],"wh":[5382,7454,64],"of":[178,356,178]}'
             }
+        },
+        {
+            # 身份 3：ad3
+            "headers": {
+                "accept": "*/*",
+                "accept-language": "zh-CN,zh;q=0.9",
+                "origin": "https://space.bilibili.com",
+                "priority": "u=1, i",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+                "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+                "cookie": "buvid3=5A3E5C48-1334-2437-62DE-AF105F0D75C508480infoc; b_nut=1772771108; __at_once=2518939619716495421; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzAzMDgsImlhdCI6MTc3Mjc3MTA0OCwicGx0IjotMX0.socfjRWgdc6eqW1hjV937DKmiCG0DBTOP7224bgMjuo; bili_ticket_expires=1773030248; buvid4=B7AE2A90-FDDD-90F1-BAC5-F0333949CE8709028-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=bce33e466000947e3212fd8857254bbf"
+            },
+            "dm_params": {
+                "platform": "web",
+                "web_location": "333.1387",
+                # 这里必须是解码后的 JSON 字符串，因为 requests 会自动进行 urlencode 编码
+                "dm_img_list": '[{"x":873,"y":313,"z":0,"timestamp":31,"k":99,"type":0},{"x":1487,"y":458,"z":89,"timestamp":256,"k":115,"type":0}]',
+                "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
+                "dm_cover_img_str": "QU5HTEUgKEludGVsLCBJbnRlbChSKSBVSEQgR3JhcGhpY3MgKDB4MDAwMDlCQTQpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEtMjcuMjAuMTAwLjg3MjkpR29vZ2xlIEluYy4gKEludGVsKQ",
+                "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[45,15,15],"s":[268,6344,2084]}],"wh":[4772,4519,22],"of":[223,446,223]}'
+            }
         }
     ]
 
