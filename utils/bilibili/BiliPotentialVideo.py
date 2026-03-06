@@ -52,6 +52,31 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
                 "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDIwODAgVGkgKDB4MDAwMDFFMDcpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEpR29vZ2xlIEluYy4gKE5WSURJQS",
                 "dm_img_inter": '{"ds":[],"wh":[4004,2418,100],"of":[157,314,157]}'
             }
+        },
+        {
+            # 身份 2：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Origin": "https://space.bilibili.com",
+                "Sec-GPC": "1",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "Priority": "u=4",
+                "Cookie": "buvid3=14E13BE1-9C29-B253-1E41-2B46DB27089423391infoc; b_nut=1772753823; __at_once=10441780667350004868; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMTMwMjQsImlhdCI6MTc3Mjc1Mzc2NCwicGx0IjotMX0.-xA30SvAlxLAINx_CfNFOpMWxQSBGYgic5H0IONb_ls; bili_ticket_expires=1773012964; buvid4=543C034A-6F64-159F-88B3-68DB3591885924296-026030607-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=266a273e7f2ada11ebf2f497ea6a4b7b; CURRENT_FNVAL=2000; sid=5z63h9e6"
+            },
+            "dm_params": {
+                "platform": "web",
+                "web_location": "333.1387",
+                "dm_img_list": "[]",
+                "dm_img_str": "V2ViR0wgMS",
+                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+                "dm_img_inter": '{"ds":[],"wh":[5382,7454,64],"of":[178,356,178]}'
+            }
         }
     ]
 
@@ -63,7 +88,9 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         ])
 
     # 随机抽取一个身份档案进行请求伪装
-    profile = random.choice(PROFILES)
+    # 获取随机的index 通过index获取profile
+    random_index = random.randint(0, len(PROFILES) - 1)
+    profile = PROFILES[random_index]
     session = requests.Session()
     session.headers.update(profile["headers"])
     session.headers["referer"] = f"https://space.bilibili.com/{mid}/upload/video"
@@ -130,7 +157,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
             if result.get("code") != 0:
                 print(
-                    f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')} proxies {proxies}")
+                    f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')} proxies {proxies} random_index：{random_index}")
                 break
 
             data = result.get("data")
@@ -265,61 +292,77 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24):
     """
     新增功能函数：多线程提取逻辑 & 批量落盘机制
+    调整点：增加了超过200失败时最高进行5次重试的防跳过机制。
     """
-    start_time = time.time()
-    success_count = 0
-    fail_count = 0
-    jump_count = 0
     total_mids = len(all_mid_list)
-    processed_since_save = 0
-
     # 建立全局锁，用于保护共享大字典及写文件的安全性
     data_lock = threading.Lock()
+    max_retries = 5
 
-    print(f"\n--- 开始多线程处理，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
+    for attempt in range(1, max_retries + 1):
+        start_time = time.time()
+        success_count = 0
+        fail_count = 0
+        jump_count = 0
+        processed_since_save = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 批量向线程池提交任务
-        future_to_mid = {
-            executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour): mid
-            for mid in all_mid_list
-        }
+        print(
+            f"\n--- 开始多线程处理 (第 {attempt}/{max_retries} 轮)，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
 
-        # as_completed 只要有完成的就会 yield 输出，完美解决多线程下计数器竞态的问题
-        for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
-            mid = future_to_mid[future]
-            try:
-                result = future.result()
-                if result == 1:
-                    success_count += 1
-                    processed_since_save += 1
-                elif result == -1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 批量向线程池提交任务
+            future_to_mid = {
+                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour): mid
+                for mid in all_mid_list
+            }
+
+            # as_completed 只要有完成的就会 yield 输出，完美解决多线程下计数器竞态的问题
+            for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
+                mid = future_to_mid[future]
+                try:
+                    result = future.result()
+                    if result == 1:
+                        success_count += 1
+                        processed_since_save += 1
+                    elif result == -1:
+                        fail_count += 1
+                    else:
+                        jump_count += 1
+
+                    print(
+                        f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+                    # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
+                    if processed_since_save >= save_interval:
+                        with data_lock:
+                            save_json(ALL_VIDEO_FILE, all_video_info)
+                        print(f"\n>>>> 触发批量定时保存：最新 {processed_since_save} 个用户数据已落盘 <<<<\n")
+                        processed_since_save = 0
+
+                except Exception as e:
+                    traceback.print_exc()
+                    print(f"处理用户 mid: {mid} 发生异常: {e}")
                     fail_count += 1
-                else:
-                    jump_count += 1
 
-                print(
-                    f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # 处理结束扫尾工作：如果还有积攒未保存的新数据，进行最终兜底落盘
+        if processed_since_save > 0:
+            with data_lock:
+                save_json(ALL_VIDEO_FILE, all_video_info)
+            print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
-                # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
-                if processed_since_save >= save_interval:
-                    with data_lock:
-                        save_json(ALL_VIDEO_FILE, all_video_info)
-                    print(f"\n>>>> 触发批量定时保存：最新 {processed_since_save} 个用户数据已落盘 <<<<\n")
-                    processed_since_save = 0
+        print(
+            f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
 
-            except Exception as e:
-                traceback.print_exc()
-                print(f"处理用户 mid: {mid} 发生异常: {e}")
-                fail_count += 1
-
-    # 处理结束扫尾工作：如果还有积攒未保存的新数据，进行最终兜底落盘
-    if processed_since_save > 0:
-        with data_lock:
-            save_json(ALL_VIDEO_FILE, all_video_info)
-        print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
-    print(
-        f"\n--- 多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
+        # 检查重试机制
+        if fail_count <= 200:
+            print(f"失败数量({fail_count})在可接受范围内(<=200)，无需重试，正常结束本阶段处理。")
+            break
+        else:
+            if attempt < max_retries:
+                print(f"注意：检测到 fail_count({fail_count}) > 200，准备触发原路重试机制，进行第 {attempt + 1} 轮执行...")
+                time.sleep(10)  # 稍微睡眠避嫌，防止高频触发风控
+            else:
+                print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
 
 
 def process_single_tag(tag, all_user_info, max_hour=24):
@@ -710,7 +753,7 @@ if __name__ == "__main__":
 
     # update_uid_type()
 
-    counter = 0  # 初始化计数器
+    counter = 1  # 初始化计数器
 
     while True:
         try:
