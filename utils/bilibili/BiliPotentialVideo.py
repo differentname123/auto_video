@@ -863,41 +863,39 @@ def get_good_video(video_type=None):
     }
 
 
-# --- 测试代码 ---
-if __name__ == "__main__":
-    # get_good_video()
-    # update_uid_type()
+COOLDOWN_SECONDS = 4 * 3600
+INTERVAL_SLEEP = 30
 
-    counter = 0  # 总循环计数器
-    finish_streak = 0  # 连续完成（is_finish=True）的计数器
+def run_extended_tasks():
+    """封装需要额外执行的三个函数"""
+    print(f"[{datetime.now()}] 触发扩展任务执行...")
+    search_good_user()
+    get_all_user_video_info()
+    update_uid_type()
+
+if __name__ == "__main__":
+    counter, finish_streak, last_run_time = 0, 0, 0
 
     while True:
         try:
-            # 1. 每次循环都执行这个函数
+            # 1. 执行核心任务并更新计数器
             is_finish = update_good_user_video()
-
-            # 2. 更新计数器
             counter += 1
+            finish_streak = (finish_streak + 1) if is_finish else 0
 
-            if is_finish:
-                finish_streak += 1
-            else:
-                finish_streak = 0  # 如果中途有一词为 False，连续计数重置为 0
-            if counter >= 100 or finish_streak >= 10:
-                print(f"触发更新条件: counter={counter}, finish_streak={finish_streak}")
+            # 2. 检查是否满足触发条件（阈值满足 且 时间间隔满足）
+            threshold_met = (counter >= 100 or finish_streak >= 20)
+            time_met = (time.time() - last_run_time >= COOLDOWN_SECONDS)
 
-                # 执行另外三个函数
-                search_good_user()
-                get_all_user_video_info()
-                update_uid_type()
-
-                # 4. 执行完毕后重置所有计数器
-                counter = 0
-                finish_streak = 0
+            if threshold_met and time_met:
+                run_extended_tasks()
+                # 重置所有状态
+                counter, finish_streak, last_run_time = 0, 0, time.time()
+            elif threshold_met:
+                print(f"阈值已达，但冷却中...剩余 {(COOLDOWN_SECONDS - (time.time()-last_run_time))/60:.1f} 分钟")
 
         except Exception as e:
             traceback.print_exc()
-            print(f"主循环发生异常: {e}")
 
-        print(f"等待30秒后重试..counter  {counter} finish_streak {finish_streak} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        time.sleep(30)
+        print(f"Wait 30s.. Counter:{counter} Streak:{finish_streak}")
+        time.sleep(INTERVAL_SLEEP)

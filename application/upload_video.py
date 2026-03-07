@@ -122,10 +122,12 @@ def check_type(task_info, user_config):
     """
     user_name = task_info.get("userName", "other")
     upload_info_list = task_info.get("upload_info")
+    video_type_list = [upload_info["video_type"] for upload_info in upload_info_list if "video_type" in upload_info]
+
     # 获取category_id
     category_id_list = [upload_info["category_id"] for upload_info in upload_info_list if "category_id" in upload_info]
     category_data_info = read_json(r'W:\project\python_project\auto_video\config\bili_category_data.json')
-    category_name_list = []
+    category_name_list = video_type_list
     for category_id in category_id_list:
         category_name = category_data_info.get(str(category_id), {}).get("name", "")
         if category_name:
@@ -229,7 +231,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
     if len(already_upload_users) >= 5:
-        print(f"本轮已投稿用户过多，跳过 {log_pre}")
+        # print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
     right_now_user_list = user_config.get('right_now_user_list', [])
@@ -252,7 +254,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
     today_upload_count = user_upload_info.get(user_name, {}).get('today_upload_count', 0)
     platform_upload_count_local = user_upload_info.get(user_name, {}).get('platform_upload_count_local', 0)
     if platform_upload_count >= max_count or today_upload_count > 25 or platform_upload_count_local >= max_count:
-        print(f"{user_name}  今天投稿 {today_upload_count} 实际数量{platform_upload_count} 今日投稿次数已达上限 {max_count} 次，跳过 {log_pre}")
+        # print(f"{user_name}  今天投稿 {today_upload_count} 实际数量{platform_upload_count} 今日投稿次数已达上限 {max_count} 次，跳过 {log_pre}")
         return False
 
 
@@ -431,10 +433,11 @@ def statistic_tasks_with_video(tasks_to_upload_list, allowed_user_name_list):
         task_path_info = build_task_video_paths(task_info)
         final_output_path = task_path_info['final_output_path']
         user_name = task_info.get('userName')
+        status = task_info.get('status')
         if user_name not in allowed_user_name_list:
             continue
 
-        if is_valid_target_file_simple(final_output_path):
+        if is_valid_target_file_simple(final_output_path) and status == TaskStatus.TO_UPLOADED:
             existing_video_tasks.append(task_info)
             if user_name not in tobe_upload_video_info:
                 tobe_upload_video_info[user_name] = 0

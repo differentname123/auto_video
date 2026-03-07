@@ -942,7 +942,7 @@ def recover_task(manager):
     query_2 = {
         "create_time": {
             # 当前时间减去 12 小时
-            "$gt": datetime.now() - timedelta(hours=8)
+            "$gt": datetime.now() - timedelta(hours=12)
         },
         "failed_count": {
             "$gt": 5
