@@ -30,7 +30,7 @@ def get_bilibili_fresh_profile():
         try:
             # 启动浏览器，禁用 WebRTC 防止真实 IP 泄露
             browser = p.firefox.launch(
-                headless=False,
+                headless=True,
                 firefox_user_prefs={
                     "media.peerconnection.enabled": False
                 }

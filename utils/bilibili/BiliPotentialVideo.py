@@ -24,6 +24,137 @@ ALL_GOOD_USER_FILE = r'W:\project\python_project\auto_video\config\all_good_user
 
 ALL_USER_TYPE_MAP_FILE = r'W:\project\python_project\auto_video\config\all_user_type_map.json'
 ALL_GOOD_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_good_video.json'
+BASE_PROFILES = [
+    {
+        # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Origin": "https://space.bilibili.com",
+            "Sec-GPC": "1",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Priority": "u=4",
+            "TE": "trailers",  # 补充了抓包中存在的 TE 头
+            # 【修改】使用 curl 中完全一致的 Cookie
+            "Cookie": "buvid3=ADC48BBC-C48D-32BD-6E56-4BFB55D0DE9603414infoc; b_nut=1772839403; __at_once=18129603945248101006; buvid4=B47E505C-ED4B-8166-D3D2-A6A677005C3404828-026030707-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwOTg2MDUsImlhdCI6MTc3MjgzOTM0NSwicGx0IjotMX0.ZzJwVNy04i8RjUhw9kpXI_CBY-n2vfmL8BWtEfKIgGU; bili_ticket_expires=1773098545; buvid_fp=446700a5f2f4f41f3e38bd98cabbc908; CURRENT_FNVAL=2000; sid=gqvw5gl7"
+        },
+        "dm_params": {
+            "platform": "web",
+            "web_location": "333.1387",
+            # 【修改】还原抓包中真实的空轨迹数据
+            "dm_img_list": "[]",
+            "dm_img_str": "V2ViR0wgMS",
+            "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+            # 【修改】还原抓包中真实的页面交互和环境特征数据 (已做URL解码处理)
+            "dm_img_inter": '{"ds":[],"wh":[5235,7405,15],"of":[491,982,491]}'
+        }
+    },
+
+    {
+        # 身份 1：Windows Chrome 145 (您的原生抓包数据)
+        "headers": {
+            "accept": "*/*", "accept-language": "zh-CN,zh;q=0.9", "origin": "https://space.bilibili.com",
+            "priority": "u=1, i", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+            "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+            "cookie": "buvid3=A3C5C7F7-CE22-2319-1BF1-5A12667F16F681690infoc; b_nut=1772599781; _uuid=828F87AF-9108E-7BDB-BFD6-1F749476181182401infoc; home_feed_column=5; browser_resolution=1862-925; buvid4=CCC31F1C-EBCF-9C0D-9306-7D78D3D3BBDD82499-026030412-C733j3GbXXTp8uVzKptMqg%3D%3D; buvid_fp=02a64a5530e27a720f537b223dbf6381; sid=6uas0qcc; CURRENT_QUALITY=0; rpdid=|(k))kmuk|RY0J'u~~klmm)~|; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzI4ODM3ODYsImlhdCI6MTc3MjYyNDUyNiwicGx0IjotMX0.eg7x6QGwKAc_lBgDT7tTVViek_I9b7y8fI4_eoa0OO4; bili_ticket_expires=1772883726; PVID=1; LIVE_BUVID=AUTO7417726245881683; CURRENT_FNVAL=2000; b_lsid=ED43E64E_19CBAB38E4B"
+        },
+        "dm_params": {
+            "platform": "web", "web_location": "333.1387", "dm_img_list": "[]",
+            "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
+            "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDIwODAgVGkgKDB4MDAwMDFFMDcpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEpR29vZ2xlIEluYy4gKE5WSURJQS",
+            "dm_img_inter": '{"ds":[],"wh":[4004,2418,100],"of":[157,314,157]}'
+        }
+    },
+    {
+        # 身份 2：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Origin": "https://space.bilibili.com",
+            "Sec-GPC": "1",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Priority": "u=4",
+            "Cookie": "buvid3=14E13BE1-9C29-B253-1E41-2B46DB27089423391infoc; b_nut=1772753823; __at_once=10441780667350004868; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMTMwMjQsImlhdCI6MTc3Mjc1Mzc2NCwicGx0IjotMX0.-xA30SvAlxLAINx_CfNFOpMWxQSBGYgic5H0IONb_ls; bili_ticket_expires=1773012964; buvid4=543C034A-6F64-159F-88B3-68DB3591885924296-026030607-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=266a273e7f2ada11ebf2f497ea6a4b7b; CURRENT_FNVAL=2000; sid=5z63h9e6"
+        },
+        "dm_params": {
+            "platform": "web",
+            "web_location": "333.1387",
+            "dm_img_list": "[]",
+            "dm_img_str": "V2ViR0wgMS",
+            "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+            "dm_img_inter": '{"ds":[],"wh":[5382,7454,64],"of":[178,356,178]}'
+        }
+    },
+    {
+        # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Origin": "https://space.bilibili.com",
+            "Sec-GPC": "1",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Priority": "u=4",
+            "TE": "trailers",  # 补充了抓包中存在的 TE 头
+            # 使用 curl 中完全一致的 Cookie
+            "Cookie": "buvid3=26370685-F7D5-7985-9016-10FADE22B0D575328infoc; b_nut=1772772275; __at_once=907977295708651421; buvid4=68ADC892-0AE5-E3FC-9B0B-41599A2B83BE76184-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzE0NzYsImlhdCI6MTc3Mjc3MjIxNiwicGx0IjotMX0.bNzKK01FWT7cIwli-O377Dhh-JytjJ45yiUkkygsQ9s; bili_ticket_expires=1773031416; buvid_fp=5ce8c95d90333611d4b197f1a9f09267"
+        },
+        "dm_params": {
+            "platform": "web",
+            "web_location": "333.1387",
+            # 还原真实的鼠标/按键轨迹数据
+            "dm_img_list": '[{"x":2026,"y":-1822,"z":0,"timestamp":7,"k":94,"type":0}]',
+            "dm_img_str": "V2ViR0wgMS",
+            "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+            # 还原真实的页面交互和环境特征数据
+            "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[267,89,89],"s":[52,7236,5696]}],"wh":[5487,7489,99],"of":[146,292,146]}'
+        }
+    },
+
+    {
+        # 身份 4：ad3
+        "headers": {
+            "accept": "*/*",
+            "accept-language": "zh-CN,zh;q=0.9",
+            "origin": "https://space.bilibili.com",
+            "priority": "u=1, i",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+            "cookie": "buvid3=5A3E5C48-1334-2437-62DE-AF105F0D75C508480infoc; b_nut=1772771108; __at_once=2518939619716495421; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzAzMDgsImlhdCI6MTc3Mjc3MTA0OCwicGx0IjotMX0.socfjRWgdc6eqW1hjV937DKmiCG0DBTOP7224bgMjuo; bili_ticket_expires=1773030248; buvid4=B7AE2A90-FDDD-90F1-BAC5-F0333949CE8709028-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=bce33e466000947e3212fd8857254bbf"
+        },
+        "dm_params": {
+            "platform": "web",
+            "web_location": "333.1387",
+            # 这里必须是解码后的 JSON 字符串，因为 requests 会自动进行 urlencode 编码
+            "dm_img_list": '[{"x":873,"y":313,"z":0,"timestamp":31,"k":99,"type":0},{"x":1487,"y":458,"z":89,"timestamp":256,"k":115,"type":0}]',
+            "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
+            "dm_cover_img_str": "QU5HTEUgKEludGVsLCBJbnRlbChSKSBVSEQgR3JhcGhpY3MgKDB4MDAwMDlCQTQpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEtMjcuMjAuMTAwLjg3MjkpR29vZ2xlIEluYy4gKEludGVsKQ",
+            "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[45,15,15],"s":[268,6344,2084]}],"wh":[4772,4519,22],"of":[223,446,223]}'
+        }
+    }
+]
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
@@ -34,137 +165,6 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
     # 【核心优化】：身份池。将配套的 UA、Headers、Cookie 和 显卡指纹强绑定
     # 警告：高并发时，请务必将 Profile 2 和 3 中的 Cookie 替换为您从无痕浏览器中抓取的真实有效 Cookie
-    PROFILES = [
-        {
-            # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
-            "headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
-                "Accept": "*/*",
-                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br, zstd",
-                "Origin": "https://space.bilibili.com",
-                "Sec-GPC": "1",
-                "Connection": "keep-alive",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-                "Priority": "u=4",
-                "TE": "trailers",  # 补充了抓包中存在的 TE 头
-                # 【修改】使用 curl 中完全一致的 Cookie
-                "Cookie": "buvid3=ADC48BBC-C48D-32BD-6E56-4BFB55D0DE9603414infoc; b_nut=1772839403; __at_once=18129603945248101006; buvid4=B47E505C-ED4B-8166-D3D2-A6A677005C3404828-026030707-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwOTg2MDUsImlhdCI6MTc3MjgzOTM0NSwicGx0IjotMX0.ZzJwVNy04i8RjUhw9kpXI_CBY-n2vfmL8BWtEfKIgGU; bili_ticket_expires=1773098545; buvid_fp=446700a5f2f4f41f3e38bd98cabbc908; CURRENT_FNVAL=2000; sid=gqvw5gl7"
-            },
-            "dm_params": {
-                "platform": "web",
-                "web_location": "333.1387",
-                # 【修改】还原抓包中真实的空轨迹数据
-                "dm_img_list": "[]",
-                "dm_img_str": "V2ViR0wgMS",
-                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
-                # 【修改】还原抓包中真实的页面交互和环境特征数据 (已做URL解码处理)
-                "dm_img_inter": '{"ds":[],"wh":[5235,7405,15],"of":[491,982,491]}'
-            }
-        },
-
-        {
-            # 身份 1：Windows Chrome 145 (您的原生抓包数据)
-            "headers": {
-                "accept": "*/*", "accept-language": "zh-CN,zh;q=0.9", "origin": "https://space.bilibili.com",
-                "priority": "u=1, i", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors",
-                "sec-fetch-site": "same-site",
-                "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
-                "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": '"Windows"',
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-                "cookie": "buvid3=A3C5C7F7-CE22-2319-1BF1-5A12667F16F681690infoc; b_nut=1772599781; _uuid=828F87AF-9108E-7BDB-BFD6-1F749476181182401infoc; home_feed_column=5; browser_resolution=1862-925; buvid4=CCC31F1C-EBCF-9C0D-9306-7D78D3D3BBDD82499-026030412-C733j3GbXXTp8uVzKptMqg%3D%3D; buvid_fp=02a64a5530e27a720f537b223dbf6381; sid=6uas0qcc; CURRENT_QUALITY=0; rpdid=|(k))kmuk|RY0J'u~~klmm)~|; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzI4ODM3ODYsImlhdCI6MTc3MjYyNDUyNiwicGx0IjotMX0.eg7x6QGwKAc_lBgDT7tTVViek_I9b7y8fI4_eoa0OO4; bili_ticket_expires=1772883726; PVID=1; LIVE_BUVID=AUTO7417726245881683; CURRENT_FNVAL=2000; b_lsid=ED43E64E_19CBAB38E4B"
-            },
-            "dm_params": {
-                "platform": "web", "web_location": "333.1387", "dm_img_list": "[]",
-                "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
-                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgUlRYIDIwODAgVGkgKDB4MDAwMDFFMDcpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEpR29vZ2xlIEluYy4gKE5WSURJQS",
-                "dm_img_inter": '{"ds":[],"wh":[4004,2418,100],"of":[157,314,157]}'
-            }
-        },
-        {
-            # 身份 2：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
-            "headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
-                "Accept": "*/*",
-                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br, zstd",
-                "Origin": "https://space.bilibili.com",
-                "Sec-GPC": "1",
-                "Connection": "keep-alive",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-                "Priority": "u=4",
-                "Cookie": "buvid3=14E13BE1-9C29-B253-1E41-2B46DB27089423391infoc; b_nut=1772753823; __at_once=10441780667350004868; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMTMwMjQsImlhdCI6MTc3Mjc1Mzc2NCwicGx0IjotMX0.-xA30SvAlxLAINx_CfNFOpMWxQSBGYgic5H0IONb_ls; bili_ticket_expires=1773012964; buvid4=543C034A-6F64-159F-88B3-68DB3591885924296-026030607-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=266a273e7f2ada11ebf2f497ea6a4b7b; CURRENT_FNVAL=2000; sid=5z63h9e6"
-            },
-            "dm_params": {
-                "platform": "web",
-                "web_location": "333.1387",
-                "dm_img_list": "[]",
-                "dm_img_str": "V2ViR0wgMS",
-                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
-                "dm_img_inter": '{"ds":[],"wh":[5382,7454,64],"of":[178,356,178]}'
-            }
-        },
-        {
-            # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
-            "headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
-                "Accept": "*/*",
-                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
-                "Accept-Encoding": "gzip, deflate, br, zstd",
-                "Origin": "https://space.bilibili.com",
-                "Sec-GPC": "1",
-                "Connection": "keep-alive",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-                "Priority": "u=4",
-                "TE": "trailers",  # 补充了抓包中存在的 TE 头
-                # 使用 curl 中完全一致的 Cookie
-                "Cookie": "buvid3=26370685-F7D5-7985-9016-10FADE22B0D575328infoc; b_nut=1772772275; __at_once=907977295708651421; buvid4=68ADC892-0AE5-E3FC-9B0B-41599A2B83BE76184-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzE0NzYsImlhdCI6MTc3Mjc3MjIxNiwicGx0IjotMX0.bNzKK01FWT7cIwli-O377Dhh-JytjJ45yiUkkygsQ9s; bili_ticket_expires=1773031416; buvid_fp=5ce8c95d90333611d4b197f1a9f09267"
-            },
-            "dm_params": {
-                "platform": "web",
-                "web_location": "333.1387",
-                # 还原真实的鼠标/按键轨迹数据
-                "dm_img_list": '[{"x":2026,"y":-1822,"z":0,"timestamp":7,"k":94,"type":0}]',
-                "dm_img_str": "V2ViR0wgMS",
-                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
-                # 还原真实的页面交互和环境特征数据
-                "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[267,89,89],"s":[52,7236,5696]}],"wh":[5487,7489,99],"of":[146,292,146]}'
-            }
-        },
-
-        {
-            # 身份 4：ad3
-            "headers": {
-                "accept": "*/*",
-                "accept-language": "zh-CN,zh;q=0.9",
-                "origin": "https://space.bilibili.com",
-                "priority": "u=1, i",
-                "sec-fetch-dest": "empty",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-site": "same-site",
-                "sec-ch-ua": '"Chromium";v="140", "Not=A?Brand";v="24", "Google Chrome";v="140"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"Windows"',
-                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
-                "cookie": "buvid3=5A3E5C48-1334-2437-62DE-AF105F0D75C508480infoc; b_nut=1772771108; __at_once=2518939619716495421; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwMzAzMDgsImlhdCI6MTc3Mjc3MTA0OCwicGx0IjotMX0.socfjRWgdc6eqW1hjV937DKmiCG0DBTOP7224bgMjuo; bili_ticket_expires=1773030248; buvid4=B7AE2A90-FDDD-90F1-BAC5-F0333949CE8709028-026030612-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; buvid_fp=bce33e466000947e3212fd8857254bbf"
-            },
-            "dm_params": {
-                "platform": "web",
-                "web_location": "333.1387",
-                # 这里必须是解码后的 JSON 字符串，因为 requests 会自动进行 urlencode 编码
-                "dm_img_list": '[{"x":873,"y":313,"z":0,"timestamp":31,"k":99,"type":0},{"x":1487,"y":458,"z":89,"timestamp":256,"k":115,"type":0}]',
-                "dm_img_str": "V2ViR0wgMS4wIChPcGVuR0wgRVMgMi4wIENocm9taXVtKQ",
-                "dm_cover_img_str": "QU5HTEUgKEludGVsLCBJbnRlbChSKSBVSEQgR3JhcGhpY3MgKDB4MDAwMDlCQTQpIERpcmVjdDNEMTEgdnNfNV8wIHBzXzVfMCwgRDNEMTEtMjcuMjAuMTAwLjg3MjkpR29vZ2xlIEluYy4gKEludGVsKQ",
-                "dm_img_inter": '{"ds":[{"t":0,"c":"bnByb2dyZXNzLWJ1c3","p":[45,15,15],"s":[268,6344,2084]}],"wh":[4772,4519,22],"of":[223,446,223]}'
-            }
-        }
-    ]
     if new_profile_list:
         PROFILES = new_profile_list
 
@@ -395,9 +395,10 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         processed_since_save = 0
         new_profile_list = None
 
-        # new_profile = get_bilibili_fresh_profile()
-        # if new_profile:
-        #     new_profile_list = [new_profile]
+        new_profile = get_bilibili_fresh_profile()
+        if new_profile:
+            new_profile_list = BASE_PROFILES.copy()
+            new_profile_list.append(new_profile)
 
         # 修改点：新增字典用于按轮次统计具体 index 的使用与失败情况
         profile_stats = {}
@@ -593,7 +594,7 @@ def get_all_user_video_info():
 
     # 调用提取出来的多线程调度器
     # max_workers 可以根据你的代理池稳定度适当调增（默认设 5 防高频风控），save_interval 就是批量保存的阈值
-    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=100)
+    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=1000)
 
 
 def gen_uid_type_llm(uid_info_list):
@@ -882,10 +883,6 @@ if __name__ == "__main__":
                 finish_streak += 1
             else:
                 finish_streak = 0  # 如果中途有一词为 False，连续计数重置为 0
-
-            # 3. 判断是否满足触发条件：
-            # 条件A：总循环达到 100 次
-            # 条件B：连续 10 次 is_finish 为 True
             if counter >= 100 or finish_streak >= 10:
                 print(f"触发更新条件: counter={counter}, finish_streak={finish_streak}")
 
