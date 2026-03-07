@@ -35,6 +35,36 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
     # 警告：高并发时，请务必将 Profile 2 和 3 中的 Cookie 替换为您从无痕浏览器中抓取的真实有效 Cookie
     PROFILES = [
         {
+            # 身份 3：基于您捕捉的 Firefox 148 原生抓包数据进行严格匹配
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+                "Accept-Encoding": "gzip, deflate, br, zstd",
+                "Origin": "https://space.bilibili.com",
+                "Sec-GPC": "1",
+                "Connection": "keep-alive",
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-site",
+                "Priority": "u=4",
+                "TE": "trailers",  # 补充了抓包中存在的 TE 头
+                # 【修改】使用 curl 中完全一致的 Cookie
+                "Cookie": "buvid3=ADC48BBC-C48D-32BD-6E56-4BFB55D0DE9603414infoc; b_nut=1772839403; __at_once=18129603945248101006; buvid4=B47E505C-ED4B-8166-D3D2-A6A677005C3404828-026030707-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwOTg2MDUsImlhdCI6MTc3MjgzOTM0NSwicGx0IjotMX0.ZzJwVNy04i8RjUhw9kpXI_CBY-n2vfmL8BWtEfKIgGU; bili_ticket_expires=1773098545; buvid_fp=446700a5f2f4f41f3e38bd98cabbc908; CURRENT_FNVAL=2000; sid=gqvw5gl7"
+            },
+            "dm_params": {
+                "platform": "web",
+                "web_location": "333.1387",
+                # 【修改】还原抓包中真实的空轨迹数据
+                "dm_img_list": "[]",
+                "dm_img_str": "V2ViR0wgMS",
+                "dm_cover_img_str": "QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS",
+                # 【修改】还原抓包中真实的页面交互和环境特征数据 (已做URL解码处理)
+                "dm_img_inter": '{"ds":[],"wh":[5235,7405,15],"of":[491,982,491]}'
+            }
+        },
+
+        {
             # 身份 1：Windows Chrome 145 (您的原生抓包数据)
             "headers": {
                 "accept": "*/*", "accept-language": "zh-CN,zh;q=0.9", "origin": "https://space.bilibili.com",
