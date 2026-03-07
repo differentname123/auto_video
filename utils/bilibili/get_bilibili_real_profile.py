@@ -4,7 +4,7 @@ from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 
 TARGET_MID = "950948"
-TARGET_URL = f"https://space.bilibili.com/{TARGET_MID}/upload/video"
+TARGET_URL = f"https://space.bilibili.com/950948/upload/video"
 
 # 常见真实显卡指纹池 (每次随机抽取，避免 dm_cover_img_str 撞车)
 GPU_LIST = [
@@ -103,11 +103,30 @@ def get_bilibili_fresh_profile():
             # 定义要排除的敏感字段（全小写匹配）
             exclude_keys = {'host', 'referer'}
 
-            # 核心修改：保持 k 原样（不加 .title()），且排除 Host 和 Referer
-            headers = {
-                k: v for k, v in req_headers.items()
-                if not k.startswith(':') and k.lower() not in exclude_keys
+            # 定义您所需要的特定大小写映射字典
+            case_mapping = {
+                "user-agent": "User-Agent",
+                "accept": "Accept",
+                "accept-language": "Accept-Language",
+                "accept-encoding": "Accept-Encoding",
+                "origin": "Origin",
+                "sec-gpc": "Sec-GPC",
+                "connection": "Connection",
+                "sec-fetch-dest": "Sec-Fetch-Dest",
+                "sec-fetch-mode": "Sec-Fetch-Mode",
+                "sec-fetch-site": "Sec-Fetch-Site",
+                "priority": "Priority",
+                "cookie": "Cookie",
+                "te": "TE"
             }
+
+            # 核心修改：通过映射字典强制还原为您指定的抓包大小写格式
+            headers = {}
+            for k, v in req_headers.items():
+                if not k.startswith(':') and k.lower() not in exclude_keys:
+                    # 如果在映射表中，使用特定的格式；否则默认首字母大写
+                    proper_key = case_mapping.get(k.lower(), k.title())
+                    headers[proper_key] = v
 
             # 【关键修改】：补齐 Firefox 老身份中的灵魂指纹头，确保自洽性
             if 'TE' not in headers:

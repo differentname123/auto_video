@@ -12,6 +12,7 @@ import threading  # 新增：用于共享资源的线程锁保护
 # 移除未使用和重复的导入
 from application.video_common_config import ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
 from utils.bilibili.bili_utils import fetch_from_search
+from utils.bilibili.get_bilibili_real_profile import get_bilibili_fresh_profile
 from utils.common_utils import read_json, save_json, time_to_ms, read_file_to_str, string_to_object
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
 
@@ -26,7 +27,7 @@ ALL_GOOD_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_good_vid
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
-                           use_proxy: bool = False, proxies: dict = None) -> tuple: # 修改点：改变了返回提示符为 tuple
+                           use_proxy: bool = False, proxies: dict = None, new_profile_list=None) -> tuple: # 修改点：改变了返回提示符为 tuple
     """
     独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
     """
@@ -164,6 +165,8 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             }
         }
     ]
+    if new_profile_list:
+        PROFILES = new_profile_list
 
     if use_proxy and proxies is None:
         proxies = random.choice([
@@ -322,7 +325,7 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
             v['window_ratios'][f'{w}h_ratio'] = ratio
 
         v['comp_score'] = sum(ratios) if ratios else 0
-        v['score'] = math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
+        v['score'] = math.log(v['abs_score'] + 1) *  math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
         v['avg_daily_videos'] = avg_daily_videos
         v['update_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         v['update_time'] = current_timestamp
@@ -331,7 +334,7 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
     return video_list
 
 
-def process_single_user(uid, all_video_info, data_lock, max_hour=24):
+def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None):
     """
     修改点：引入 data_lock 保护读取；移除内部 save_json，交由外层调度器批量轻量保存。
     同时接收并抛出 profile_index 状态以便于外层做失败统计。
@@ -347,7 +350,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24):
         return 0, -1  # 修改点：返回 0 (跳过)，且 index 返回 -1 表示未分配
 
     # 修改点：解包接收 videos 以及所使用的 index
-    videos, used_index = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True)
+    videos, used_index = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True, new_profile_list=new_profile_list)
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -390,6 +393,11 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         fail_count = 0
         jump_count = 0
         processed_since_save = 0
+        new_profile_list = None
+
+        # new_profile = get_bilibili_fresh_profile()
+        # if new_profile:
+        #     new_profile_list = [new_profile]
 
         # 修改点：新增字典用于按轮次统计具体 index 的使用与失败情况
         profile_stats = {}
@@ -400,7 +408,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 批量向线程池提交任务
             future_to_mid = {
-                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour): mid
+                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list): mid
                 for mid in all_mid_list
             }
 
@@ -777,9 +785,8 @@ def update_good_user_video():
     # 2. 获取不重复的uid (注：如果是自带的json库，直接存set可能会报错，建议转为list，如 list(unique_uids))
     unique_uids = set(v['mid'] for v in all_video_score_list)
     save_json(ALL_GOOD_USER_FILE, list(unique_uids))
-    print(
-        f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=100, max_hour=1)
+    print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
+    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000, max_hour=1)
 
     return is_finish
 
@@ -822,7 +829,7 @@ def get_good_video(video_type=None):
             break
 
         alive_hours = video.get('alive_hours', 0)
-        score = round(video.get('score', 0) * video.get('score', 0) * video.get('score', 0), 1)
+        score = round(video.get('score', 0) * video.get('score', 0), 1)
         title = video.get('title', '')
         bvid = video.get('bvid', '')
         created = video.get('created', 0)
