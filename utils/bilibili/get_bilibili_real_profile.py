@@ -92,21 +92,30 @@ def get_bilibili_fresh_profile():
 
             # === 开始组装零破绽的身份档案 ===
 
-            # 1. 组装原生 Cookie (此时大概率已包含 buvid_fp)
+            # 1. 组装原生 Cookie
             raw_cookies = context.cookies()
             cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in raw_cookies])
 
-            if "buvid_fp" not in cookie_str:
-                print("[!] 警告：本次 Cookie 中似乎未包含 buvid_fp，可能被降级或生成延迟。")
 
             # 2. 提取并清洗 Headers
             req_headers = captured_request.all_headers()
-            headers = {k.title(): v for k, v in req_headers.items() if not k.startswith(':')}
 
-            if 'Te' in headers:
-                headers['TE'] = headers.pop('Te')
-            elif 'Firefox' in headers.get('User-Agent', '') and 'TE' not in headers:
+            # 定义要排除的敏感字段（全小写匹配）
+            exclude_keys = {'host', 'referer'}
+
+            # 核心修改：保持 k 原样（不加 .title()），且排除 Host 和 Referer
+            headers = {
+                k: v for k, v in req_headers.items()
+                if not k.startswith(':') and k.lower() not in exclude_keys
+            }
+
+            # 【关键修改】：补齐 Firefox 老身份中的灵魂指纹头，确保自洽性
+            if 'TE' not in headers:
                 headers['TE'] = 'trailers'
+            if 'Sec-GPC' not in headers:
+                headers['Sec-GPC'] = '1'
+            if 'Priority' not in headers:
+                headers['Priority'] = 'u=4'
 
             headers['Cookie'] = cookie_str
 
@@ -117,14 +126,13 @@ def get_bilibili_fresh_profile():
             def get_dm(key, default=""):
                 return query.get(key, [default])[0]
 
-            # 4. 组装 dm_params，这里的 dm_cover_img_str 将是我们伪造后的版本！
+            # 4. 组装 dm_params
             dm_params = {
                 "platform": get_dm("platform", "web"),
                 "web_location": get_dm("web_location", "333.1387"),
                 "dm_img_list": get_dm("dm_img_list", "[]"),
                 "dm_img_str": get_dm("dm_img_str", "V2ViR0wgMS"),
                 "dm_cover_img_str": get_dm("dm_cover_img_str"),
-                # 如果没有抓到环境特征，给一个兜底的，并使用我们随机出的分辨率
                 "dm_img_inter": get_dm("dm_img_inter",
                                        f'{{"ds":[],"wh":[{viewport_width},{viewport_height},15],"of":[0,0,0]}}')
             }
