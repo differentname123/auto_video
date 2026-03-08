@@ -395,7 +395,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         processed_since_save = 0
         new_profile_list = BASE_PROFILES.copy()
 
-        for i in range(2):
+        for i in range(1):
             new_profile = get_bilibili_fresh_profile()
             if new_profile:
                 new_profile_list.append(new_profile)
@@ -721,24 +721,54 @@ def get_sorted_high_score_videos(max_hour=24):
     """
     all_video_info = load_pure_video_info()
 
+    # 初始化统计数据
+    stats = {
+        "total_users": len(all_video_info),
+        "filter_update_timeout": 0,  # 更新时间超过 max_hour 的用户数
+        "filter_no_recent_video": 0,  # 24小时内无新视频的用户数
+        "processed_users": 0  # 最终处理的用户数
+    }
+
     all_video_score_list = []
-    process_count = 0
+    current_now = time.time()  # 统一使用当前时间，避免循环中微小差异
 
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
         update_time = exist_video_info.get('update_time', 0)
 
-        if time.time() - update_time > max_hour * 3600:
+        # 过滤原因 1：更新时间太久
+        if current_now - update_time > max_hour * 3600:
+            stats["filter_update_timeout"] += 1
             continue
 
+        # 要求 24 小时内有视频
+        latest_created_time = max((v.get('created', 0) for v in exist_video_list), default=0)
+
+        # 过滤原因 2：24小时内没有发布视频
+        if current_now - latest_created_time > 24 * 3600:
+            stats["filter_no_recent_video"] += 1
+            continue
+
+        # 成功通过过滤
         video_score_list = calculate_video_scores(exist_video_list, current_timestamp=update_time)
-        process_count += 1
+        stats["processed_users"] += 1
         all_video_score_list.extend(video_score_list)
 
-    print(f"共处理了 {process_count} 个用户的视频数据，计算得到 {len(all_video_score_list)} 个视频的分数。")
+    # 按得分降序排序 (根据函数名要求补充排序逻辑)
+    all_video_score_list.sort(key=lambda x: x.get('score', 0), reverse=True)
+
+    # 打印详细统计结果
+    print("-" * 30)
+    print(f"【处理统计报告】")
+    print(f"1. 总用户数: {stats['total_users']}")
+    print(f"2. 过滤-更新超时 (>{max_hour}h): {stats['filter_update_timeout']}")
+    print(f"3. 过滤-24h内无新视频: {stats['filter_no_recent_video']}")
+    print(f"4. 最终处理用户数: {stats['processed_users']}")
+    print(f"5. 最终生成视频分数记录数: {len(all_video_score_list)}")
+    print("-" * 30)
 
     # 基础过滤条件
-    all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
+    all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 2.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 72]
     all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)

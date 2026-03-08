@@ -219,7 +219,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         return False
 
     if user_name in already_upload_users:
-        print(f"{user_name} 本轮已投稿，跳过 {log_pre}")
+        # print(f"{user_name} 本轮已投稿，跳过 {log_pre}")
         return False
 
 
