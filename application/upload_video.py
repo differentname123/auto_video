@@ -134,13 +134,17 @@ def check_type(task_info, user_config):
             category_name_list.append(category_name)
     category_name_list_str = str(category_name_list)
     video_type = "no"
+    video_type_list = []
     if category_name_list_str:
         if "游戏" in category_name_list_str:
             video_type = "game"
-        elif "运动" in category_name_list_str or "体育" in category_name_list_str:
+            video_type_list.append("game")
+        if "运动" in category_name_list_str or "体育" in category_name_list_str:
             video_type = "sport"
-        elif "音乐" in category_name_list_str or "动物" in category_name_list_str or "搞笑" in category_name_list_str or "小剧场" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
+            video_type_list.append("sport")
+        if "音乐" in category_name_list_str or "动物" in category_name_list_str or "搞笑" in category_name_list_str or "小剧场" in category_name_list_str or "资讯" in category_name_list_str or "旅游出行" in category_name_list_str or "趣味" in category_name_list_str or "娱乐" in category_name_list_str or "新闻" in category_name_list_str or "影视" in category_name_list_str or "情感" in category_name_list_str or "知识" in category_name_list_str:
             video_type = "fun"
+            video_type_list.append("fun")
         task_info['video_type'] = video_type
     user_type = "other"
     user_type_info = user_config.get('user_type_info')
@@ -148,9 +152,11 @@ def check_type(task_info, user_config):
         if user_name in user_list:
             break
 
-    if user_type != video_type:
-        error_info = f"⚠️ 用户 {user_name} 的类型 {user_type} 与视频题材 {category_name_list_str} 的类型 {video_type} 不匹配，跳过上传。"
+    if user_type not in video_type_list:
+        error_info = f"⚠️ 用户 {user_name} 的类型 {user_type} 与视频题材 {category_name_list_str} 的类型 {video_type_list} 不匹配，跳过上传。"
         return error_info
+    task_info['video_type'] = user_type
+
     return ""
 
 

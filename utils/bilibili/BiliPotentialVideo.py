@@ -815,7 +815,12 @@ def update_good_user_video():
     unique_uids = set(v['mid'] for v in all_video_score_list)
     save_json(ALL_GOOD_USER_FILE, list(unique_uids))
     print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
-    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000, max_hour=1)
+
+    max_hour = 1
+    if not (5 <= datetime.now().hour < 24):
+        max_hour = 2
+
+    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000, max_hour=max_hour)
 
     return is_finish
 
@@ -858,7 +863,7 @@ def get_good_video(video_type=None):
             break
 
         alive_hours = video.get('alive_hours', 0)
-        score = round(video.get('score', 0) * video.get('score', 0), 1)
+        score = round(video.get('score', 0) * video.get('score', 0) * video.get('score', 0) / 10, 1)
         title = video.get('title', '')
         bvid = video.get('bvid', '')
         created = video.get('created', 0)

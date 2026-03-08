@@ -965,7 +965,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
                 gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-3-pro-preview")
             else:
-                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro")
+                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro", fallback_model="gemini-3-pro-preview")
 
             # 解析和校验
             owner_asr_info = string_to_object(raw_response)
