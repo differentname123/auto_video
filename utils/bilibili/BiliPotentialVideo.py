@@ -268,7 +268,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             # time.sleep(sleep_time)
 
         except Exception as e:
-            print(f"查询请求发生网络或未知错误: {e}")
+            print(f"查询请求发生网络或未知错误: proxies {proxies} random_index：{random_index}  {e}")
             break
 
     final_result = collected_videos[:desired_count]
@@ -393,12 +393,12 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         fail_count = 0
         jump_count = 0
         processed_since_save = 0
-        new_profile_list = None
+        new_profile_list = BASE_PROFILES.copy()
 
-        new_profile = get_bilibili_fresh_profile()
-        if new_profile:
-            new_profile_list = BASE_PROFILES.copy()
-            new_profile_list.append(new_profile)
+        for i in range(2):
+            new_profile = get_bilibili_fresh_profile()
+            if new_profile:
+                new_profile_list.append(new_profile)
 
         # 修改点：新增字典用于按轮次统计具体 index 的使用与失败情况
         profile_stats = {}
@@ -436,9 +436,8 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                             profile_stats[used_index]['failed'] += 1
                     else:
                         jump_count += 1
-
-                    print(
-                        f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    if index % 100 == 0 or index == total_mids - 1:
+                        print(f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
                     # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
                     if processed_since_save >= save_interval:
@@ -458,8 +457,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 save_json(ALL_VIDEO_FILE, all_video_info)
             print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
-        print(
-            f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
+        print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
 
         # 修改点：每轮执行完后，打印 Profile 详细统计
         print(">>> 📊 本轮 PROFILES (Index) 详细统计 <<<")

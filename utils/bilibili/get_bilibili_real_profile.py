@@ -18,7 +18,7 @@ GPU_LIST = [
 
 
 def get_bilibili_fresh_profile():
-    print(f"[*] 准备启动全新无痕浏览器...")
+    # print(f"[*] 准备启动全新无痕浏览器...")
     profile_data = None
 
     # 随机化视口分辨率，伪装不同的显示器尺寸
@@ -60,7 +60,7 @@ def get_bilibili_fresh_profile():
             """
             page.add_init_script(webgl_spoof_js)
 
-            print(f"[*] 正在加载页面...")
+            # print(f"[*] 正在加载页面...")
             print(f"[*] 当前伪装分辨率: {viewport_width}x{viewport_height}")
             print(f"[*] 当前伪装显卡: {selected_gpu.split(',')[1].strip()}")
 
@@ -162,7 +162,7 @@ def get_bilibili_fresh_profile():
                 "dm_params": dm_params
             }
 
-            print("[+] 成功捕捉到完整身份特征和 Cookie！\n")
+            # print("[+] 成功捕捉到完整身份特征和 Cookie！\n")
 
         except Exception as e:
             print(f"[!] 捕捉过程发生错误: {e}")
@@ -170,7 +170,7 @@ def get_bilibili_fresh_profile():
         finally:
             if 'browser' in locals():
                 browser.close()
-                print("[*] 浏览器已销毁，不留一丝痕迹。")
+                # print("[*] 浏览器已销毁，不留一丝痕迹。")
 
     return profile_data
 
