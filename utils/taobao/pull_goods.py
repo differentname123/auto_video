@@ -1,7 +1,14 @@
+import asyncio
+import os
 import time
 import hashlib
 import json
+from pathlib import Path
 from urllib import parse, request
+
+BASE_DIR = r'W:\project\python_project\auto_video\utils\temp\goods'
+
+from utils.common_utils import read_json, download_cover_minimal, save_json
 
 
 def generate_sign(secret, params):
@@ -76,7 +83,7 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
                 if "error_response" in res_json:
                     err = res_json["error_response"]
                     print(
-                        f"[API业务错误-物料搜索] 停止拉取 | 错误码: {err.get('code')} | 描述: {err.get('msg')} | 子错误码: {err.get('sub_code')} | 子描述: {err.get('sub_msg')}")
+                        f"[API业务错误-物料搜索] 停止拉取 {q} | 错误码: {err.get('code')} | 描述: {err.get('msg')} | 子错误码: {err.get('sub_code')} | 子描述: {err.get('sub_msg')}")
                     break
 
                 # 逐层安全提取目标数据 map_data
@@ -99,11 +106,18 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
                     basic_info = item.get("item_basic_info", {})
                     publish_info = item.get("publish_info", {})
                     income_info = publish_info.get("income_info", {})
-
+                    item_id = item.get("item_id", "")
                     # 组装扁平化数据
                     extracted_item = {
+                        "item_id" : item_id,
                         "item_name": basic_info.get("title", ""),
                         "brand": basic_info.get("brand_name", ""),
+                        "pict_url": basic_info.get("pict_url", ""),
+                        "category_name": basic_info.get("category_name", ""),
+                        "level_one_category_name": basic_info.get("level_one_category_name", ""),
+                        "shop_title": basic_info.get("shop_title", ""),
+                        "short_title": basic_info.get("short_title", ""),
+
                         "original_price": price_info.get("reserve_price", ""),
                         "final_price": price_info.get("final_promotion_price", price_info.get("zk_final_price", "")),
                         "commission_rate": income_info.get("commission_rate", ""),
@@ -189,23 +203,116 @@ def batch_append_tpwd(app_key, app_secret, item_list):
     return item_list
 
 
-# ================= 使用示例 =================
-if __name__ == "__main__":
+def get_all_keywords(data):
+    # 使用集合(set)来存储，以便自动去重
+    keyword_set = set()
+
+    # 遍历外层字典的所有值
+    for video_data in data.values():
+        try:
+            # 获取 final_goods 字段，如果不存在则返回空字典
+            final_goods = video_data.get("final_goods", {})
+
+            # 获取 product_recommendations 列表，如果不存在则返回空列表
+            recommendations = final_goods.get("product_recommendations", [])
+
+            # 遍历每一个产品推荐
+            for product in recommendations:
+                # 获取该产品的 keywords 列表
+                keywords = product.get("keywords", [])
+                # 将关键词添加到集合中
+                for kw in keywords:
+                    keyword_set.add(kw)
+        except Exception as e:
+            # print(f"处理数据时发生异常: {e}. 当前处理的数据片段: {video_data}")
+            pass
+    # 将集合转换回列表并返回
+    return list(keyword_set)
+
+
+def update_all_goods():
+    """
+    根据已有的关键词进行商品信息的拉取
+    :return:
+    """
+    # 扫描BASE_DIR下面的所有json文件
+    all_goods_info_file = f"{BASE_DIR}/all_goods_info.json"
+    all_goods_info = read_json(all_goods_info_file)
+    json_file_list = []
+    for root, dirs, files in os.walk(BASE_DIR):
+        for file in files:
+            if file.endswith('.json') and 'replay_goods_inf' in file:
+                json_file_list.append(os.path.join(root, file))
+
+    keyword_list = []
+    for json_file in json_file_list:
+        file_data = read_json(json_file)
+        keywords = get_all_keywords(file_data)
+        keyword_list.extend(keywords)
+    keyword_list = list(set(keyword_list))  # 去重
+    print(f"扫描到 {len(json_file_list)} 个商品账号信息文件。 从所有商品信息文件中提取到了 {len(keyword_list)} 个关键词")
+
+    for keyword in keyword_list:
+        start_time = time.time()
+        goods_info_list = get_goods_info(keyword)
+        for item in goods_info_list:
+            item_id = item.get("item_id")
+            all_goods_info[item_id] = item
+
+        save_json(all_goods_info_file, all_goods_info)
+        print(f"已更新关键词 '{keyword}' 获取到的商品数量为 {len(goods_info_list)} 并保存到 {all_goods_info_file}。当前总商品数: {len(all_goods_info)} 耗时: {time.time() - start_time:.2f} 秒 当前时间 : {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+
+def get_goods_info(key_word, desire_count=100):
+    """
+    根据关键词拉取商品信息
+    :param key_word:
+    :return:
+    """
     APP_KEY = "35288611"
     APP_SECRET = "3f861aab50cd92d29870becf34d6fc64"
-    ADZONE_ID = 116238150030
+    ADZONE_ID = 116238500456
 
     # ============ 第一步：先搜索商品 ============
     result_list = get_tbk_material(
         app_key=APP_KEY,
         app_secret=APP_SECRET,
         adzone_id=ADZONE_ID,
-        q="女装",
-        desire_count=3  # 测试拉取 3 个商品看下格式
+        q=key_word,
+        desire_count=desire_count  # 测试拉取 3 个商品看下格式
     )
 
     print(f"成功获取到了 {len(result_list)} 个商品。")
 
     # ============ 第二步：为获取到的商品追加生成淘口令 ============
     result_list = batch_append_tpwd(APP_KEY, APP_SECRET, result_list)
-    print("追加淘口令后的结果示例：")
+    result_list = update_image(result_list)
+    # 每个元素都增加当前的时间戳
+    current_timestamp = int(time.time())
+    for item in result_list:
+        item["update_timestamp"] = current_timestamp
+
+    return result_list
+
+def update_image(result_list):
+    for item in result_list:
+
+        image_urls = item.get("pict_url", "")
+        name_seed = f"{image_urls}".encode('utf-8')
+        file_hash = hashlib.md5(name_seed).hexdigest()
+        save_dir = Path(BASE_DIR) / 'images'
+        save_dir.mkdir(parents=True, exist_ok=True)
+        save_path = save_dir / f"{file_hash}.jpg"
+        final_path = None
+        if save_path.exists():
+            final_path = save_path.resolve()
+        else:
+            success = asyncio.run(download_cover_minimal(image_urls, save_path))
+            if success:
+                final_path = save_path.resolve()
+        item["local_image_path"] = str(final_path) if final_path else None
+    return result_list
+
+# ================= 使用示例 =================
+if __name__ == "__main__":
+    update_all_goods()

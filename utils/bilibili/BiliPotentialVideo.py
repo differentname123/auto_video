@@ -938,7 +938,7 @@ def run_extended_tasks():
     print(f"[{datetime.now()}] 触发扩展任务执行...")
     search_good_user()
     get_all_user_video_info()
-    update_uid_type()
+    # update_uid_type()
 
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
