@@ -635,6 +635,7 @@ def gen_uid_type_llm(uid_info_list):
 def update_uid_type():
     """
     进行用户类型的更新，主要是依据最近发的视频然后分为 sport game 和 fun
+    修改点：引入 update_time 记录，对未收录或上次更新超过 24 小时的用户进行重新判断
     """
     start_time = time.time()
     all_video_score_list, all_video_info = get_sorted_high_score_videos()
@@ -647,18 +648,34 @@ def update_uid_type():
     all_video_info = load_pure_video_info()
     unique_uids = set(v['mid'] for v in all_video_score_list)
 
-    # 找到unique_uids中不在all_user_type_info中的uid，进行类型更新
-    new_uids = [uid for uid in unique_uids if str(uid) not in all_user_type_info]
+    current_time = time.time()
+    uids_to_update = []
 
-    if not new_uids:
-        print("没有检测到需要更新类型的新用户UID。")
+    # 1. 核心修改：找到不在 all_user_type_info 中的 uid，或者更新时间超过 24 小时的 uid
+    for uid in unique_uids:
+        uid_str = str(uid)
+        if uid_str not in all_user_type_info:
+            uids_to_update.append(uid)
+        else:
+            user_data = all_user_type_info[uid_str]
+            # 检查新数据结构是否为字典，并判断时间
+            if isinstance(user_data, dict):
+                last_update = user_data.get('update_time', 0)
+                if current_time - last_update > 24 * 3600:
+                    uids_to_update.append(uid)
+            else:
+                # 兼容旧版本直接存字符串的数据，强制拉取并更新为包含时间戳的新字典结构
+                uids_to_update.append(uid)
+
+    if not uids_to_update:
+        print("没有检测到需要更新类型的新用户或过期用户。")
         return
 
-    print(f"检测到 {len(new_uids)} 个新用户需要更新类型...")
+    print(f"检测到 {len(uids_to_update)} 个用户需要更新类型 (新增或已超过24小时)...")
 
-    # 1. 对每个new_uids的uid保留最新 5 个视频的title，新建 dict
+    # 2. 对每个 uids_to_update 的uid保留最新 5 个视频的title，新建 dict
     uid_latest_titles_dict = {}
-    for uid in new_uids:
+    for uid in uids_to_update:
         uid_str = str(uid)
         if uid_str in all_video_info:
             video_list = all_video_info[uid_str].get('video_list', [])
@@ -668,7 +685,7 @@ def update_uid_type():
             latest_5_titles = [v.get('title', '') for v in sorted_videos[:5]]
             uid_latest_titles_dict[uid_str] = latest_5_titles
 
-    # 2. 对新dict进行batch_size分组，默认为100，每一组都加入batch_list
+    # 3. 对新dict进行batch_size分组，默认为50，每一组都加入batch_list
     batch_size = 50
     batch_list = []
     current_batch = {}
@@ -679,51 +696,53 @@ def update_uid_type():
             batch_list.append(current_batch)
             current_batch = {}  # 重置当前批次
 
-    # 将最后不满 100 的剩余数据加入 batch_list
+    # 将最后不满 50 的剩余数据加入 batch_list
     if current_batch:
         batch_list.append(current_batch)
 
-    # 3 & 4. 遍历batch_list，调用 get_type 并保存
+    # 4 & 5. 遍历batch_list，调用 gen_uid_type_llm 并保存
     for index, batch in enumerate(batch_list):
         batch_start_time = time.time()
         try:
-            # 3. 对每一个batch调用 get_type(batch), 得到 dict {uid: type}
-            # 假设外部已导入或定义好 get_type 函数
-            print(
-                f"\n\n正在处理第 {index + 1} 批次，共 {len(batch_list)} 批次，当前批次包含 {len(batch)} 个用户... 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"\n\n正在处理第 {index + 1} 批次，共 {len(batch_list)} 批次，当前批次包含 {len(batch)} 个用户... 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             type_result_dict = gen_uid_type_llm(batch)
 
             if type_result_dict:
-                # 4. 每一个batch执行后都需要更新all_user_type_info并且保存
+                # 5. 每一个batch执行后都需要更新all_user_type_info并且保存
                 for uid, v_type in type_result_dict.items():
-                    if v_type in ["体育", "游戏", "娱乐"]:
-                        all_user_type_info[str(uid)] = v_type
+                    if v_type in ["体育", "游戏", "娱乐", "军事"]:
+                        # 核心修改：保存为字典对象，记录类型和当前的时间戳
+                        all_user_type_info[str(uid)] = {
+                            "type": v_type,
+                            "update_time": int(time.time())
+                        }
 
                 # 覆盖保存 JSON
                 save_json(ALL_USER_TYPE_MAP_FILE, all_user_type_info)
-                print(
-                    f"Batch {index + 1}/{len(batch_list)} 更新完毕并保存，本批次处理 {len(type_result_dict)} 个用户。 耗时 {time.time() - batch_start_time:.2f} 秒。")
+                print(f"Batch {index + 1}/{len(batch_list)} 更新完毕并保存，本批次处理 {len(type_result_dict)} 个用户。 耗时 {time.time() - batch_start_time:.2f} 秒。")
             else:
-                print(f"Batch {index + 1}/{len(batch_list)} get_type 返回为空，跳过保存。")
+                print(f"Batch {index + 1}/{len(batch_list)} gen_uid_type_llm 返回为空，跳过保存。")
 
         except Exception as e:
             # 加入异常捕获防阻断，一个批次失败不影响下一个批次
-            print(f"Batch {index + 1}/{len(batch_list)} 调用 get_type 或保存时发生异常: {e}")
+            print(f"Batch {index + 1}/{len(batch_list)} 调用 LLM 或保存时发生异常: {e}")
             traceback.print_exc()
 
-    print(
-        f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(new_uids)} 个新用户的类型。 批次数量: {len(batch_list)}。")
+    print(f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(uids_to_update)} 个用户的类型。 批次数量: {len(batch_list)}。")
 
 
 def get_sorted_high_score_videos(max_hour=24):
     """
     处理视频信息：计算得分、根据条件过滤并按得分降序排序。
+    修改点：兼容读取新结构的字典型 video_type 数据，并将题材过滤提前到外层循环以提升效率并统计拦截量
     """
     all_video_info = load_pure_video_info()
+    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)  # 修改：提前读取用户类型数据
 
     # 初始化统计数据
     stats = {
         "total_users": len(all_video_info),
+        "filter_invalid_type": 0,  # 题材不符合要求的用户数（新增）
         "filter_update_timeout": 0,  # 更新时间超过 max_hour 的用户数
         "filter_no_recent_video": 0,  # 24小时内无新视频的用户数
         "processed_users": 0  # 最终处理的用户数
@@ -731,9 +750,25 @@ def get_sorted_high_score_videos(max_hour=24):
 
     all_video_score_list = []
     current_now = time.time()  # 统一使用当前时间，避免循环中微小差异
-
+    total_count = 0
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
+
+        total_count += len(exist_video_list)
+        # 核心修改：提前获取和判断题材类型
+        user_type_data = all_user_type_info.get(str(uid))
+        if isinstance(user_type_data, dict):
+            video_type = user_type_data.get('type', "未知")
+        elif isinstance(user_type_data, str):
+            video_type = user_type_data
+        else:
+            video_type = "未知"
+
+        # 如果类型不在指定范围内，直接过滤并跳过后续耗时计算
+        if video_type not in ['娱乐', '游戏', '体育']:
+            stats["filter_invalid_type"] += 1
+            continue
+
         update_time = exist_video_info.get('update_time', 0)
 
         # 过滤原因 1：更新时间太久
@@ -751,6 +786,11 @@ def get_sorted_high_score_videos(max_hour=24):
 
         # 成功通过过滤
         video_score_list = calculate_video_scores(exist_video_list, current_timestamp=update_time)
+
+        # 将题材信息提前注入到经过计算的视频属性中
+        for v in video_score_list:
+            v['video_type'] = video_type
+
         stats["processed_users"] += 1
         all_video_score_list.extend(video_score_list)
 
@@ -760,22 +800,18 @@ def get_sorted_high_score_videos(max_hour=24):
     # 打印详细统计结果
     print("-" * 30)
     print(f"【处理统计报告】")
-    print(f"1. 总用户数: {stats['total_users']}")
-    print(f"2. 过滤-更新超时 (>{max_hour}h): {stats['filter_update_timeout']}")
-    print(f"3. 过滤-24h内无新视频: {stats['filter_no_recent_video']}")
-    print(f"4. 最终处理用户数: {stats['processed_users']}")
-    print(f"5. 最终生成视频分数记录数: {len(all_video_score_list)}")
+    print(f"1. 总用户数: {stats['total_users']} 过滤前总视频数: {total_count}")
+    print(f"2. 过滤-题材不符 (非娱乐/游戏/体育): {stats['filter_invalid_type']}")
+    print(f"3. 过滤-更新超时 (>{max_hour}h): {stats['filter_update_timeout']}")
+    print(f"4. 过滤-24h内无新视频: {stats['filter_no_recent_video']}")
+    print(f"5. 最终处理用户数: {stats['processed_users']}")
+    print(f"6. 最终生成视频分数记录数: {len(all_video_score_list)}")
     print("-" * 30)
 
     # 基础过滤条件
-    all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 2.0]
+    all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 72]
-    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
-
-    for v in all_video_score_list:
-        uid = str(v['mid'])
-        v['video_type'] = all_user_type_info.get(uid, "未知")
 
     # 按分数降序排序
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
@@ -783,9 +819,8 @@ def get_sorted_high_score_videos(max_hour=24):
     good_video_count = 1000
     type_count_map = {}
     pure_all_video_score_list = []
-    need_filed_list = ['play', 'title', 'created', 'alive_hours', 'abs_score', 'comp_score', 'score', 'bvid',
-                       'video_type']
 
+    # 截断或只提取需使用的字段等
     for v in all_video_score_list:
         video_type = v.get('video_type', '未知')
         if video_type not in type_count_map:
@@ -793,14 +828,13 @@ def get_sorted_high_score_videos(max_hour=24):
         type_count_map[video_type] += 1
         if type_count_map[video_type] > good_video_count:
             continue
-        # pure_video_info = {k: v[k] for k in need_filed_list if k in v}
         pure_video_info = v.copy()
-
         pure_all_video_score_list.append(pure_video_info)
 
     save_json(ALL_GOOD_VIDEO_FILE, pure_all_video_score_list)
 
     return all_video_score_list, all_video_info
+
 
 
 def update_good_user_video():
