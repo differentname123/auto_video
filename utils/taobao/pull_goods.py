@@ -229,8 +229,9 @@ def update_all_goods():
     logger.info(f"扫描到 {len(json_file_list)} 个商品账号信息文件。提取到了 {len(keyword_list)} 个去重关键词")
 
     current_time = time.time()
-
+    count = 0
     for keyword in keyword_list:
+        count += 1
         # 核心逻辑：检查是否在 24 小时内拉取过
         history_record = keyword_history.get(keyword)
         if history_record:
@@ -258,7 +259,7 @@ def update_all_goods():
         save_json(KEYWORD_HISTORY_FILE, keyword_history)
 
         logger.info(
-            f"✅ [更新成功] 关键词 '{keyword}' 获取商品数量: {len(goods_info_list)} | 当前总商品数: {len(all_goods_info)} | 耗时: {time.time() - start_time:.2f} 秒")
+            f"✅ [更新成功] 关键词 '{keyword}' 进度： {count}/{len(keyword_list)} 获取商品数量: {len(goods_info_list)} | 当前总商品数: {len(all_goods_info)} | 耗时: {time.time() - start_time:.2f} 秒 \n")
 
 
 def get_goods_info(key_word, desire_count=100):
