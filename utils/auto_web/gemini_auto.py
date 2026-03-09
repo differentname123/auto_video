@@ -310,7 +310,7 @@ def generate_gemini_content_playwright(prompt, file_path=None, wait_timeout=600,
     start_time = time.time()
     account_name, user_data_dir, actual_model_name = None, None, model_name
 
-    no_file_name_list = ['new_taobao6', 'new_taobao9']
+    no_file_name_list = ['new_taobao6']
     # 1. 循环申请账号
     while time.time() - start_time < wait_timeout:
         # 新增解构 actual_model_name 并在入参支持备用模型
