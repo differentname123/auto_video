@@ -74,7 +74,8 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
         try:
             data = parse.urlencode(params).encode('utf-8')
             req = request.Request(url, data=data)
-            with request.urlopen(req) as response:
+            # 【核心修改点】：增加 timeout=15 参数，防止无限期阻塞卡死
+            with request.urlopen(req, timeout=15) as response:
                 res_data = response.read().decode('utf-8')
                 res_json = json.loads(res_data)
 
@@ -126,11 +127,11 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
             logger.error(f"[JSON解析异常-物料搜索] 停止拉取 | 详情: {e} | 原始返回: {res_data}")
             break
         except Exception as e:
+            # 这里的 Exception 会捕获到 urllib.error.URLError 或 socket.timeout
             logger.error(f"[网络或系统异常-物料搜索] 停止拉取 | 详情: {e}")
             break
 
     return all_map_data[:desire_count]
-
 
 def create_tbk_tpwd(app_key, app_secret, target_url):
     """根据目标链接生成淘口令"""
@@ -154,7 +155,8 @@ def create_tbk_tpwd(app_key, app_secret, target_url):
     try:
         data = parse.urlencode(params).encode('utf-8')
         req = request.Request(url, data=data)
-        with request.urlopen(req) as response:
+        # 【核心修改点】：增加 timeout=15 参数
+        with request.urlopen(req, timeout=15) as response:
             res_data = response.read().decode('utf-8')
             res_json = json.loads(res_data)
 
@@ -170,7 +172,6 @@ def create_tbk_tpwd(app_key, app_secret, target_url):
     except Exception as e:
         logger.error(f"[网络或系统异常-淘口令生成] 详情: {e}")
         return None
-
 
 def batch_append_tpwd(app_key, app_secret, item_list):
     """批量为商品列表追加淘口令信息"""
@@ -236,7 +237,7 @@ def update_all_goods():
         history_record = keyword_history.get(keyword)
         if history_record:
             last_pull_time = history_record.get("last_time", 0)
-            if current_time - last_pull_time < 24 * 3600:
+            if current_time - last_pull_time < 7 * 24 * 3600:
                 time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_pull_time))
                 logger.info(
                     f"⏭️ [跳过] 关键词 '{keyword}' 最近拉取时间为 {time_str} (获取 {history_record.get('count', 0)} 个)，未满24小时。")
