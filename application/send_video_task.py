@@ -1,7 +1,7 @@
 import random
 import time
 import traceback
-from collections import defaultdict
+from collections import defaultdict, Counter
 from datetime import datetime, timedelta
 
 import requests
@@ -343,6 +343,16 @@ def build_need_upload_video():
     return combined_video_list
 
 
+def get_tags_info(data_list):
+    # 提取所有 items 中的 tags 并平铺到一个列表中
+    all_tags = []
+    if data_list:
+        for item in data_list:
+            all_tags.extend(item.get("tags", []))
+
+    # 使用 Counter 计数并转为普通字典返回
+    return dict(Counter(all_tags))
+
 def gen_user_detail_upload_info(manager, user_list):
     """
     获取用户今日详细的投稿数据，确保每个用户都有完整的四个字段
@@ -362,22 +372,43 @@ def gen_user_detail_upload_info(manager, user_list):
     now = datetime.now()
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
+    # 根据today_midnight获取前两天时间
+    two_days_ago = today_midnight - timedelta(days=2)
+
     query_2 = {
         "userName": {"$in": user_list},
         "failed_count": {"$lt": VIDEO_MAX_RETRY_TIMES + 1},
-        "create_time": {"$gt": today_midnight}
+        "create_time": {"$gt": two_days_ago}
     }
     task_list = manager.find_by_custom_query(manager.tasks_collection, query_2)
 
     # 2. 填充数据
     for task_info in task_list:
         user_name = task_info.get('userName')
+        create_time = task_info.get('create_time')
+
 
         # 容错：如果数据库查出了不在 user_list 里的用户（虽然 query 限制了，但为了健壮性可保留）
         if user_name not in user_detail_upload_info:
             continue
+        upload_info_list = task_info.get('upload_info', [])
+
 
         user_data = user_detail_upload_info[user_name]
+        user_tags_info = user_data.get('user_tags_info', {})
+        tags_info = get_tags_info(upload_info_list)
+        # 使用 tags_info 更新user_tags_info
+        for tag, count in tags_info.items():
+            if tag not in user_tags_info:
+                user_tags_info[tag] = 0
+            user_tags_info[tag] += count
+        user_data['user_tags_info'] = user_tags_info
+
+        # 判断create_time释放大于today_midnight，如果是则说明是今天的任务，否则是昨天的任务
+        if create_time < today_midnight:
+            continue
+
+
         creation_guidance_info = task_info.get('creation_guidance_info', {})
 
         # 统计 dig_type
@@ -834,7 +865,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'zhong', 'liuzhu', 'qizhu', 'xiaoxue', 'dan', 'junda', 'jun', 'ningtao']
+    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'liuzhu', 'qizhu', 'xiaoxue', 'dan', 'junda', 'jun', 'ningtao']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
