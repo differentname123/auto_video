@@ -10,6 +10,7 @@ from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_comment import get_bilibili_comments
 from utils.common_utils import read_json, init_config, save_json, string_to_object, read_file_to_str
 from utils.gemini import get_llm_content
+from utils.gemini_web import generate_gemini_content_managed
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -60,7 +61,9 @@ def gen_property_good(video_info):
 
         model_name = random.choice(model_name_list)
         try:
-            raw = get_llm_content(prompt=prompt, model_name=model_name)
+            # raw = get_llm_content(prompt=prompt, model_name=model_name)
+            gen_error_info, raw = generate_gemini_content_managed(prompt, model_name='gemini-3.0-flash')
+
             return string_to_object(raw), format_video_info
         except Exception as e:
             print(f"[ERROR] 生成视频信息失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
