@@ -679,6 +679,53 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
     return matched_user, detail_match_info
 
 
+def calc_match_weights(match_user_list, video_info, all_video_info, user_detail_upload_info):
+    """
+    为已经筛选出的用户列表计算与当前视频的垂直度匹配权重及概率
+    返回格式: { 'user_name': {'weight': 1.5, 'probability': 0.3}, ... }
+    """
+    user_weight_info = {}
+    base_weight = 1.0  # 基础分兜底，保证所有人都有基础概率被选中
+
+    # 统一提取视频的 tags_info (避免在循环中重复计算)
+    all_video_tags = {}
+    video_id_list = video_info.get('video_id_list', [])
+    for video_id in video_id_list:
+        video_detail_info = all_video_info.get(video_id, {})
+        video_tags = video_detail_info.get('tags_info', {})
+        for tag, count in video_tags.items():
+            if tag not in all_video_tags:
+                all_video_tags[tag] = 0
+            all_video_tags[tag] += count
+    video_info['all_video_tags'] = all_video_tags
+    # 第一步：计算每个用户的权重，并统计总权重
+    total_weight_sum = 0.0
+    for user_name in match_user_list:
+        detail_info = user_detail_upload_info.get(user_name, {})
+        user_tags_info = detail_info.get('user_tags_info', {})
+
+        total_score = 0
+        if user_tags_info:
+            for v_tag, v_weight in all_video_tags.items():
+                for t_tag, t_weight in user_tags_info.items():
+                    has_comm, common_str = has_long_common_substring(v_tag, t_tag)
+                    if has_comm:
+                        total_score += v_weight * t_weight
+
+        weight = base_weight + total_score
+        user_weight_info[user_name] = {'weight': weight}
+        total_weight_sum += weight
+
+    # 第二步：计算每个用户被选中的理论概率（仅作记录或日志打印等扩展使用）
+    for user_name in match_user_list:
+        if total_weight_sum > 0:
+            user_weight_info[user_name]['probability'] = user_weight_info[user_name]['weight'] / total_weight_sum
+        else:
+            user_weight_info[user_name]['probability'] = 0.0
+
+    return user_weight_info
+
+
 def get_final_users(manager, video_info, user_detail_upload_info, all_video_info):
     priority_user = ['lin', 'danzhu', 'dan']
     priority_user = []
@@ -698,31 +745,32 @@ def get_final_users(manager, video_info, user_detail_upload_info, all_video_info
     final_list = []
 
     if sample_size > 0:
-        # --- 核心修改逻辑开始 ---
-
-        # 1. 将匹配到的用户分为两组：优先用户 和 普通用户
-        # 使用 set 提高查找效率（如果列表很短，直接用 list 也可以）
         priority_set = set(priority_user)
 
         candidates_priority = [u for u in match_user_list if u in priority_set]
         candidates_normal = [u for u in match_user_list if u not in priority_set]
 
-        # 2. 第一步：优先从 candidates_priority 中选取
-        # 我们需要选取的优先用户数量，受限于“现有优先用户数”和“总目标数量”
+        # 1. 第一步：优先从 candidates_priority 中选取
         count_from_priority = min(len(candidates_priority), sample_size)
         if count_from_priority > 0:
-            final_list.extend(random.sample(candidates_priority, count_from_priority))
+            p_info = calc_match_weights(candidates_priority, video_info, all_video_info, user_detail_upload_info)
+            # 直接提取权重列表供 random.choices 使用
+            weights = [p_info[u]['weight'] for u in candidates_priority]
+            # random.choices 返回的是列表，直接 extend
+            final_list.extend(random.choices(candidates_priority, weights=weights, k=count_from_priority))
+            video_info['match_weights'] = p_info
 
-        # 3. 第二步：计算剩余还需要多少名额
+        # 2. 第二步：计算剩余还需要多少名额
         remaining_slots = sample_size - len(final_list)
 
-        # 4. 如果还有剩余名额，从 candidates_normal 中补齐
+        # 3. 第三步：如果还有剩余名额，从 candidates_normal 中补齐
         if remaining_slots > 0:
-            # 同样防止 sample 数量超过列表长度（理论上前面 min 处理过，这里双重保险）
             count_from_normal = min(len(candidates_normal), remaining_slots)
-            final_list.extend(random.sample(candidates_normal, count_from_normal))
-
-        # --- 核心修改逻辑结束 ---
+            n_info = calc_match_weights(candidates_normal, video_info, all_video_info, user_detail_upload_info)
+            # 直接提取权重列表供 random.choices 使用
+            weights = [n_info[u]['weight'] for u in candidates_normal]
+            final_list.extend(random.choices(candidates_normal, weights=weights, k=count_from_normal))
+            video_info['match_weights'] = n_info
 
     return final_list
 
