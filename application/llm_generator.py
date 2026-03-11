@@ -600,7 +600,7 @@ def gen_logical_scene_llm(video_path, video_info, all_path_info):
             random_value = random.random()
             if random_value < 0.9:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
-                                                                         model_name="gemini-3.1-pro-preview", fallback_model="gemini-3-pro-preview")
+                                                                         model_name="gemini-3.1-pro-preview", fallback_model="gemini-3.1-flash-lite-preview")
             else:
                 gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=video_path,
                                                                          model_name="gemini-2.5-pro")
@@ -930,6 +930,9 @@ def gen_owner_asr_by_llm(video_path, video_info):
     通过大模型生成带说话人识别的ASR文本。
     """
     check_owner = video_info.get('extra_info', {}).get('check_owner', True)
+    # 获取最大允许无声时长，默认 10000 ms (10秒)
+    max_silence_duration_ms = video_info.get('extra_info', {}).get('max_silence_duration_ms', 30000)
+
     log_pre = f"{video_path} owner asr 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
     base_prompt = gen_base_prompt(video_path, video_info)
     error_info = ""
@@ -954,6 +957,10 @@ def gen_owner_asr_by_llm(video_path, video_info):
         print(error_info)
         return error_info, None
     prompt = f"{prompt}{base_prompt}"
+
+    # 记录是否已经成功解析出带有长无声的结果
+    has_seen_large_gap_previously = False
+
     # --- 5. 带重试机制的核心逻辑 ---
     for attempt in range(1, max_retries + 1):
         print(f"尝试生成ASR信息... (第 {attempt}/{max_retries} 次) {log_pre}")
@@ -963,21 +970,37 @@ def gen_owner_asr_by_llm(video_path, video_info):
             random_value = random.random()
             if random_value < 0.01:
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
-                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-3-pro-preview")
+                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path,
+                                                                                  model_name="gemini-3.1-pro-preview")
             else:
-                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path, model_name="gemini-2.5-pro", fallback_model="gemini-3-pro-preview")
+                gen_error_info, raw_response = generate_gemini_content_playwright(prompt, file_path=video_path,
+                                                                                  model_name="gemini-2.5-pro")
 
             # 解析和校验
             owner_asr_info = string_to_object(raw_response)
+
+            # 第一步：基础校验（原汁原味）
             check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms, check_owner)
             if not check_result:
-                error_info = f"asr 检查未通过: {check_info} {raw_response} {check_info} {log_pre}"
+                error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
                 raise ValueError(error_info)
+
+            has_large_gap = check_long_silence(owner_asr_info, video_duration_ms, max_silence_duration_ms)
+            if has_large_gap:
+                if has_seen_large_gap_previously:
+                    print(
+                        f"两次成功解析均检测到 {max_silence_duration_ms}ms 以上无声，推测为真实无声段落，允许放行。 {log_pre}")
+                else:
+                    has_seen_large_gap_previously = True
+                    error_info = f"首次成功解析检测到 {max_silence_duration_ms}ms 以上无声，疑似漏识别，触发重试确认 {log_pre}"
+                    raise ValueError(error_info)
+
             # owner_asr_info = correct_owner_timestamps(owner_asr_info, video_duration_ms)
             video_info['owner_asr_info'] = owner_asr_info
             owner_asr_info = fix_owner_asr_by_subtitle(video_info)
 
             return error_info, owner_asr_info
+
         except Exception as e:
             error_str = f"{error_info} {str(e)} {gen_error_info} {log_pre}"
             print(f"asr 生成 未通过 (尝试 {attempt}/{max_retries}): {e}")
@@ -987,6 +1010,34 @@ def gen_owner_asr_by_llm(video_path, video_info):
             else:
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None  # 达到最大重试次数后返回 None
+
+
+def check_long_silence(owner_asr_info, video_duration_ms, max_silence_duration_ms):
+    """
+    独立函数：检测 ASR 列表中是否存在超过指定时长的无声段落。
+    """
+    if not owner_asr_info:
+        return False
+
+    # 确保按时间顺序排列，防范乱序数据
+    sorted_segments = sorted(owner_asr_info, key=lambda x: x.get("start", 0))
+
+    # 1. 检查视频开头是否有长无声
+    if sorted_segments[0].get("start", 0) > max_silence_duration_ms:
+        return True
+
+    # 2. 检查片段之间是否有长无声
+    for j in range(1, len(sorted_segments)):
+        gap = sorted_segments[j].get("start", 0) - sorted_segments[j - 1].get("end", 0)
+        if gap > max_silence_duration_ms:
+            return True
+
+    # 3. 检查视频结尾是否有长无声
+    max_end_time_ms = max([seg.get("end", 0) for seg in sorted_segments])
+    if (video_duration_ms - max_end_time_ms) > max_silence_duration_ms:
+        return True
+
+    return False
 
 def validate_danmu_result(result: any):
     """
@@ -1420,11 +1471,11 @@ def gen_draft_video_script_llm(final_info_list):
             try:
                 random_value = random.random()
                 if random_value < 0.8:
-                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview", fallback_model="gemini-3-pro-preview")
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-pro-preview", fallback_model="gemini-3.1-flash-lite-preview")
                 else:
                     # model_name = "gemini-2.5-flash"
                     model_name = "gemini-3-flash-preview"
-                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name=model_name, fallback_model="gemini-2.5-flash")
+                    gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name=model_name, fallback_model="gemini-3.1-flash-lite-preview")
                     # raw_response = get_llm_content(prompt=full_prompt, model_name=model_name)
 
                 draft_video_script_info = string_to_object(raw_response)
@@ -1592,14 +1643,14 @@ def gen_video_script_llm(task_info, video_info_dict):
             random_value = random.random()
             if random_value < 0.01:
                 # gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-2.5-pro")
-                gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3-flash-preview", fallback_model="gemini-2.5-flash")
+                gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None, model_name="gemini-3.1-flash-lite-preview", fallback_model="gemini-2.5-flash")
             else:
                 gen_error_info, raw_response = generate_gemini_content_managed(full_prompt)
                 if gen_error_info:
                     gen_error_info, raw_response = generate_gemini_content_managed(full_prompt, model_name='gemini-3.0-flash')
                 if gen_error_info:
                     gen_error_info, raw_response = generate_gemini_content_playwright(full_prompt, file_path=None,
-                                                                                      model_name="gemini-3-pro-preview",
+                                                                                      model_name="gemini-3.1-pro-preview",
                                                                                       fallback_model="gemini-3-flash-preview")
 
             # 解析和校验
