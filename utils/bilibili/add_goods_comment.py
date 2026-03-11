@@ -1,5 +1,7 @@
 import datetime
+import math
 import os
+import difflib
 import random
 import time
 import traceback
@@ -9,10 +11,11 @@ from multiprocessing import Pool
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_comment import get_bilibili_comments
 from utils.common_utils import read_json, init_config, save_json, string_to_object, read_file_to_str
-from utils.gemini import get_llm_content
+# 清理了未使用的 get_llm_content
 from utils.gemini_web import generate_gemini_content_managed
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
+from utils.taobao.search_engine import update_and_search
 
 BASE_DIR = r'W:\project\python_project\auto_video\utils\temp\goods'
 
@@ -23,57 +26,72 @@ EXISTING_REPLIES_THRESHOLD = 1
 RETRY_INTERVAL_SECONDS = 10
 
 
+# ==========================================
+# 提取的通用 LLM 与数据处理工具函数
+# ==========================================
 
-def _truncate_field(value, limit):
-    """把 value 转为字符串，去首尾空白并把换行替换为空格，然后截取前 limit 个字符。"""
-    if value is None:
-        return ''
-    s = str(value).strip().replace('\n', ' ')
-    return s[:limit]
-
-
-def gen_property_good(video_info):
-    """根据视频信息生成合适的商品信息"""
-
-
-    print(f"正在生成最终商品信息，视频信息")
-    retry_delay = 10
-    max_retries = 3
-
+def _extract_video_info_for_llm(video_info: Dict[str, Any]) -> Dict[str, Any]:
+    """提取视频信息并格式化，供LLM生成使用"""
     draft_video_script_info = video_info.get('draft_video_script_info', [{}])[0]
     comment_list = video_info.get('hudong_info', {}).get('comment_list', [])
 
     # 按照c[1]降序排序，截取前100
     temp_comments = sorted([(c[0], c[1]) for c in comment_list], key=lambda x: x[1], reverse=True)[:100]
 
-    format_video_info = {
+    return {
         'titles': video_info.get('upload_params', {}).get('title', ''),
         'video_summary': draft_video_script_info.get('one_sentence_summary', ''),
-        'scene_summary_list': [scene['scene_summary'] for scene in draft_video_script_info.get('scene_sourcing_plan', [])],
+        'scene_summary_list': [scene.get('scene_summary', '') for scene in
+                               draft_video_script_info.get('scene_sourcing_plan', [])],
         'comments': temp_comments,
     }
 
-    PROMPT_FILE_PATH = r'W:\project\python_project\auto_video\application\prompt\视频商品推荐.txt'
-    prompt = f"{read_file_to_str(PROMPT_FILE_PATH)}\n输入信息如下:\n{format_video_info}"
-    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-lite-latest"]
-    raw = ""
-    for attempt in range(1, max_retries + 1):
 
+def _call_gemini_with_retry(prompt_file_path: str, format_video_info: Dict[str, Any]) -> Any:
+    """统一的 LLM 调用和重试逻辑"""
+    prompt = f"{read_file_to_str(prompt_file_path)}\n输入信息如下:\n{format_video_info}"
+    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-lite-latest"]
+
+    retry_delay = 10
+    max_retries = 3
+    raw = ""
+
+    for attempt in range(1, max_retries + 1):
         model_name = random.choice(model_name_list)
         try:
-            # raw = get_llm_content(prompt=prompt, model_name=model_name)
             gen_error_info, raw = generate_gemini_content_managed(prompt, model_name='gemini-3.0-flash')
-
-            return string_to_object(raw), format_video_info
+            return string_to_object(raw)
         except Exception as e:
-            print(f"[ERROR] 生成视频信息失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
+            print(f"[ERROR] 调用大模型失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
             if attempt < max_retries:
                 print(f"[INFO] 正在重试... (等待 {retry_delay} 秒)")
                 time.sleep(retry_delay)
             else:
                 print("[ERROR] 达到最大重试次数，失败.")
-                return None, None
-            traceback.print_exc()
+                traceback.print_exc()
+                return None
+
+
+# ==========================================
+# 业务逻辑层
+# ==========================================
+
+def gen_property_good(video_info: Dict[str, Any]) -> Any:
+    """根据视频信息生成合适的商品信息"""
+    print("正在生成初步商品信息，视频信息")
+    format_video_info = _extract_video_info_for_llm(video_info)
+    prompt_file = r'W:\project\python_project\auto_video\application\prompt\视频商品推荐.txt'
+    return _call_gemini_with_retry(prompt_file, format_video_info)
+
+
+def gen_final_property_good(video_info: Dict[str, Any], goods_info_list: List[Any]) -> Any:
+    """根据视频信息和确切的商品信息生成相应的推荐评论"""
+    print("正在生成最终商品信息，视频信息")
+    format_video_info = _extract_video_info_for_llm(video_info)
+    format_video_info['goods'] = goods_info_list
+    prompt_file = r'W:\project\python_project\auto_video\application\prompt\视频商品最终话术生成.txt'
+    # 修复Bug: 只返回对象本身，防止下游调用 .get() 崩溃
+    return _call_gemini_with_retry(prompt_file, format_video_info)
 
 
 def _is_rpid_in_comments(rpid: int, comments: List[Dict[str, Any]]) -> bool:
@@ -186,12 +204,12 @@ def _should_skip_video(record: Dict[str, Any], bvid: str, today: str) -> Optiona
     return None
 
 
-def auto_replay_refactored(user_name: str):
+def process_video_replies(user_name: str):
     """自动扫描并回复指定用户的置顶评论，以增加商品购买几率。"""
     print(f"\n🚀 开始为用户 {user_name} 的视频增加置顶文案回复...当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     try:
-        all_records_file = f"{BASE_DIR}/{user_name}_replay_video_info.json"
+        all_records_file = f"{BASE_DIR}/{user_name}_replay_goods_info.json"
         all_records = read_json(all_records_file)
         seven_days_ago = time.time() - 1 * 24 * 60 * 60
         all_records = {k: v for k, v in all_records.items() if v.get('send_time', 0) >= seven_days_ago}
@@ -248,45 +266,128 @@ def auto_replay_refactored(user_name: str):
         print(f"最终保存文件时出错: {e}")
 
 
-def send_replay_comment(commenter: Any, bvid: str, record_info):
+def filter_property_good(goods_list, limit_count=10):
+    if len(goods_list) <= limit_count:
+        return sorted(goods_list, key=lambda x: x.get('goods_score', 0), reverse=True)
+
+    def get_id(item):
+        return f"{item.get('item_name', '')} {item.get('category_name', '')} {item.get('short_title', '')}"
+
+    sorted_goods = sorted(goods_list, key=lambda x: x.get('goods_score', 0), reverse=True)
+    selected_goods = [sorted_goods.pop(0)]
+
+    # 用于存储每次加入时与已选集合的最高相似度
+    sim_scores = []
+
+    while len(selected_goods) < limit_count and sorted_goods:
+        best_idx = 0
+        min_max_sim = 1.0
+
+        for i, item in enumerate(sorted_goods):
+            item_id = get_id(item)
+            max_sim_with_selected = max(
+                difflib.SequenceMatcher(None, item_id, get_id(selected)).ratio()
+                for selected in selected_goods
+            )
+
+            if max_sim_with_selected < min_max_sim:
+                min_max_sim = max_sim_with_selected
+                best_idx = i
+
+        # 记录本次被选中项的相似度分值
+        sim_scores.append(min_max_sim)
+        selected_goods.append(sorted_goods.pop(best_idx))
+
+    # 输出日志
+    if sim_scores:
+        print(f"最后选择的数据中，各新增项与已选集的最大相似度分值为: {sim_scores}")
+        print(f"其中最高相似度分值为: {max(sim_scores)}")
+
+    return sorted(selected_goods, key=lambda x: x.get('goods_score', 0), reverse=True)
+
+def build_comment_body(pinned_text, rec, kouling):
+    reason_icons = [("🔥", "🔥"), ("💡", "✨"), ("🏆", "🎯"), ("💎", "💎"), ("✅", "🌟"), ("⏰", "⚡"), ("❤️", "🌹"), ("🛠️", "👍")]
+    goods_icons = [("📦", "📦"), ("🛒", "🛒"), ("📌", "📌"), ("🎁", "🎁"), ("💰", "💰"), ("✨", "✨"), ("📍", "📍"), ("🥇", "🥇")]
+
+    reason_pre, reason_post = random.choice(reason_icons)
+    goods_pre, goods_post = random.choice(goods_icons)
+    taobao = random.choice(['【🍑 宝】', '【🍑 橙色软件】', '【🍑橙色App】'])
+
+    return (
+        f"{pinned_text}\n"
+        f"{reason_pre} {rec.get('reason', '')} {reason_post}\n"
+        f"{goods_pre} {rec.get('goodsName', '')} {goods_post}\n"
+        f"{kouling}长按複，制整段内容，然后迲， 👉{taobao}就能直达。"
+    )
+
+
+def send_good_comment(commenter: Any, bvid: str, final_goods_record: Dict[str, Any]):
     """发送商品评论到指定的 B 站视频，并将评论置顶。"""
-    property_goods = record_info['property_goods']
-    sorted_recs = record_info.get('final_goods', [])
-    print(f"\n\n正在发送回复性评论到视频 {bvid}")
-    print(f"找到 {len(sorted_recs)} 条电影推荐。")
+    print(f"\n\n正在发送商品评论到视频 {bvid}")
 
-    random.shuffle(sorted_recs)
+    recommendations: List[Dict[str, Any]] = (
+        final_goods_record
+        .get('final_goods', {})
+        .get('product_recommendations', [])
+    )
+
+    # 简化排序逻辑，提升可读性
+    def _calculate_score(item):
+        return float(item.get('estimated_ctr') or 0) * float(item.get('score') or 0)
+
+    sorted_recs = sorted(
+        [item for item in recommendations if _calculate_score(item) >= 0],
+        key=_calculate_score,
+        reverse=True
+    )
+    print(f"找到 {len(sorted_recs)} 条商品推荐，按预估点击率和评分排序。过滤前推荐数量: {len(recommendations)}")
+
+    property_goods: List[Dict[str, Any]] = final_goods_record.get('property_goods', [])
+
     for rec in sorted_recs:
-        title: str = rec.get('名称', '')
-        if not title:
+        outer_id: str = rec.get('outerId', '')
+        if not outer_id:
             continue
 
-        target_good = next((pg for pg in property_goods if pg.get('名称') == title),
-                           property_goods[0] if property_goods else {})
-        movie_link = target_good.get('链接', '')
-        if not movie_link:
+        target_good: Optional[Dict[str, Any]] = next(
+            (pg for pg in property_goods if pg.get('item_id') == outer_id), None
+        )
+        if not target_good:
             continue
 
-        pinned_text: str = rec.get('置顶评论', '').strip()
-        comment_body = f"{pinned_text}\n{movie_link}"
+        taokouling_30d = target_good.get('tpwd_simple', '').strip()
+        kouling = taokouling_30d
+        abd_image_path = target_good.get('local_image_path', '')
 
-        print(f"正在发布电影推荐评论: 视频 {bvid}，电影 {title} comment_body: {comment_body}")
-        rpid = commenter.post_comment(bvid=bvid, message_content=comment_body)
+        if not kouling:
+            print(f"⚠️ 商品 {outer_id} 没有有效的短链接，跳过。{taokouling_30d}")
+            continue
+
+        pinned_text: str = rec.get('pinned_comment', '').strip()
+        comment_body = build_comment_body(pinned_text, rec, kouling)
+
+        print(
+            f"正在发布商品评论: 视频 {bvid}，商品 {outer_id} “{rec.get('goodsName', '')}” comment_body: {comment_body}")
+
+        if os.path.exists(abd_image_path):
+            rpid = commenter.post_comment(bvid=bvid, message_content=comment_body, image_path=abd_image_path)
+        else:
+            rpid = commenter.post_comment(bvid=bvid, message_content=comment_body)
+
         if not rpid:
             continue
 
         if commenter.pin_comment(bvid=bvid, rpid=rpid):
-            record_info['comment_body'] = comment_body
-            record_info['shill_comments'] = rec.get('互动评论', [])
-            print(f"✅ 已成功发送并置电影推荐评论: 视频 {bvid}，电影 {title} comment_body: {comment_body}")
-            time.sleep(60)
-            return rpid, target_good.get('名称', '')
+            final_goods_record['comment_body'] = comment_body
+            print(
+                f"✅ 已成功发送并置顶商品评论: 视频 {bvid}，商品 {outer_id} “{rec.get('goodsName', '')}” comment_body: {comment_body}")
+            return rpid, rec.get('goodsName', '')
 
     print(f"⚠️ 未能发送或置顶任何商品评论到视频 {bvid}")
     return None, None
 
 
-def add_replay_comment_for_video(task_info_list, user_name='qiqi'):
+def add_video_goods_comments(task_info_list, user_name='qiqi'):
     """为视频增加合适的商品链接"""
     print(f"\n\n开始为用户 {user_name} 的视频增加商品推荐评论...")
     config_map = init_config()
@@ -297,11 +398,11 @@ def add_replay_comment_for_video(task_info_list, user_name='qiqi'):
         print(f"未找到用户 {user_name} 的配置，程序终止。")
         return
 
-    # commenter = BilibiliCommenter(
-    #     total_cookie=config_map[uid]['total_cookie'],
-    #     csrf_token=config_map[uid].get('BILI_JCT', ''),
-    #     all_params=config_map[uid].get('all_params', {})
-    # )
+    commenter = BilibiliCommenter(
+        total_cookie=config_map[uid]['total_cookie'],
+        csrf_token=config_map[uid].get('BILI_JCT', ''),
+        all_params=config_map[uid].get('all_params', {})
+    )
 
     all_records = read_json(all_records_file)
     success_bvids = []
@@ -327,7 +428,7 @@ def add_replay_comment_for_video(task_info_list, user_name='qiqi'):
     for video in videos_to_process:
         bvid = video.get('bvid', '')
         if not bvid:
-            print(f"视频未找到对应bvid信息，跳过。")
+            print("视频未找到对应bvid信息，跳过。")
             continue
 
         try:
@@ -336,29 +437,54 @@ def add_replay_comment_for_video(task_info_list, user_name='qiqi'):
             record.update({'bvid': bvid, 'user_name': user_name})
             save_json(all_records_file, all_records)
 
-            if 'final_goods' in record and record['final_goods']:
-                print(f"视频 {bvid} 已经有最终商品信息，跳过LLM生成。")
-                final_goods = record['final_goods']
+            if 'property_good_info' in record and record['property_good_info']:
+                print(f"视频 {bvid} 已经有初步商品信息，跳过LLM生成。")
+                property_good_info = record['property_good_info']
             else:
-                final_goods, format_video_info = gen_property_good(video)
-                record['final_goods'] = final_goods
+                property_good_info = gen_property_good(video)
+                record['property_good_info'] = property_good_info
                 save_json(all_records_file, all_records)
 
-            # if final_goods:
-            #     record['property_goods'] = all_replay_info
-            #     rpid, title = send_replay_comment(commenter, bvid, record)
-            #     if rpid:
-            #         record.update({
-            #             'status': 'success',
-            #             'rpid': rpid,
-            #             'title': title,
-            #             'upload_time': time.time(),
-            #             'send_time': time.time(),
-            #             'property_goods': []
-            #         })
-            #         save_json(all_records_file, all_records)
-            #     # 增加处理的次数
-            #     record['process_count'] = record.get('process_count', 0) + 1
+            if property_good_info:
+                # 修复Bug: 预防LLM漏生成字段导致的 KeyError
+                product_recs = property_good_info.get('product_recommendations', [])
+                keyword_list = [good.get('product_name', '') for good in product_recs if good.get('product_name')]
+                for good in product_recs:
+                    keyword_list.extend(good.get('keywords', []))
+
+                keyword_list = list(set(keyword_list))
+                limit_count = 50
+                top_n = math.ceil(limit_count / len(keyword_list)) if len(keyword_list) > 0 else 5
+
+                property_goods = update_and_search(keyword_list=keyword_list, top_n=top_n)
+                print(
+                    f"为视频 {bvid} 生成商品信息，关键词列表长度 {len(keyword_list)} 关键词列表：{keyword_list} 每个关键词抓取 {top_n} 个商品")
+                property_goods = filter_property_good(property_goods)
+
+                all_records[bvid]['property_goods'] = property_goods
+                save_json(all_records_file, all_records)
+
+                if 'final_goods' in record and record['final_goods'] and False:
+                    print(f"视频 {bvid} 已经有最终商品信息，跳过。")
+                    final_goods = record['final_goods']
+                else:
+                    final_goods = gen_final_property_good(video, property_goods)
+                    all_records[bvid]['final_goods'] = final_goods
+                    save_json(all_records_file, all_records)
+
+                if final_goods:
+                    rpid, good_name = send_good_comment(commenter, bvid, all_records[bvid])
+                    if rpid:
+                        all_records[bvid]['status'] = 'success'
+                        all_records[bvid]['rpid'] = rpid
+                        all_records[bvid]['good_name'] = good_name
+                        all_records[bvid]['upload_time'] = time.time()
+                        all_records[bvid]['send_time'] = time.time()
+                        all_records[bvid]['property_goods'] = []
+                        save_json(all_records_file, all_records)
+
+                # 增加处理的次数
+                record['process_count'] = record.get('process_count', 0) + 1
         except Exception as e:
             print(f"处理视频 {bvid} 时出错: {e}")
             traceback.print_exc()
@@ -374,8 +500,9 @@ def process_user(user, all_task):
         start_time = time.time()
         print(f"[{time.strftime('%X')}] 子进程开始处理用户: {user}")
 
-        add_replay_comment_for_video(task_info_list, user_name=user)
-        # auto_replay_refactored(user)
+        # 使用了重命名后的函数
+        add_video_goods_comments(task_info_list, user_name=user)
+        process_video_replies(user)
 
         print(f"[{time.strftime('%X')}] 子进程完成用户: {user} 处理，耗时: {time.time() - start_time:.2f} 秒")
     except Exception as e:
@@ -389,7 +516,7 @@ def run_once(username_list):
     query = {
         "status": "已投稿",
         "create_time": {
-            "$gt": datetime.datetime.now() - datetime.timedelta(hours=24 * 30)
+            "$gt": datetime.datetime.now() - datetime.timedelta(hours=24 * 1)
         }
     }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query)
@@ -408,7 +535,6 @@ def run_once(username_list):
 
 
 if __name__ == '__main__':
-
 
     while True:
         user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')

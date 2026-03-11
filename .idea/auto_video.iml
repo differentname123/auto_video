@@ -9,6 +9,7 @@
       <excludeFolder url="file://$MODULE_DIR$/application/logs" />
       <excludeFolder url="file://$MODULE_DIR$/application/process_locks" />
       <excludeFolder url="file://$MODULE_DIR$/utils/temp" />
+      <excludeFolder url="file://$MODULE_DIR$/utils/taobao/product_db" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.12 (auto_video)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
