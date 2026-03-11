@@ -120,7 +120,7 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
                         "commission_rate": income_info.get("commission_rate", ""),
                         "commission_amount": income_info.get("commission_amount", ""),
                         "click_url": publish_info.get("coupon_share_url", publish_info.get("click_url", "")),
-                        "raw_data": item
+                        # "raw_data": item
                     }
                     all_map_data.append(extracted_item)
 
@@ -275,7 +275,7 @@ def fetch_alimama_data(search_query: str, cookie_string: str, pid: str = 'mm_328
                         "commission_rate": item.get("tkRate", ""),
                         "commission_amount": item.get("unionCommissionAmount", item.get("tkCommissionAmount", "")),
                         "click_url": click_url,
-                        "raw_data": item
+                        # "raw_data": item
                     }
                     extracted_list.append(extracted_item)
                 # ============================
@@ -516,5 +516,6 @@ def update_image(result_list):
 if __name__ == "__main__":
     # cookie_string = get_config("zhu_taobao_cookie")
     # goods = fetch_alimama_data(search_query='可乐', cookie_string=get_config("zhu_taobao_cookie"))
+    # api_goods = get_goods_info("可乐")
 
     update_all_goods()
