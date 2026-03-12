@@ -502,13 +502,13 @@ def get_available_count(manager, video_info):
 
     if is_high_score and not is_within_12_hours:
         can_use_count = max(can_use_count, 1)
-        print(f"高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
+        # print(f"高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
 
     is_middle_high_score = final_score > 1000
     is_within_24_hours = latest_create_time >= (now - timedelta(hours=24))
     if is_middle_high_score and not is_within_24_hours:
         can_use_count = max(can_use_count, 1)
-        print(f"中高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
+        # print(f"中高分视频{ final_score}，{video_info.get('hot_topic')} 允许再创建一个任务 最近的时间为 {latest_create_time.strftime('%Y-%m-%d %H:%M:%S')} ")
 
     video_info['exist_count'] = len(exist_tasks)
     video_info['single_count'] = single_count
@@ -648,13 +648,15 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         exist_video_id_list = detail_info.get('unique_video_id_list', [])
 
         # 4. 检查视频ID是否已存在
-        all_exist = True
+        # 4. 严格检查视频ID是否已存在 (只要有一个素材用过，直接拦截)
+        used_overlap_ids = []
         for video_id in video_id_list:
-            if video_id not in exist_video_id_list:
-                all_exist = False
-                break
-        if all_exist:
-            detail_match_info[user_name] = "视频ID已存在于该用户列表"
+            if video_id in exist_video_id_list:
+                used_overlap_ids.append(video_id)
+
+        # 只要重合的素材ID数量大于0，就说明这个视频里混入了该账号发过的旧画面
+        if len(used_overlap_ids) > 0:
+            detail_match_info[user_name] = f"素材画面重复，包含已发过的ID: {used_overlap_ids}"
             continue
 
         # 5. 检查是否重复题材超过限制
@@ -913,7 +915,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'liuzhu', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'caizhu']
+    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'caizhu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
@@ -928,6 +930,7 @@ def send_good_plan(manager):
 
     for video_info in to_upload_video_list:
         if 'oinb' in str(video_info):
+            video_info['detail_match_info'] = "包含敏感词oinb，直接跳过"
             continue
 
         # if '毁号' in str(video_info):
