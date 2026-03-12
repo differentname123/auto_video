@@ -4,21 +4,15 @@ import time
 import hashlib
 import json
 import logging
-import re
 import threading  # <--- 新增：用于隔离事件循环
 from pathlib import Path
 from urllib import parse, request
-from urllib.parse import quote
-from curl_cffi import requests  # 注意：这里改用了 curl_cffi 的 requests
-
-from utils.taobao.pull_goods_web import AlimamaScraper
 
 BASE_DIR = r'W:\project\python_project\auto_video\utils\temp\goods'
 KEYWORD_HISTORY_FILE = os.path.join(BASE_DIR, 'keyword_history.json')
-KEYWORD_HISTORY_FILE_ALIMAMA = os.path.join(BASE_DIR,
-                                            'keyword_history_alimama.json')  # 新增：用于单独记录 fetch_alimama_data 拉取的关键词历史
 
-from utils.common_utils import read_json, download_cover_minimal, save_json, get_config
+# 移除了不需要的 get_config
+from utils.common_utils import read_json, download_cover_minimal, save_json
 
 # ================= 日志配置 =================
 logging.basicConfig(
@@ -142,173 +136,6 @@ def get_tbk_material(app_key, app_secret, adzone_id, q=None, material_id=80309, 
     return all_map_data[:desire_count]
 
 
-def fetch_alimama_data(search_query: str, cookie_string: str, pid: str = 'mm_328750149_3161250458_116238500456',
-                       target_num: int = 10):
-    """
-    模拟请求阿里妈妈商品搜索接口，并使用 curl_cffi 绕过底层 TLS 指纹检测。
-    """
-    # --- 1. 参数校验 ---
-    if "在此处粘贴你的完整Cookie字符串" in cookie_string or not cookie_string:
-        print("错误：请填入你自己的有效 Cookie！")
-        return []
-    if "mm_xxxx_xxxx_xxxx" in pid or not pid:
-        print("错误：请填入你自己的推广位 PID！")
-        return []
-
-    # --- 2. 从Cookie中动态提取 _tb_token_ ---
-    match = re.search(r'_tb_token_\s*=\s*([^;]+)', cookie_string)
-    if not match:
-        print("错误：无法从你的Cookie字符串中找到 '_tb_token_'。请检查Cookie是否完整且正确。")
-        return []
-    tb_token = match.group(1).strip()
-
-    # --- 3. 准备固定的Headers和URL ---
-    url = "https://pub.alimama.com/openapi/param2/1/gateway.unionpub/skyleap.distribution.site.json"
-
-    # 严格对齐你抓包提供的 Firefox Header，补齐缺失的 bx-v 等防爬字段
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
-        "Accept": "*/*",
-        "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
-        "Referer": f"https://pub.alimama.com/portal/v2/pages/promo/goods/index.htm?pageNum=1&pageSize=30&filters=%257B%257D&fn=search&q={quote(search_query)}&sort=default&selected=%257B%257D&floorId=80674",
-        "X-Requested-With": "XMLHttpRequest",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "bx-v": "2.5.11",  # 核心防爬字段，必须保留
-        "Origin": "https://pub.alimama.com",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-        "Connection": "keep-alive",
-        "Cookie": cookie_string
-    }
-
-    # --- 4. 循环获取数据 ---
-    all_products = []
-    current_page = 0  # 阿里妈妈的部分接口分页是从0或1开始，请根据实际情况微调
-
-    while len(all_products) < target_num:
-        print(f"正在尝试获取第 {current_page + 1} 页的数据...")
-
-        # 准备每一页的动态Payload
-        extras_dict = {
-            "sceneCode": "pub_selection_navigation",
-            "floorId": 80674,
-            "pageNum": current_page,
-            "pageSize": "30",  # 对齐抓包数据中的30
-            "pid": pid,
-            "variableMap": {
-                "fn": "search",
-                "resultCanBeEmpty": True,
-                "q": search_query,
-                "curSelected": {},
-                "pubFloorId": 80674,
-                "sort": "default",
-                "tk_navigator": "true",
-                # 注意：union_lens 通常带有时间戳和页面追踪ID，硬编码可能导致后期被拦截
-                # 如果依然被拦截，可以尝试将此参数设为空字符串或移除该键值对
-                "union_lens": "b_pvid:a219t._portal_v2_pages_promo_goods_index_htm_1773193381602_8925081227083047_F7U3I",
-                "lensScene": "PUB",
-                "spmB": "_portal_v2_pages_promo_goods_index_htm"
-            }
-        }
-
-        payload = {
-            "t": int(time.time() * 1000),
-            "_tb_token_": tb_token,
-            "siteCode": "selectionPlaza_site",
-            "appCode": "pub",
-            "extras": json.dumps(extras_dict, separators=(',', ':'))
-        }
-
-        try:
-            # 核心替换：使用 impersonate 参数伪装为真实的 Firefox 浏览器指纹
-            response = requests.post(
-                url,
-                headers=headers,
-                data=payload,
-                impersonate="chrome120",  # curl_cffi 在 chrome 模拟上最稳定，实测可兼容大部分防爬
-                timeout=15
-            )
-
-            # 如果 HTTP 状态码不是 200，抛出异常
-            response.raise_for_status()
-            result_json = response.json()
-
-            # 检查阿里妈妈自定义的业务错误码 (成功通常是 resultCode 200 或不存在 ret 报错)
-            if 'ret' in result_json and 'FAIL_SYS_USER_VALIDATE' in str(result_json['ret']):
-                print(f"请求被风控拦截 (滑块验证)：\n{result_json}")
-                print("\n-> 请前往浏览器手动滑块验证后，获取最新的 Cookie 重试。")
-                break
-
-            if str(result_json.get('resultCode', 200)) == '200' or 'data' in result_json:
-                # 兼容不同的数据返回结构
-                site_data = result_json.get('data', {}).get('siteData', {})
-                resultList = site_data.get('resultList', []) if isinstance(site_data, dict) else []
-
-                if not resultList:
-                    print("API返回数据为空，已获取所有商品或无对应数据，停止翻页。")
-                    break
-
-                # ==== 新增：字段对齐逻辑 ====
-                extracted_list = []
-                for item in resultList:
-                    # 处理图片URL缺少 https: 的情况
-                    pict_url = item.get("pic", "")
-                    if pict_url and pict_url.startswith("//"):
-                        pict_url = "https:" + pict_url
-
-                    # 提取推广链接
-                    click_url = item.get("udf_temp_store", {}).get("clickUrl", "")
-                    if not click_url:
-                        click_url = item.get("url", "")
-                    if click_url and click_url.startswith("//"):
-                        click_url = "https:" + click_url
-
-                    extracted_item = {
-                        "item_id": item.get("outputMktId", ""),
-                        "item_name": item.get("itemName", ""),
-                        "brand": item.get("brandName", ""),  # 原始数据中无直接体现品牌名，给默认值容错
-                        "pict_url": pict_url,
-                        "category_name": item.get("categoryName", ""),
-                        "level_one_category_name": item.get("levelOneCategoryName", ""),
-                        "shop_title": item.get("shopTitle", ""),
-                        "short_title": item.get("shortTitle", ""),
-                        "original_price": item.get("reservePrice", ""),
-                        # 优先使用联盟到手价，其次是券后价/折扣价
-                        "final_price": item.get("unionPromotionPrice",
-                                                item.get("promotionPrice", item.get("zkFinalPrice", ""))),
-                        "commission_rate": item.get("tkRate", ""),
-                        "commission_amount": item.get("unionCommissionAmount", item.get("tkCommissionAmount", "")),
-                        "click_url": click_url,
-                        # "raw_data": item
-                    }
-                    extracted_list.append(extracted_item)
-                # ============================
-
-                all_products.extend(extracted_list)
-                print(f"成功获取 {len(extracted_list)} 条商品。当前总数: {len(all_products)} / {target_num}")
-
-                current_page += 1
-
-                # 增加随机延时，降低被风控的概率
-                time.sleep(2 + (time.time() % 2))
-
-            else:
-                error_message = result_json.get("info", {}).get("message", "未知错误")
-                print(f"请求失败，API返回信息：{error_message}\n完整返回：{result_json}")
-                if "login" in error_message.lower():
-                    print("提示：您的Cookie已过期。")
-                break
-
-        except Exception as e:
-            print(f"请求发生异常: {e}")
-            break
-
-    final_results = all_products[:target_num]
-    print(f"\n抓取完成！共返回 {len(final_results)} 条商品。")
-    return final_results
-
-
 def create_tbk_tpwd(app_key, app_secret, target_url):
     """根据目标链接生成淘口令"""
     url = "http://gw.api.taobao.com/router/rest"
@@ -378,7 +205,6 @@ def get_all_keywords(data):
             for product in recommendations:
                 keyword_set.update(product.get("keywords", []))
         except Exception as e:
-            # logger.warning(f"⚠️ 处理视频数据时发生异常，已跳过该条数据 | 详情: {e}")
             continue
     return list(keyword_set)
 
@@ -484,9 +310,9 @@ def gen_goods_score():
     processed_list = []
 
     # 初始化统计字典
-    stats = {"item_id为空": 0, "price>100": 0, "commission_amount<1": 0, "无￥符号": 0, "相似度去重": 0}
+    stats = {"item_id为空": 0, "price>100": 0, "commission_amount<1": 0, "无￥符号": 0, "click_url含http": 0, "相似度去重": 0}
     total_count = len(all_goods_info)
-
+    item_id_list = []
     for item_id, item in all_goods_info.items():
         # 3. 过滤掉 item_id 为空的数据
         if not item_id:
@@ -499,6 +325,7 @@ def gen_goods_score():
             commission_amount = float(item.get("commission_amount", 0))
             commission_rate = float(item.get("commission_rate", 0))
             tpwd = str(item.get("tpwd_simple", ""))
+            click_url = str(item.get("click_url", ""))
 
             # 1. 过滤 price > 100
             if price > 100:
@@ -511,6 +338,11 @@ def gen_goods_score():
             # 4. 过滤 tpwd_simple 不包含 '￥'
             if '￥' not in tpwd:
                 stats["无￥符号"] += 1
+                continue
+            # 新增：过滤 click_url 包含 'http'
+            if 'http' in click_url:
+                stats["click_url含http"] += 1
+                item_id_list.append(item_id)
                 continue
 
             # 5. 计算 doc_str
@@ -556,125 +388,10 @@ def gen_goods_score():
         print(f"{key}: {count} 个 ({percent:.2f}%)")
 
     print(
-        f"筛选并去重后还剩 {len(final_list)} 个商品。 总共去重掉 {total_count - len(final_list)} 个商品。 最开始的商品数量是 {total_count} 个。\n")
+        f"筛选并去重后还剩 {len(final_list)} 个商品。 总共去重掉 {total_count - len(final_list)} 个商品。 最开始的商品数量是 {total_count} 个。{item_id_list}\n")
 
     save_json(output_goods_info_file, output_goods_info)
     return final_list
-
-
-
-# ===================== 新增：Alimama 版本逻辑 =====================
-
-def update_all_goods_alimama():
-    """根据已有的关键词进行商品信息的拉取（基于 fetch_alimama_data，单独记录关键词）"""
-    all_goods_info_file = os.path.join(BASE_DIR, "all_goods_info.json")
-    scraper = AlimamaScraper()
-
-    # 注意此处使用新的 KEYWORD_HISTORY_FILE_ALIMAMA 以实现记录分离
-    all_goods_info = read_json(all_goods_info_file) if os.path.exists(all_goods_info_file) else {}
-    keyword_history_alimama = read_json(KEYWORD_HISTORY_FILE_ALIMAMA) if os.path.exists(
-        KEYWORD_HISTORY_FILE_ALIMAMA) else {}
-
-    json_file_list = []
-    for root, dirs, files in os.walk(BASE_DIR):
-        for file in files:
-            if file.endswith('.json') and 'replay_goods_inf' in file:
-                json_file_list.append(os.path.join(root, file))
-
-    keyword_set = set()
-    for json_file in json_file_list:
-        file_data = read_json(json_file)
-        if file_data:
-            keyword_set.update(get_all_keywords(file_data))
-
-    keyword_list = list(keyword_set)
-    logger.info(
-        f"[Alimama版] 扫描到 {len(json_file_list)} 个商品账号信息文件。提取到了 {len(keyword_list)} 个去重关键词")
-
-    # 获取默认 Cookie 列表并剔除空值
-    cookie_string_list = [get_config("zhu_taobao_cookie"), get_config("jie_taobao_cookie")]
-    cookie_string_list = [c for c in cookie_string_list if c]
-
-    if not cookie_string_list:
-        logger.error("❌ 没有读取到有效的淘宝 Cookie，请检查配置文件！")
-        return
-
-    current_time = time.time()
-    count = 0
-    fail_count = 0
-    cookie_idx = 0
-
-    for keyword in keyword_list:
-        count += 1
-        history_record = keyword_history_alimama.get(keyword)
-        if history_record:
-            last_pull_time = history_record.get("last_time", 0)
-            if current_time - last_pull_time < 7 * 24 * 3600:
-                time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_pull_time))
-                logger.info(
-                    f"⏭️ [Alimama版跳过] 关键词 '{keyword}' 最近拉取时间为 {time_str} (获取 {history_record.get('count', 0)} 个)，未满24小时。")
-                continue
-
-        start_time = time.time()
-
-        # 调用 Alimama 版专用方法拉取信息
-        goods_info_list = get_goods_info_alimama(keyword, scraper)
-
-        # 判断并处理连续拉取失败的逻辑
-        if not goods_info_list:
-            fail_count += 1
-            if fail_count >= 2:
-                logger.warning(f"⚠️ 相应 Cookie 连续两次拉取失败或无数据，主动等待 1 分钟以防风控...")
-                time.sleep(60)
-                fail_count = 0
-                # 自动切换至下一个可用的 Cookie
-                cookie_idx = (cookie_idx + 1) % len(cookie_string_list)
-                logger.info(f"🔄 已切换至后续的 Cookie 继续尝试。")
-        else:
-            fail_count = 0  # 成功一次即重置失败计数器
-
-        # 保存商品信息
-        for item in goods_info_list:
-            item_id = item.get("item_id")
-            all_goods_info[item_id] = item
-
-        save_json(all_goods_info_file, all_goods_info)
-
-        # 保存 Alimama 专版的关键词历史
-        keyword_history_alimama[keyword] = {
-            "last_time": time.time(),
-            "count": len(goods_info_list)
-        }
-        save_json(KEYWORD_HISTORY_FILE_ALIMAMA, keyword_history_alimama)
-        gen_goods_score()
-        logger.info(
-            f"✅ [Alimama版更新成功] 关键词 '{keyword}' 进度： {count}/{len(keyword_list)} 获取商品数量: {len(goods_info_list)} | 当前总商品数: {len(all_goods_info)} | 耗时: {time.time() - start_time:.2f} 秒 \n")
-
-
-def get_goods_info_alimama(key_word, scraper, desire_count=10):
-    """基于 fetch_alimama_data 的商品信息获取（包含了图片获取和口令生成）"""
-    APP_KEY = "35288611"
-    APP_SECRET = "3f861aab50cd92d29870becf34d6fc64"
-
-    logger.info(f"🔄 开始处理关键词 '{key_word}' (Alimama版) ...")
-
-    # 第一步：改用 fetch_alimama_data 搜索商品
-    result_list = scraper.fetch_data(key_word, target_num=desire_count)
-
-    if not result_list:
-        logger.warning(f"⚠️ 关键词 '{key_word}' 未获取到任何商品数据。")
-        return []
-
-    # 第二步：为获取到的商品追加生成淘口令并处理图片
-    result_list = batch_append_tpwd(APP_KEY, APP_SECRET, result_list)
-    result_list = update_image(result_list)
-
-    current_timestamp = int(time.time())
-    for item in result_list:
-        item["update_timestamp"] = current_timestamp
-
-    logger.info(f"🎯 关键词 '{key_word}' (Alimama版) 处理完毕，有效返回 {len(result_list)} 个商品。")
-    return result_list
 
 
 # ===================== 图片异步下载辅助 =====================
@@ -737,15 +454,8 @@ def update_image(result_list):
 
 # ================= 使用示例 =================
 if __name__ == "__main__":
-    # cookie_string = get_config("zhu_taobao_cookie")
-    # goods = fetch_alimama_data(search_query='可乐', cookie_string=get_config("zhu_taobao_cookie"))
-    # api_goods = get_goods_info("可乐")
+    # goods_info_list = get_goods_info('可乐')
 
-    # 执行原版更新
-    update_all_goods()
-    #
-    # # 执行新增的 Alimama 版本更新
-    # update_all_goods_alimama()
-    #
-    # gen_goods_score()
-    # print()
+    # update_all_goods()
+
+    gen_goods_score()

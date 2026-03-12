@@ -86,7 +86,7 @@ def gen_property_good(video_info: Dict[str, Any]) -> Any:
 
 def gen_final_property_good(video_info: Dict[str, Any], goods_info_list: List[Any]) -> Any:
     """根据视频信息和确切的商品信息生成相应的推荐评论"""
-    print("正在生成最终商品信息，视频信息")
+    print("正在生成最终商品信息，视频信息 商品数量:", len(goods_info_list))
     format_video_info = _extract_video_info_for_llm(video_info)
     format_video_info['goods'] = goods_info_list
     prompt_file = r'W:\project\python_project\auto_video\application\prompt\视频商品最终话术生成.txt'
@@ -464,7 +464,7 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
                 all_records[bvid]['property_goods'] = property_goods
                 save_json(all_records_file, all_records)
 
-                if 'final_goods' in record and record['final_goods'] and False:
+                if 'final_goods' in record and record['final_goods'] and True:
                     print(f"视频 {bvid} 已经有最终商品信息，跳过。")
                     final_goods = record['final_goods']
                 else:
@@ -481,10 +481,11 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
                         all_records[bvid]['upload_time'] = time.time()
                         all_records[bvid]['send_time'] = time.time()
                         all_records[bvid]['property_goods'] = []
-                        save_json(all_records_file, all_records)
 
                 # 增加处理的次数
                 record['process_count'] = record.get('process_count', 0) + 1
+                save_json(all_records_file, all_records)
+
         except Exception as e:
             print(f"处理视频 {bvid} 时出错: {e}")
             traceback.print_exc()
@@ -516,7 +517,7 @@ def run_once(username_list):
     query = {
         "status": "已投稿",
         "create_time": {
-            "$gt": datetime.datetime.now() - datetime.timedelta(hours=24 * 1)
+            "$gt": datetime.datetime.now() - datetime.timedelta(hours=24 * 2)
         }
     }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query)
@@ -524,7 +525,7 @@ def run_once(username_list):
     print(f"当前配置的用户列表:{len(username_list)}个 {username_list}")
     processes_count = 1
     print(f"--- {processes_count} 个进程启动，准备以并行进程处理用户 ---")
-
+    username_list = ['ningtao']
     with Pool(processes=processes_count) as pool:
         pool.starmap(
             process_user,
