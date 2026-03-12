@@ -101,6 +101,29 @@ def _is_rpid_in_comments(rpid: int, comments: List[Dict[str, Any]]) -> bool:
     return str(rpid) in str(comments)
 
 
+def extract_shill_comments(data):
+    """
+    根据 good_name 提取对应的 shill_comments 到最外层
+    """
+    target_good_name = data.get("good_name")
+    if not target_good_name:
+        return data
+
+    # 遍历 final_goods 中的 product_recommendations
+    final_goods = data.get("final_goods", {}).get("product_recommendations", [])
+
+    for item in final_goods:
+        # 使用 goodsName 进行匹配
+        if item.get("goodsName") == target_good_name:
+            # 抽取 shill_comments
+            shill_comments = item.get("shill_comments", [])
+            # 将其添加到最外层
+            data["shill_comments"] = shill_comments
+            break
+
+    return data
+
+
 def _process_single_video(bvid: str, record: Dict[str, Any], commenter_pool) -> Dict[str, Any]:
     """处理单个视频的回复逻辑，返回更新后的记录。"""
     updated_record = record.copy()
@@ -118,6 +141,10 @@ def _process_single_video(bvid: str, record: Dict[str, Any], commenter_pool) -> 
 
     exist_shill_comments = updated_record.get('exist_shill_comments', [])
     all_shill_comments = updated_record.get('shill_comments', [])
+    if 'shill_comments' not in updated_record:
+        updated_record = extract_shill_comments(updated_record)
+        all_shill_comments = updated_record.get('shill_comments', [])
+
     comments_to_send = [c for c in all_shill_comments if c not in exist_shill_comments]
 
     if not comments_to_send:
@@ -385,10 +412,10 @@ def send_good_comment(commenter: Any, bvid: str, final_goods_record: Dict[str, A
             final_goods_record['comment_body'] = comment_body
             print(
                 f"✅ 已成功发送并置顶商品评论: 视频 {bvid}，商品 {outer_id} “{rec.get('goodsName', '')}” comment_body: {comment_body}")
-            return rpid, rec.get('goodsName', '')
+            return rpid, rec.get('goodsName', ''), rec.get('shill_comments', [])
 
     print(f"⚠️ 未能发送或置顶任何商品评论到视频 {bvid}")
-    return None, None
+    return None, None, None
 
 
 def add_video_goods_comments(task_info_list, user_name='qiqi'):
@@ -477,11 +504,12 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
                     save_json(all_records_file, all_records)
 
                 if final_goods:
-                    rpid, good_name = send_good_comment(commenter, bvid, all_records[bvid])
+                    rpid, good_name, shill_comments = send_good_comment(commenter, bvid, all_records[bvid])
                     if rpid:
                         all_records[bvid]['status'] = 'success'
                         all_records[bvid]['rpid'] = rpid
                         all_records[bvid]['good_name'] = good_name
+                        all_records[bvid]['shill_comments'] = shill_comments
                         all_records[bvid]['upload_time'] = time.time()
                         all_records[bvid]['send_time'] = time.time()
                         all_records[bvid]['property_goods'] = []
