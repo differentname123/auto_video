@@ -357,6 +357,10 @@ def send_good_comment(commenter: Any, bvid: str, final_goods_record: Dict[str, A
 
         taokouling_30d = target_good.get('tpwd_simple', '').strip()
         kouling = taokouling_30d
+        # 去除kouling中的 ￥
+        if kouling:
+            kouling = kouling.replace('￥', '').strip()
+
         abd_image_path = target_good.get('local_image_path', '')
 
         if not kouling:
@@ -464,7 +468,7 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
                 all_records[bvid]['property_goods'] = property_goods
                 save_json(all_records_file, all_records)
 
-                if 'final_goods' in record and record['final_goods'] and True:
+                if 'final_goods' in record and record['final_goods'] and False:
                     print(f"视频 {bvid} 已经有最终商品信息，跳过。")
                     final_goods = record['final_goods']
                 else:
