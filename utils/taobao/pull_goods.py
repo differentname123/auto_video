@@ -201,7 +201,7 @@ def get_all_keywords(data):
     keyword_set = set()
     for video_data in data.values():
         try:
-            recommendations = video_data.get("final_goods", {}).get("product_recommendations", [])
+            recommendations = video_data.get('property_good_info', {}).get("product_recommendations", [])
             for product in recommendations:
                 keyword_set.update(product.get("keywords", []))
         except Exception as e:
@@ -456,6 +456,6 @@ def update_image(result_list):
 if __name__ == "__main__":
     # goods_info_list = get_goods_info('可乐')
 
-    # update_all_goods()
-
-    gen_goods_score()
+    update_all_goods()
+    #
+    # gen_goods_score()
