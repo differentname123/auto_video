@@ -36,12 +36,16 @@ def _extract_video_info_for_llm(video_info: Dict[str, Any]) -> Dict[str, Any]:
     comment_list = video_info.get('hudong_info', {}).get('comment_list', [])
 
     # 按照c[1]降序排序，截取前100
-    temp_comments = sorted([(c[0], c[1]) for c in comment_list], key=lambda x: x[1], reverse=True)[:100]
+    temp_comments = sorted(
+        [{"content": c[0], "likes": c[1]} for c in comment_list if c[0]],
+        key=lambda x: x["likes"],
+        reverse=True
+    )[:20]
 
     return {
-        'titles': video_info.get('upload_params', {}).get('title', ''),
+        'video_title': video_info.get('upload_params', {}).get('title', ''),
         'video_summary': draft_video_script_info.get('one_sentence_summary', ''),
-        'scene_summary_list': [scene.get('scene_summary', '') for scene in
+        'video_scenes': [scene.get('scene_summary', '') for scene in
                                draft_video_script_info.get('scene_sourcing_plan', [])],
         'comments': temp_comments,
     }
@@ -88,7 +92,16 @@ def gen_final_property_good(video_info: Dict[str, Any], goods_info_list: List[An
     """根据视频信息和确切的商品信息生成相应的推荐评论"""
     print("正在生成最终商品信息，视频信息 商品数量:", len(goods_info_list))
     format_video_info = _extract_video_info_for_llm(video_info)
-    format_video_info['goods'] = goods_info_list
+
+    target_key_list = ["category_name", "item_name", "item_id"]  # 你想要保留的字段名列表
+
+    # 使用列表推导式 + 字典推导式
+    filtered_goods_list = [
+        {key: item[key] for key in target_key_list if key in item}
+        for item in goods_info_list
+    ]
+
+    format_video_info['goods'] = filtered_goods_list
     prompt_file = r'W:\project\python_project\auto_video\application\prompt\视频商品最终话术生成.txt'
     # 修复Bug: 只返回对象本身，防止下游调用 .get() 崩溃
     return _call_gemini_with_retry(prompt_file, format_video_info)

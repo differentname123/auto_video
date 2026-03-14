@@ -126,7 +126,8 @@ def search_goods(keywords, model, collection, top_n=5):
                 all_results.append({
                     "id": item_id,
                     "metadata": results['metadatas'][0][i],
-                    "similarity": 1 - results['distances'][0][i]  # 余弦距离转相似度
+                    "similarity": 1 - results['distances'][0][i],  # 余弦距离转相似度
+                    "keyword": kw  # 记录当前匹配到的搜索词
                 })
 
     # 2. 按 item_id 智能去重：如果不同词搜出同一个商品，保留相似度得分最高的那次
@@ -139,10 +140,9 @@ def search_goods(keywords, model, collection, top_n=5):
             # 如果是新商品，或者当前相似度比记录在案的更高，则更新覆盖
             if product_id not in unique_products or item['similarity'] > unique_products[product_id].get(
                     'search_similarity', 0):
-                # 将相似度得分也塞进 metadata，方便前端展示或后续排序
+                # 将相似度得分和搜索词塞进 metadata，方便前端展示或后续排序
                 metadata['search_similarity'] = item['similarity']
-                # 新增搜索的词
-                metadata['matched_keyword'] = kw
+                metadata['search_keyword'] = item['keyword']
                 unique_products[product_id] = metadata
 
     # 3. 按相似度从高到低排序后返回
