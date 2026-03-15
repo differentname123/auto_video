@@ -621,7 +621,7 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         hot_topic_count += 1
 
     for user_name, detail_info in user_detail_upload_info.items():
-        if user_name in ['dan', 'nana', 'junda', 'jun'] and final_score < 10000:
+        if user_name in ['dan', 'nana', 'junda', 'jun', 'zhuyang'] and final_score < 5000:
             continue
 
         need_count = detail_info.get('need_count', 0)
@@ -915,7 +915,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'caizhu', 'xiaocai', 'ning']
+    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'xiaocai', 'ning', 'zhuyang', 'junda']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
 
