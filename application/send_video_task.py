@@ -621,9 +621,10 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         hot_topic_count += 1
 
     for user_name, detail_info in user_detail_upload_info.items():
-        if user_name in ['dan', 'nana', 'junda', 'jun', 'zhuyang'] and final_score < 5000:
+        if user_name in ['dan', 'nana', 'junda', 'jun'] and final_score < 5000:
             continue
-
+        if user_name in ['zhuyang'] and final_score < 1000:
+            continue
         need_count = detail_info.get('need_count', 0)
         if user_name in simple_need_process_users and need_count < 1:
             detail_match_info[user_name] = "简化用户且需求量不足"
