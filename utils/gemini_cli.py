@@ -11,6 +11,11 @@ from filelock import FileLock, Timeout
 # 1. 定义锁文件的数量和基础名称。
 MAX_CONCURRENT_TASKS = 10
 LOCK_FILE_TEMPLATE = os.path.join(os.path.dirname(__file__), "gemini.process.lock.{}")
+
+# --- 新增全局超时配置 ---
+TOTAL_MAX_TIME = 600  # 整个 ask_gemini 函数的绝对最大执行时间（秒），包含“排队等锁 + 执行命令”的总时间
+
+
 # --- 新增部分结束 ---
 
 def with_proxy(func):
@@ -31,6 +36,7 @@ def with_proxy(func):
 
     return wrapper
 
+
 @with_proxy
 def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     """
@@ -42,9 +48,18 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     """
     my_lock = None
 
+    # --- 新增：记录整个函数生命周期的起点时间 ---
+    func_start_time = time.time()
+
     # --- 并发控制部分 ---
     print(f"[进程 {os.getpid()}] 正在尝试获取文件锁许可...{model_name}")
     while my_lock is None:
+        # 新增：排队等锁时，检查整个函数的总时间是否已经耗尽
+        if time.time() - func_start_time > TOTAL_MAX_TIME:
+            error_msg = f"函数整体执行已达到最大限制（{TOTAL_MAX_TIME} 秒），在获取锁阶段被强制终止"
+            print(f"[进程 {os.getpid()}] {error_msg}")
+            raise TimeoutError(error_msg)
+
         for i in range(MAX_CONCURRENT_TASKS):
             try:
                 lock_path = LOCK_FILE_TEMPLATE.format(i)
@@ -62,6 +77,15 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     try:
         # vvvvvv 这里是函数核心逻辑 vvvvvv
         try:
+            # 新增：拿到锁后，计算留给真实业务逻辑的“剩余可用时间”
+            remaining_time = TOTAL_MAX_TIME - (time.time() - func_start_time)
+
+            # 如果排队等锁把时间都耗光了，直接不执行了
+            if remaining_time <= 0:
+                error_msg = f"获取锁后已无剩余时间 (总限制 {TOTAL_MAX_TIME} 秒已耗尽)，拒绝执行命令"
+                print(f"[进程 {os.getpid()}] {error_msg}")
+                raise TimeoutError(error_msg)
+
             with tempfile.TemporaryDirectory() as temp_dir:
                 npm_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'npm')
                 gemini_executable = os.path.join(npm_path, 'gemini.cmd' if os.name == 'nt' else 'gemini')
@@ -78,6 +102,7 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                     check=True,
                     encoding='utf-8',
                     cwd=temp_dir,
+                    timeout=remaining_time  # ←←← 核心修改：动态传入剩余时间，保证整个函数卡死也一定在总时间内被杀掉
                     # env=env  # ←←← 就是这一行
 
                 )
@@ -85,6 +110,14 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                 response_data = json.loads(result.stdout)
                 text_content = response_data.get('response')
                 return text_content.strip()
+
+        except subprocess.TimeoutExpired as e:
+            # 新增：捕获子进程执行的超时异常
+            print("=" * 20 + " gemini-cli 执行超时，已被系统强制终止 " + "=" * 20)
+            print(f"命令: {' '.join(e.cmd)}")
+            print(f"执行分配的剩余时间: {e.timeout:.2f} 秒已耗尽 (总限制 {TOTAL_MAX_TIME} 秒)")
+            print("=" * 70)
+            raise e
 
         except subprocess.CalledProcessError as e:
             # 当 gemini-cli 调用失败时，捕获异常并打印详细信息
@@ -104,15 +137,15 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
         # ^^^^^^ 核心逻辑结束 ^^^^^^
 
     finally:
-        # 无论函数成功还是异常退出，都必须释放锁
+        # 无论函数成功、超时还是异常退出，都必须释放锁
         if my_lock:
             my_lock.release()
-            print(f"[进程 {os.getpid()}] 执行完毕，已释放许可 ({my_lock.lock_file})。 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"[进程 {os.getpid()}] 执行完毕，已释放许可 ({my_lock.lock_file})。 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
 
 # --- 业务代码 (同样无需修改) ---
 if __name__ == "__main__":
-
     data = ask_gemini("你觉得我是干什么的，这次给你的完整提示词是什么，请完整的返回给我")
     print(data)
 
