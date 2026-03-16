@@ -237,36 +237,39 @@ def update_all_goods():
     current_time = time.time()
     count = 0
     for keyword in keyword_list:
-        count += 1
-        # 核心逻辑：检查是否在 24 小时内拉取过
-        history_record = keyword_history.get(keyword)
-        if history_record:
-            last_pull_time = history_record.get("last_time", 0)
-            if current_time - last_pull_time < 7 * 24 * 3600:
-                time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_pull_time))
-                logger.info(
-                    f"⏭️ [跳过] 关键词 '{keyword}' 最近拉取时间为 {time_str} (获取 {history_record.get('count', 0)} 个)，未满24小时。")
-                continue
+        try:
+            count += 1
+            # 核心逻辑：检查是否在 24 小时内拉取过
+            history_record = keyword_history.get(keyword)
+            if history_record:
+                last_pull_time = history_record.get("last_time", 0)
+                if current_time - last_pull_time < 7 * 24 * 3600:
+                    time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(last_pull_time))
+                    logger.info(
+                        f"⏭️ [跳过] 关键词 '{keyword}' 最近拉取时间为 {time_str} (获取 {history_record.get('count', 0)} 个)，未满24小时。")
+                    continue
 
-        start_time = time.time()
-        goods_info_list = get_goods_info(keyword)
+            start_time = time.time()
+            goods_info_list = get_goods_info(keyword)
 
-        for item in goods_info_list:
-            item_id = item.get("item_id")
-            all_goods_info[item_id] = item
+            for item in goods_info_list:
+                item_id = item.get("item_id")
+                all_goods_info[item_id] = item
 
-        # 更新全局缓存和记录
-        save_json(all_goods_info_file, all_goods_info)
+            # 更新全局缓存和记录
+            save_json(all_goods_info_file, all_goods_info)
 
-        keyword_history[keyword] = {
-            "last_time": time.time(),
-            "count": len(goods_info_list)
-        }
-        save_json(KEYWORD_HISTORY_FILE, keyword_history)
-        gen_goods_score()
-        logger.info(
-            f"✅ [更新成功] 关键词 '{keyword}' 进度： {count}/{len(keyword_list)} 获取商品数量: {len(goods_info_list)} | 当前总商品数: {len(all_goods_info)} | 耗时: {time.time() - start_time:.2f} 秒 \n")
-
+            keyword_history[keyword] = {
+                "last_time": time.time(),
+                "count": len(goods_info_list)
+            }
+            save_json(KEYWORD_HISTORY_FILE, keyword_history)
+            gen_goods_score()
+            logger.info(
+                f"✅ [更新成功] 关键词 '{keyword}' 进度： {count}/{len(keyword_list)} 获取商品数量: {len(goods_info_list)} | 当前总商品数: {len(all_goods_info)} | 耗时: {time.time() - start_time:.2f} 秒 \n")
+        except Exception as e:
+            logger.error(f"❌ [更新失败] 关键词 '{keyword}' 进度： {count}/{len(keyword_list)} | 错误详情: {e}")
+            continue
 
 def get_goods_info(key_word, desire_count=100):
     """根据关键词拉取商品信息"""
