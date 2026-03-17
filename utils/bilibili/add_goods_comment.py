@@ -8,6 +8,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 from multiprocessing import Pool
 
+from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_comment import get_bilibili_comments
 from utils.common_utils import read_json, init_config, save_json, string_to_object, read_file_to_str
@@ -53,7 +54,7 @@ def _extract_video_info_for_llm(video_info: Dict[str, Any]) -> Dict[str, Any]:
 
 def _call_gemini_with_retry(prompt_file_path: str, format_video_info: Dict[str, Any]) -> Any:
     """统一的 LLM 调用和重试逻辑"""
-    prompt = f"{read_file_to_str(prompt_file_path)}\n输入信息如下:\n{format_video_info}"
+    prompt = f"{read_file_to_str(prompt_file_path)}\n{format_video_info}"
     model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-flash-lite-latest"]
 
     retry_delay = 10
@@ -63,7 +64,10 @@ def _call_gemini_with_retry(prompt_file_path: str, format_video_info: Dict[str, 
     for attempt in range(1, max_retries + 1):
         model_name = random.choice(model_name_list)
         try:
-            gen_error_info, raw = generate_gemini_content_managed(prompt, model_name='gemini-3.0-flash')
+            # gen_error_info, raw = generate_gemini_content_managed(prompt, model_name='gemini-3.0-flash')
+            gen_error_info, raw = generate_gemini_content_playwright(prompt, file_path=None,
+                                                                              model_name="gemini-3-flash-preview")
+
             return string_to_object(raw)
         except Exception as e:
             print(f"[ERROR] 调用大模型失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
@@ -104,7 +108,7 @@ def gen_final_property_good(video_info: Dict[str, Any], goods_info_list: List[An
     format_video_info['goods'] = filtered_goods_list
     prompt_file = r'W:\project\python_project\auto_video\application\prompt\视频商品最终话术生成.txt'
     # 修复Bug: 只返回对象本身，防止下游调用 .get() 崩溃
-    return _call_gemini_with_retry(prompt_file, format_video_info)
+    return _call_gemini_with_retry(prompt_file, format_video_info), format_video_info
 
 
 def _is_rpid_in_comments(rpid: int, comments: List[Dict[str, Any]]) -> bool:
@@ -454,14 +458,26 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
         bvid = rec.get('bvid')
         if not bvid:
             continue
-        if rec.get('status') == 'success' and rec.get('rpid'):
-            success_bvids.append(bvid)
-            continue
-        try:
-            if int(rec.get('process_count', 0)) > 1:
+
+        # 修改点：只有当 final_goods 存在且有值时，才进入后续成功状态的判断
+        if rec.get('final_goods'):
+            if rec.get('status') == 'success' and rec.get('rpid'):
                 success_bvids.append(bvid)
-        except (TypeError, ValueError):
-            pass
+                continue
+            try:
+                if int(rec.get('process_count', 0)) > 1:
+                    success_bvids.append(bvid)
+            except (TypeError, ValueError):
+                pass
+
+        # if rec.get('status') == 'success' and rec.get('rpid'):
+        #     success_bvids.append(bvid)
+        #     continue
+        # try:
+        #     if int(rec.get('process_count', 0)) > 1:
+        #         success_bvids.append(bvid)
+        # except (TypeError, ValueError):
+        #     pass
 
     processed_bvids = set(success_bvids)
     print(f"已处理 {len(all_records)} 条记录，其中 {len(success_bvids)} 条成功。")
@@ -512,20 +528,21 @@ def add_video_goods_comments(task_info_list, user_name='qiqi'):
                     print(f"视频 {bvid} 已经有最终商品信息，跳过。")
                     final_goods = record['final_goods']
                 else:
-                    final_goods = gen_final_property_good(video, property_goods)
+                    final_goods, format_video_info = gen_final_property_good(video, property_goods)
                     all_records[bvid]['final_goods'] = final_goods
+                    all_records[bvid]['format_video_info'] = format_video_info
                     save_json(all_records_file, all_records)
 
-                if final_goods:
-                    rpid, good_name, shill_comments = send_good_comment(commenter, bvid, all_records[bvid])
-                    if rpid:
-                        all_records[bvid]['status'] = 'success'
-                        all_records[bvid]['rpid'] = rpid
-                        all_records[bvid]['good_name'] = good_name
-                        all_records[bvid]['shill_comments'] = shill_comments
-                        all_records[bvid]['upload_time'] = time.time()
-                        all_records[bvid]['send_time'] = time.time()
-                        all_records[bvid]['property_goods'] = []
+                # if final_goods:
+                #     rpid, good_name, shill_comments = send_good_comment(commenter, bvid, all_records[bvid])
+                #     if rpid:
+                #         all_records[bvid]['status'] = 'success'
+                #         all_records[bvid]['rpid'] = rpid
+                #         all_records[bvid]['good_name'] = good_name
+                #         all_records[bvid]['shill_comments'] = shill_comments
+                #         all_records[bvid]['upload_time'] = time.time()
+                #         all_records[bvid]['send_time'] = time.time()
+                #         all_records[bvid]['property_goods'] = []
 
                 # 增加处理的次数
                 record['process_count'] = record.get('process_count', 0) + 1
@@ -548,7 +565,7 @@ def process_user(user, all_task):
 
         # 使用了重命名后的函数
         add_video_goods_comments(task_info_list, user_name=user)
-        process_video_replies(user)
+        # process_video_replies(user)
 
         print(f"[{time.strftime('%X')}] 子进程完成用户: {user} 处理，耗时: {time.time() - start_time:.2f} 秒")
     except Exception as e:
@@ -570,7 +587,7 @@ def run_once(username_list):
     print(f"当前配置的用户列表:{len(username_list)}个 {username_list}")
     processes_count = 1
     print(f"--- {processes_count} 个进程启动，准备以并行进程处理用户 ---")
-    username_list = ['ningtao']
+    # username_list = ['ningtao']
     with Pool(processes=processes_count) as pool:
         pool.starmap(
             process_user,
