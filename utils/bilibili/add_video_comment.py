@@ -6,6 +6,7 @@ import traceback
 from typing import Any, Dict, List, Optional
 from multiprocessing import Pool
 
+from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.comment import BilibiliCommenter
 from utils.bilibili.get_comment import get_bilibili_comments
 from utils.common_utils import read_json, init_config, save_json, string_to_object, read_file_to_str
@@ -71,7 +72,10 @@ def gen_final_property_replay(video_info, all_replay_info):
 
         model_name = random.choice(model_name_list)
         try:
-            raw = get_llm_content(prompt=prompt, model_name=model_name)
+            # raw = get_llm_content(prompt=prompt, model_name=model_name)
+            gen_error_info, raw = generate_gemini_content_playwright(prompt, file_path=None,
+                                                                              model_name="gemini-3-flash-preview")
+
             return string_to_object(raw)
         except Exception as e:
             print(f"[ERROR] 生成视频信息失败 (尝试 {attempt}/{max_retries}): {e} {raw}")
@@ -402,15 +406,18 @@ def run_once(username_list):
         }
     }
     all_task = manager.find_by_custom_query(manager.tasks_collection, query)
+    # 获取all_task所有的userName字段，去重后形成一个列表
+    all_username_list = list(set(task.get('userName') for task in all_task if task.get('userName')))
 
-    print(f"当前配置的用户列表:{len(username_list)}个 {username_list}")
+
+    print(f"当前配置的用户列表:{len(username_list)}{len(all_username_list)} 个 {username_list} {all_username_list}")
     processes_count = 2
     print(f"--- {processes_count} 个进程启动，准备以并行进程处理用户 ---")
 
     with Pool(processes=processes_count) as pool:
         pool.starmap(
             process_user,
-            [(user, all_task) for user in username_list]
+            [(user, all_task) for user in all_username_list]
         )
 
     print("--- 所有用户处理完成 ---")

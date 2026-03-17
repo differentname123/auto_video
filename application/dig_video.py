@@ -391,9 +391,8 @@ def gen_hot_video_llm(video_info, hot_video=None):
     for attempt in range(1, max_retries + 1):
         try:
             print(f"尝试第 {attempt} 次生成视频内容计划 素材长度为{len(video_info)} {PROMPT_FILE_PATH}...")
-            # raw = ask_gemini(full_prompt, model_name=model_name)
-            gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None,
-                                                                              model_name=model_name)
+            raw = ask_gemini(full_prompt, model_name=model_name)
+            # gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None, model_name=model_name)
 
             # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
             video_content_plans = string_to_object(raw)
@@ -677,16 +676,15 @@ def gen_true_tags_llm(tags_list):
     base_prompt = read_file_to_str(PROMPT_FILE_PATH)
 
     full_prompt = f"{base_prompt}\n{tags_list}"
-    model_name = "gemini-2.5-flash"
-    # model_name = "gemini-3-pro-preview"
+    # model_name = "gemini-2.5-flash"
+    model_name = "gemini-3-pro-preview"
     max_retries = 3
     filter_tag_list = []
     for attempt in range(1, max_retries + 1):
         try:
             print(f"尝试第 {attempt} 次过滤标签 标签列表长度为{len(tags_list)} {PROMPT_FILE_PATH}...")
-            # raw = ask_gemini(full_prompt, model_name=model_name)
-            gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None,
-                                                                              model_name=model_name)
+            raw = ask_gemini(full_prompt, model_name=model_name)
+            # gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None, model_name=model_name)
             # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
             filter_tag_info = string_to_object(raw)
             filter_tag_list = filter_tag_info.get('filtered_tags', [])
