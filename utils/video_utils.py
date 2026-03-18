@@ -218,12 +218,15 @@ def find_motion_bbox(video_path, start_frame=60, end_frame_offset=60, num_sample
     # --- 参数有效性检查 ---
     if start_frame < 0 or start_frame >= total_frames:
         print(f"错误: 起始帧 {start_frame} 超出范围 (0-{total_frames - 1})。", file=sys.stderr)
+        cap.release()
         return None
     if actual_end_frame <= start_frame:
         print(f"错误: 计算出的结束帧({actual_end_frame})必须大于起始帧({start_frame})。", file=sys.stderr)
+        cap.release()
         return None
     if num_samples < 2:
         print(f"错误: 采样帧数 {num_samples} 必须至少为2。", file=sys.stderr)
+        cap.release()
         return None
 
     # --- 新逻辑: 使用 linspace 生成均匀分布的采样帧索引 ---
@@ -285,6 +288,7 @@ def find_motion_bbox(video_path, start_frame=60, end_frame_offset=60, num_sample
     if y + h > frame_height: h = frame_height - y
 
     return ((x, y, w, h), frame_width, frame_height)
+
 
 def crop_video(input_path, output_path, bbox, crf=23):
     """
@@ -3391,11 +3395,12 @@ def add_bgm_to_video(video_path: str, bgm_path: str, output_path: str, volume_pe
     print("--------------------------------------------------")
 
     try:
-        # 使用 Popen 以便实时看到 ffmpeg 的输出，对于长时间任务更友好
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
-        for line in process.stdout:
-            # 你可以在这里解析ffmpeg的进度，但为了简单起见，我们只打印它
-            print(line.strip())
+        # ✅ 改为上下文管理器形式
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              universal_newlines=True) as process:
+            for line in process.stdout:
+                print(line.strip())
+            process.wait()
 
         process.wait()  # 等待命令执行完成
 

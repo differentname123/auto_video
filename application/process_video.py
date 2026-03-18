@@ -195,6 +195,7 @@ def generate_blur_segments(raw_data: list, video_w: int, video_h: int, duration)
 
     return formatted_segments
 
+
 @safe_process_limit(limit=1, name="gen_blur_video_path")
 def gen_blur_video_path(video_path, output_path, watermark_list):
     """
@@ -715,19 +716,32 @@ def _task_process_worker(task_queue, running_task_ids):
     修改说明：
     1. 增加了 running_task_ids 参数
     2. 在任务结束（成功或彻底失败）时，从 running_task_ids 移除对应的 video_id
+    3. [新增] 引入内存高水位线熔断机制（主动释放内存）
     """
     # 在进程内部初始化数据库连接
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
 
+    # 设定当前 Worker 进程最多处理几个任务后重启
+    MAX_TASKS_PER_WORKER = 5
+    processed_count = 0
+
     # print(f"[消费者-{os.getpid()}] 启动...")
 
     while True:
         try:
+            # 放在循环头部判断，确保上一个任务完全善后（无论成功还是通过 continue 重试）后再退出进程
+            if processed_count >= MAX_TASKS_PER_WORKER:
+                print(f"♻️ [消费者-{os.getpid()}] 累计处理了 {processed_count} 个任务，触发内存释放机制，主动退出。")
+                break
+
             start_time = time.time()
             task_info = task_queue.get()
             if task_info is None:
                 break
+
+            # 只要拿到了任务（哪怕后面报错），我们都算进程跑了一次重度负载，增加计数
+            processed_count += 1
 
             # 获取当前任务关联的视频ID列表，用于后续解锁
             current_video_ids = task_info.get('video_id_list', [])
@@ -938,6 +952,7 @@ def update_narration_key(data_list):
         # 发生异常，直接返回传入的原始列表
         return data_list
 
+
 def recover_task(manager):
     query_2 = {
         "create_time": {
@@ -969,7 +984,7 @@ def recover_task(manager):
   }
 }
 
-    
+
     """
 
     all_task = manager.find_by_custom_query(manager.tasks_collection, query_2)
@@ -1015,5 +1030,5 @@ if __name__ == '__main__':
         upload_info = task_info.get('upload_info', {})
         if '旭旭宝宝' in str(upload_info):
             for value in upload_info:
-               value['category_id'] = 1008
+                value['category_id'] = 1008
             manager.upsert_tasks([task_info])
