@@ -924,13 +924,16 @@ def fun(manager):
             #     continue
 
             if NEED_UPDATE_SIGN:
-                detail_config = config_map[uid]
-                name = detail_config.get('name', key)
+                try:
+                    detail_config = config_map[uid]
+                    name = detail_config.get('name', key)
 
-                signature = random.choice(signatures)
-                cookie = detail_config.get('total_cookie', '')
-                result = update_bili_user_sign(cookie, signature)
-                print(f"更新用户签名结果: {result} {name}")
+                    signature = random.choice(signatures)
+                    cookie = detail_config.get('total_cookie', '')
+                    result = update_bili_user_sign(cookie, signature)
+                    print(f"更新用户签名结果: {result} {name}")
+                except Exception as e:
+                    print(f"更新用户签名失败: {e} {name}")
 
             logging.info(f"  > 正在获取UP主(UID: {uid} {name})的最新动态...")
             temp_found_videos = commenter.get_user_videos(mid=uid, desired_count=40)
@@ -985,9 +988,9 @@ def fun(manager):
 
 
 if __name__ == '__main__':
-    config_map = init_config()
-    mid_list = config_map.keys()
-    block_all_author(mid_list, action_type=6)
+    # config_map = init_config()
+    # mid_list = config_map.keys()
+    # block_all_author(mid_list, action_type=6)
 
     # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
 
