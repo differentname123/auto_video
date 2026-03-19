@@ -928,6 +928,37 @@ def get_good_video(video_type=None):
         "trending": trending_videos,
         "high_score": high_score_videos
     }
+def get_user_video_count_lightweight(mid: int, proxies: dict = None) -> int:
+    """
+    新增函数：轻量级前置探测 - 获取用户公开视频总数，极低概率触发 412。
+    修改点：直接写死抓包里的真实 Header 和 Cookie，无需依赖 profile 参数解耦加速。
+    返回: 视频总数 (int)。如果失败返回 -1
+    """
+    url = "https://api.bilibili.com/x/space/navnum"
+    params = {
+        "mid": mid,
+        "web_location": "333.1387"
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Origin": "https://space.bilibili.com",
+        "Referer": f"https://space.bilibili.com/{mid}",
+        "Cookie": "buvid3=3CEF1632-54DE-4D35-CE80-C378FB51067101804infoc; b_nut=1773895601; _uuid=3ED29ECE-C1101-4319-61031-104A4C11C37F704011infoc; home_feed_column=5; buvid_fp=723558e46b5a5d0b02b0f5bb22db0895; browser_resolution=1862-925; buvid4=0CF18BA3-8AE3-F557-86FB-7E80703A20F102641-026031912-XJY3ejH5lbSGGSHm/4GSTA%3D%3D; sid=4trggqol; CURRENT_QUALITY=0; rpdid=|(k))kmuuu)k0J\'u~~J)mlY|); bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQxNTQ4MTIsImlhdCI6MTc3Mzg5NTU1MiwicGx0IjotMX0.hq396y0roK3Z7pEMeG9oHbEFy0Cnsj6iVoXXTetICBI; bili_ticket_expires=1774154752; CURRENT_FNVAL=2000; b_lsid=3F555719_19D047835DD"
+    }
+
+    try:
+        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") == 0:
+            return data.get("data", {}).get("video", -1)
+        else:
+            return -1
+    except Exception:
+        return -1
 
 
 COOLDOWN_SECONDS = 4 * 3600
