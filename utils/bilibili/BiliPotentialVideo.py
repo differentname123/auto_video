@@ -15,6 +15,7 @@ from utils.bilibili.bili_utils import fetch_from_search
 from utils.bilibili.get_bilibili_real_profile import get_bilibili_fresh_profile
 from utils.common_utils import read_json, save_json, time_to_ms, read_file_to_str, string_to_object
 from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
+from utils.proxy_utils import get_proxy
 
 # === 优化：提取公共文件路径配置 ===
 ALL_VIDEO_FILE = r'W:\project\python_project\auto_video\config\all_bili_video.json'
@@ -171,10 +172,17 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
     if use_proxy and proxies is None:
         proxies = random.choice([
-            {"http": "http://127.0.0.1:7890", "https": "http://127.0.0.1:7890"},
-            {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"},
-            None
-        ])
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754", "https": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114", "https": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540", "https": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014", "https": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543", "https": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462", "https": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641", "https": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837", "https": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611", "https": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611"},
+    {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185", "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
+])
 
     # 随机抽取一个身份档案进行请求伪装
     # 获取随机的index 通过index获取profile
@@ -194,7 +202,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         return ''.join([orig[i] for i in mixin_key_enc_tab])[:32]
 
     def get_wbi_keys() -> tuple:
-        resp = session.get("https://api.bilibili.com/x/web-interface/nav", proxies=proxies, timeout=5)
+        resp = session.get("https://api.bilibili.com/x/web-interface/nav", proxies=proxies, timeout=30)
         resp.raise_for_status()
         wbi_img = resp.json().get('data', {}).get('wbi_img', {})
         return wbi_img.get('img_url', '').rsplit('/', 1)[1].split('.')[0], \
@@ -236,7 +244,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
         try:
             url = "https://api.bilibili.com/x/space/wbi/arc/search"
-            response = session.get(url, params=signed_params, proxies=proxies, timeout=10)
+            response = session.get(url, params=signed_params, proxies=proxies, timeout=30)
             response.raise_for_status()
             result = response.json()
 
@@ -346,7 +354,7 @@ def get_user_video_count_lightweight(mid: int, proxies: dict = None) -> int:
     }
 
     try:
-        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=5)
+        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         if data.get("code") == 0:
@@ -391,7 +399,7 @@ def check_user_need_heavy_request(uid, exist_video_info, max_hour, new_profile_l
     return False, -1, light_status, current_video_count, random_index
 
 
-def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None):
+def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None, proxies_list=None):
     """
     修改点：引入外置的判定逻辑，让这部分核心主流程更加直观，只处理真正需要拉取的用户。
     并将最终使用的 proxy 继续透传回调度器。
@@ -415,10 +423,12 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
             return 2, random_index, light_status, None
         else:  # 时间冷却跳过 (skip_code == 0)
             return 0, -1, 0, None
-
+    proxies = None
+    if proxies_list:
+        proxies = random.choice(proxies_list)
     # ==== 3. 真正需要拉取的用户进入这里 ====
     videos, used_index, used_proxy = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True,
-                                                new_profile_list=new_profile_list)
+                                                new_profile_list=new_profile_list, proxies=proxies)
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -457,6 +467,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
+    proxies_list = get_proxy()
     for attempt in range(1, max_retries + 1):
         start_time = time.time()
         success_count = 0
@@ -482,7 +493,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_mid = {
-                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list): mid
+                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list, proxies_list): mid
                 for mid in all_mid_list
             }
 
@@ -703,7 +714,7 @@ def get_all_user_video_info():
     print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
     all_video_info = load_pure_video_info()
 
-    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=1000)
+    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=20, save_interval=1000)
 
 
 def gen_uid_type_llm(uid_info_list):
@@ -924,7 +935,7 @@ def update_good_user_video():
     if not (5 <= datetime.now().hour < 24):
         max_hour = 2
 
-    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000,
+    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=20, save_interval=1000,
                                               max_hour=max_hour)
 
     return is_finish
@@ -1002,25 +1013,25 @@ def run_extended_tasks():
 
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
-    is_finish = update_good_user_video()
-    #
-    # while True:
-    #     try:
-    #         is_finish = update_good_user_video()
-    #         counter += 1
-    #         finish_streak = (finish_streak + 1) if is_finish else 0
-    #
-    #         threshold_met = (counter >= 100 or finish_streak >= 20)
-    #         time_met = (time.time() - last_run_time >= COOLDOWN_SECONDS)
-    #
-    #         if threshold_met and time_met:
-    #             run_extended_tasks()
-    #             counter, finish_streak, last_run_time = 0, 0, time.time()
-    #         elif threshold_met:
-    #             print(f"阈值已达，但冷却中...剩余 {(COOLDOWN_SECONDS - (time.time() - last_run_time)) / 60:.1f} 分钟")
-    #
-    #     except Exception as e:
-    #         traceback.print_exc()
-    #
-    #     print(f"Wait 30s.. Counter:{counter} Streak:{finish_streak}")
-    #     time.sleep(INTERVAL_SLEEP)
+    # is_finish = update_good_user_video()
+
+    while True:
+        try:
+            is_finish = update_good_user_video()
+            counter += 1
+            finish_streak = (finish_streak + 1) if is_finish else 0
+
+            threshold_met = (counter >= 100 or finish_streak >= 20)
+            time_met = (time.time() - last_run_time >= COOLDOWN_SECONDS)
+
+            if threshold_met and time_met:
+                run_extended_tasks()
+                counter, finish_streak, last_run_time = 0, 0, time.time()
+            elif threshold_met:
+                print(f"阈值已达，但冷却中...剩余 {(COOLDOWN_SECONDS - (time.time() - last_run_time)) / 60:.1f} 分钟")
+
+        except Exception as e:
+            traceback.print_exc()
+
+        print(f"Wait 30s.. Counter:{counter} Streak:{finish_streak}")
+        time.sleep(INTERVAL_SLEEP)
