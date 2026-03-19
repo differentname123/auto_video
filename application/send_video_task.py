@@ -927,11 +927,15 @@ def send_good_plan(manager):
     used_video_list = []
     final_video_list = []
 
-
-
+    # 1. 定义敏感词列表
+    sensitive_words = ['doinb', 'xdd']
+    sensitive_words_lower = [word.lower() for word in sensitive_words]
     for video_info in to_upload_video_list:
-        if 'oinb' in str(video_info):
-            video_info['detail_match_info'] = "包含敏感词oinb，直接跳过"
+        video_str_lower = str(video_info).lower()
+        matched_word = next((word for word in sensitive_words_lower if word in video_str_lower), None)
+        if matched_word:
+            # 将匹配到的敏感词动态写入提示信息中
+            video_info['detail_match_info'] = f"包含敏感词 '{matched_word}'，直接跳过"
             continue
 
         # if '毁号' in str(video_info):

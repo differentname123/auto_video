@@ -158,13 +158,14 @@ BASE_PROFILES = [
 
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
-                           use_proxy: bool = False, proxies: dict = None, new_profile_list=None) -> tuple: # 修改点：改变了返回提示符为 tuple
+                           use_proxy: bool = False, proxies: dict = None,
+                           new_profile_list=None) -> tuple:
     """
     独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
+    修改点：增加返回使用的 proxies 字典，方便调用层进行代理质量统计。
     """
 
     # 【核心优化】：身份池。将配套的 UA、Headers、Cookie 和 显卡指纹强绑定
-    # 警告：高并发时，请务必将 Profile 2 和 3 中的 Cookie 替换为您从无痕浏览器中抓取的真实有效 Cookie
     if new_profile_list:
         PROFILES = new_profile_list
 
@@ -213,22 +214,18 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
         params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
         return params
 
-    # print(f"准备查询用户 mid={mid} 的视频，目标数量: {desired_count}... proxy: {use_proxy}")
-
     try:
         img_key, sub_key = get_wbi_keys()
     except Exception as e:
         print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e}")
-        return [], random_index  # 修改点：异常直接返回元组，包含空列表和生成的 index
+        return [], random_index, proxies  # 修改点：将 proxies 随错误一起返回
 
     collected_videos = []
     current_page = 1
     page_size = 40
 
     while len(collected_videos) < desired_count:
-        # print(f"正在获取第 {current_page} 页数据...")
-
-        # 将动态参数与当前 profile 绑定的显卡指纹参数合并 (使用 ** 字典解包，使代码极其简洁)
+        # 将动态参数与当前 profile 绑定的显卡指纹参数合并
         unsigned_params = {
             'pn': current_page, 'ps': page_size, 'tid': 0, 'special_type': '',
             'order': order, 'mid': mid, 'index': 0, 'keyword': keyword, 'order_avoided': 'true',
@@ -263,17 +260,13 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
                 break
 
             current_page += 1
-            # sleep_time = random.uniform(2.5, 4.5)
-            # print(f"获取成功，随机休眠 {sleep_time:.2f} 秒，模拟人类行为...")
-            # time.sleep(sleep_time)
 
         except Exception as e:
             print(f"查询请求发生网络或未知错误: proxies {proxies} random_index：{random_index}  {e}")
             break
 
     final_result = collected_videos[:desired_count]
-    # print(f"获取完成，共收集到 {len(final_result)} 个视频。")
-    return final_result, random_index  # 修改点：返回视频结果与所用的 index
+    return final_result, random_index, proxies  # 修改点：返回使用的 proxies
 
 
 def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
@@ -286,7 +279,6 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
     avg_daily_videos = recent_video_count / 3.0
 
     for v in video_list:
-        # 优化：更清晰的字典过滤方式
         keys_to_del = [k for k in v if k not in need_filed_list]
         for k in keys_to_del:
             del v[k]
@@ -325,7 +317,7 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
             v['window_ratios'][f'{w}h_ratio'] = ratio
 
         v['comp_score'] = sum(ratios) if ratios else 0
-        v['score'] = math.log(v['abs_score'] + 1) *  math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
+        v['score'] = math.log(v['abs_score'] + 1) * math.log(v['abs_score'] + 1) * math.log(v['comp_score'] + 1)
         v['avg_daily_videos'] = avg_daily_videos
         v['update_time_str'] = datetime.fromtimestamp(current_timestamp).strftime("%Y-%m-%d %H:%M:%S")
         v['update_time'] = current_timestamp
@@ -334,23 +326,99 @@ def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36
     return video_list
 
 
+def get_user_video_count_lightweight(mid: int, proxies: dict = None) -> int:
+    """
+    轻量级前置探测 - 获取用户公开视频总数，极低概率触发 412。
+    """
+    url = "https://api.bilibili.com/x/space/navnum"
+    params = {
+        "mid": mid,
+        "web_location": "333.1387"
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Origin": "https://space.bilibili.com",
+        "Referer": f"https://space.bilibili.com/{mid}",
+        "Cookie": "buvid3=3CEF1632-54DE-4D35-CE80-C378FB51067101804infoc; b_nut=1773895601; _uuid=3ED29ECE-C1101-4319-61031-104A4C11C37F704011infoc; home_feed_column=5; buvid_fp=723558e46b5a5d0b02b0f5bb22db0895; browser_resolution=1862-925; buvid4=0CF18BA3-8AE3-F557-86FB-7E80703A20F102641-026031912-XJY3ejH5lbSGGSHm/4GSTA%3D%3D; sid=4trggqol; CURRENT_QUALITY=0; rpdid=|(k))kmuuu)k0J\'u~~J)mlY|); bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQxNTQ4MTIsImlhdCI6MTc3Mzg5NTU1MiwicGx0IjotMX0.hq396y0roK3Z7pEMeG9oHbEFy0Cnsj6iVoXXTetICBI; bili_ticket_expires=1774154752; CURRENT_FNVAL=2000; b_lsid=3F555719_19D047835DD"
+    }
+
+    try:
+        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") == 0:
+            return data.get("data", {}).get("video", -1)
+        else:
+            return -1
+    except Exception:
+        return -1
+
+
+def check_user_need_heavy_request(uid, exist_video_info, max_hour, new_profile_list):
+    """
+    【新增修改点】：提取的高可读性前置过滤逻辑。
+    专门用来判断该用户是否需要进入真正的重度(WBI)拉取环节。
+    返回: (is_skip: bool, skip_code: int, light_status: int, current_video_count: int, random_index: int)
+    skip_code 含义: 0 (时间冷却跳过), 2 (轻量探测成功拦截跳过), -1 (不跳过，需重度拉取)
+    """
+    update_time = exist_video_info.get('update_time', 0)
+    last_video_count = exist_video_info.get('total_video_count', 0)
+    exist_video_list = exist_video_info.get('video_list', [])
+
+    # 1. 基础时间冷却判断
+    if time.time() - update_time < max_hour * 3600:
+        return True, 0, 0, -1, 0  # 冷却跳过，无需再做轻量探测
+
+    # 2. 轻量级前置探测逻辑
+    random_index = random.randint(0, len(new_profile_list) - 1) if new_profile_list else 0
+    current_video_count = get_user_video_count_lightweight(uid)
+    light_status = -1 if current_video_count == -1 else 1
+
+    # 如果轻量探测成功，并且之前有记录过视频数量
+    if current_video_count != -1 and last_video_count > 0:
+        if current_video_count <= last_video_count:
+            # 核心拦截点：视频总数没涨。但需要额外判断有没有处于"爆发期"(4小时内)的视频
+            latest_video_time = max([v.get('created', 0) for v in exist_video_list], default=0)
+
+            # 只有当最新视频的发布时间距今也超过了 4 小时，才真正执行拦截跳过
+            if (time.time() - latest_video_time) > 4 * 3600:
+                return True, 2, light_status, current_video_count, random_index
+
+    # 3. 确实发新视频了、或首次拉取、或轻量探测失败做兜底，允许进入重度拉取
+    return False, -1, light_status, current_video_count, random_index
+
+
 def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None):
     """
-    修改点：引入 data_lock 保护读取；移除内部 save_json，交由外层调度器批量轻量保存。
-    同时接收并抛出 profile_index 状态以便于外层做失败统计。
+    修改点：引入外置的判定逻辑，让这部分核心主流程更加直观，只处理真正需要拉取的用户。
+    并将最终使用的 proxy 继续透传回调度器。
     """
     with data_lock:
-        # 使用 .copy() 防御性复制，避免与主线程中 json.dumps 循环遍历时发生修改冲突
         exist_video_info = all_video_info.get(str(uid), {}).copy()
         exist_video_list = exist_video_info.get('video_list', [])
-        update_time = exist_video_info.get('update_time', 0)
+        last_video_count = exist_video_info.get('total_video_count', 0)
 
-    if time.time() - update_time < max_hour * 3600:
-        # print(f"用户 {uid} 的视频数据在一天内已经更新过了，跳过拉取新数据。")
-        return 0, -1  # 修改点：返回 0 (跳过)，且 index 返回 -1 表示未分配
+    # ==== 提取出的高可读性判断逻辑 ====
+    is_skip, skip_code, light_status, current_video_count, random_index = check_user_need_heavy_request(
+        uid, exist_video_info, max_hour, new_profile_list
+    )
 
-    # 修改点：解包接收 videos 以及所使用的 index
-    videos, used_index = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True, new_profile_list=new_profile_list)
+    if is_skip:
+        if skip_code == 2:  # 轻量探测成功拦截
+            exist_video_info['update_time'] = int(time.time())
+            exist_video_info['update_time_str'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with data_lock:
+                all_video_info[str(uid)] = exist_video_info
+            return 2, random_index, light_status, None
+        else:  # 时间冷却跳过 (skip_code == 0)
+            return 0, -1, 0, None
+
+    # ==== 3. 真正需要拉取的用户进入这里 ====
+    videos, used_index, used_proxy = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True,
+                                                new_profile_list=new_profile_list)
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -362,7 +430,6 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
         exist_video_list = [v for v in exist_video_list if v.get('created', 0) < min_created_timestamp]
         exist_video_list.extend(videos)
 
-        # 新增修改点：按时间戳降序排序（最新的在前），并只保留前100条
         exist_video_list.sort(key=lambda x: x.get('created', 0), reverse=True)
         exist_video_list = exist_video_list[:100]
 
@@ -370,20 +437,23 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
         exist_video_info['update_time'] = int(time.time())
         exist_video_info['update_time_str'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+        if current_video_count != -1:
+            exist_video_info['total_video_count'] = current_video_count
+        elif last_video_count == 0:
+            exist_video_info['total_video_count'] = len(exist_video_list)
+
         with data_lock:
             all_video_info[str(uid)] = exist_video_info
-        # 移除 save_json，极大地提升单次处理速度
-        return 1, used_index  # 修改点：一并返回 index
-    return -1, used_index     # 修改点：失败时也返回 index
+        return 1, used_index, light_status, used_proxy
+
+    return -1, used_index, light_status, used_proxy
 
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24):
     """
-    新增功能函数：多线程提取逻辑 & 批量落盘机制
-    调整点：增加了超过200失败时最高进行5次重试的防跳过机制，并在每轮汇总打印 Profiles index 统计。
+    修改点：增加 proxy_stats 字典，统计并打印每种代理的成功、失败及总量情况。
     """
     total_mids = len(all_mid_list)
-    # 建立全局锁，用于保护共享大字典及写文件的安全性
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
@@ -392,6 +462,10 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         success_count = 0
         fail_count = 0
         jump_count = 0
+        light_skip_count = 0
+        light_total_count = 0
+        light_fail_count = 0
+        heavy_request_count = 0
         processed_since_save = 0
         new_profile_list = BASE_PROFILES.copy()
 
@@ -400,46 +474,76 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             if new_profile:
                 new_profile_list.append(new_profile)
 
-        # 修改点：新增字典用于按轮次统计具体 index 的使用与失败情况
         profile_stats = {}
+        proxy_stats = {}  # 新增：代理追踪统计表
 
         print(
             f"\n--- 开始多线程处理 (第 {attempt}/{max_retries} 轮)，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 批量向线程池提交任务
             future_to_mid = {
                 executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list): mid
                 for mid in all_mid_list
             }
 
-            # as_completed 只要有完成的就会 yield 输出，完美解决多线程下计数器竞态的问题
             for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
                 mid = future_to_mid[future]
                 try:
-                    # 修改点：解包接收两个返回值
-                    result, used_index = future.result()
+                    # 修改点：解包接收 4 个返回值，包含了使用的代理信息
+                    result, used_index, light_status, used_proxy = future.result()
 
-                    # 修改点：归档统计使用情况
+                    # 归档统计使用的 proxy
+                    # 注意：只有在发生重度请求(result为 1或-1)时，才统计 proxy 使用情况
+                    if result in (1, -1):
+                        if used_proxy is not None:
+                            # 提取字典中的 http 字段用于记录，或将其转为字符串
+                            if isinstance(used_proxy, dict) and 'http' in used_proxy:
+                                proxy_str = used_proxy['http']
+                            else:
+                                proxy_str = str(used_proxy)
+                        else:
+                            proxy_str = "None(直连)"
+
+                        if proxy_str not in proxy_stats:
+                            proxy_stats[proxy_str] = {'success': 0, 'failed': 0, 'total': 0}
+
+                        proxy_stats[proxy_str]['total'] += 1
+                        if result == 1:
+                            proxy_stats[proxy_str]['success'] += 1
+                        else:
+                            proxy_stats[proxy_str]['failed'] += 1
+
+                    # 归档统计使用的 profile
                     if used_index != -1:
                         if used_index not in profile_stats:
                             profile_stats[used_index] = {'used': 0, 'failed': 0}
                         profile_stats[used_index]['used'] += 1
 
+                    # 统计轻量接口的数据
+                    if light_status != 0:
+                        light_total_count += 1
+                        if light_status == -1:
+                            light_fail_count += 1
+
+                    # 统计重度接口及拦截的数据
                     if result == 1:
                         success_count += 1
+                        heavy_request_count += 1
                         processed_since_save += 1
                     elif result == -1:
                         fail_count += 1
-                        # 修改点：失败时增加对应 index 的失败计数
+                        heavy_request_count += 1
                         if used_index != -1:
                             profile_stats[used_index]['failed'] += 1
-                    else:
+                    elif result == 2:
+                        light_skip_count += 1
+                    else:  # result == 0
                         jump_count += 1
-                    if index % 100 == 0 or index == total_mids - 1:
-                        print(f"\n正在处理用户 mid: {mid} 进度: {index + 1} / {total_mids} 当前失败和成功数量: {fail_count} / {success_count} jump_count: {jump_count} 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-                    # 【轻量及时保存机制】：每成功保存 `save_interval` 个后，落盘一次，解决每次几百兆写入耗时的问题
+                    if index % 100 == 0 or index == total_mids - 1:
+                        print(
+                            f"\n正在处理 mid: {mid} 进度: {index + 1}/{total_mids} | 冷却跳过: {jump_count} | 轻量探测: {light_total_count}(失败{light_fail_count} 拦截{light_skip_count}) | 实际重度请求: {heavy_request_count}(成功{success_count}/失败{fail_count}) | 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
                     if processed_since_save >= save_interval:
                         with data_lock:
                             save_json(ALL_VIDEO_FILE, all_video_info)
@@ -450,16 +554,17 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                     traceback.print_exc()
                     print(f"处理用户 mid: {mid} 发生异常: {e}")
                     fail_count += 1
+                    heavy_request_count += 1
 
-        # 处理结束扫尾工作：如果还有积攒未保存的新数据，进行最终兜底落盘
         if processed_since_save > 0:
             with data_lock:
                 save_json(ALL_VIDEO_FILE, all_video_info)
             print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
-        print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。成功: {success_count}，失败: {fail_count}，跳过: {jump_count} ---\n")
+        print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。 ---")
+        print(
+            f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count})\n")
 
-        # 修改点：每轮执行完后，打印 Profile 详细统计
         print(">>> 📊 本轮 PROFILES (Index) 详细统计 <<<")
         if profile_stats:
             for idx in sorted(profile_stats.keys()):
@@ -469,19 +574,30 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                     f"  Profile Index [{idx}]: 尝试次数: {stats['used']:<4} | 失败次数: {stats['failed']:<4} | 失败率: {fail_rate:.2f}%")
         else:
             print("  本轮没有使用任何 Profile (可能是用户数据都在未过期跳过范围内)。")
+        print(">>> -------------------------------------- <<<")
+
+        # 修改点：在此处新增打印本轮 IP代理（Proxies） 的详细统计报表
+        print(">>> 🌐 本轮 IP代理 (Proxies) 详细统计 <<<")
+        if proxy_stats:
+            for p_str, stats in proxy_stats.items():
+                fail_rate = (stats['failed'] / stats['total']) * 100 if stats['total'] > 0 else 0
+                print(
+                    f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 失败率: {fail_rate:.2f}%")
+        else:
+            print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(">>> -------------------------------------- <<<\n")
 
-        # 检查重试机制
         if fail_count <= 200:
             print(f"失败数量({fail_count})在可接受范围内(<=200)，无需重试，正常结束本阶段处理。")
             break
         else:
             if attempt < max_retries:
                 print(f"注意：检测到 fail_count({fail_count}) > 200，准备触发原路重试机制，进行第 {attempt + 1} 轮执行...")
-                time.sleep(10)  # 稍微睡眠避嫌，防止高频触发风控
+                time.sleep(10)
             else:
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
     return fail_count < 200
+
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
@@ -504,7 +620,7 @@ def process_single_tag(tag, all_user_info, max_hour=24):
     print(
         f"搜索标签 {tag} 得到 {len(videos)} 个相关视频。 耗时 {time.time() - start_time:.2f} 秒。 当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    if videos:  # 优化：去掉多余的 exist_user_list 变量
+    if videos:
         exist_video_info['video_info_list'] = videos
         exist_video_info['update_time'] = int(time.time())
         all_user_info[str(tag)] = exist_video_info
@@ -521,7 +637,7 @@ def load_pure_user_info():
     for tag, video_info in all_user_info.items():
         video_info_list = video_info.get('video_info_list', [])
         if not video_info_list:
-            continue  # 修复：原代码是 return []，会导致整个解析因为一个空列表而异常终止
+            continue
 
         for v in video_info_list:
             keys_to_del = [k for k in v if k not in need_filed_list]
@@ -561,7 +677,7 @@ def load_pure_video_info():
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
         if not exist_video_list:
-            continue  # 修复：同上，改为 continue
+            continue
 
         for v in exist_video_list:
             keys_to_del = [k for k in v if k not in need_filed_list]
@@ -573,9 +689,6 @@ def load_pure_video_info():
 
 
 def get_all_user_video_info():
-    """
-    修改点：旧代码直接循环遍历进行串行处理，现在交接给新提取的 process_mid_list_concurrently 进行多并发。
-    """
     all_user_info = read_json(ALL_USER_FILE)
     all_mid_list = []
 
@@ -590,15 +703,10 @@ def get_all_user_video_info():
     print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
     all_video_info = load_pure_video_info()
 
-    # 调用提取出来的多线程调度器
-    # max_workers 可以根据你的代理池稳定度适当调增（默认设 5 防高频风控），save_interval 就是批量保存的阈值
     process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=1000)
 
 
 def gen_uid_type_llm(uid_info_list):
-    """
-    批量获取uid的类型
-    """
     log_pre = f"批量获取uid的类型 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
 
     retry_delay = 10
@@ -626,22 +734,17 @@ def gen_uid_type_llm(uid_info_list):
             print(f"批量获取uid的类型 (尝试 {attempt}/{max_retries}): {e} {raw} {log_pre}")
             if attempt < max_retries:
                 print(f"正在重试... (等待 {retry_delay} 秒) {log_pre}")
-                time.sleep(retry_delay)  # 等待一段时间后再重试
+                time.sleep(retry_delay)
             else:
                 print(f"达到最大重试次数，失败. {log_pre}")
-                return None  # 达到最大重试次数后返回 None
+                return None
 
 
 def update_uid_type():
-    """
-    进行用户类型的更新，主要是依据最近发的视频然后分为 sport game 和 fun
-    修改点：引入 update_time 记录，对未收录或上次更新超过 24 小时的用户进行重新判断
-    """
     start_time = time.time()
     all_video_score_list, all_video_info = get_sorted_high_score_videos()
 
     all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
-    # 确保字典存在
     if not isinstance(all_user_type_info, dict):
         all_user_type_info = {}
 
@@ -651,20 +754,17 @@ def update_uid_type():
     current_time = time.time()
     uids_to_update = []
 
-    # 1. 核心修改：找到不在 all_user_type_info 中的 uid，或者更新时间超过 24 小时的 uid
     for uid in unique_uids:
         uid_str = str(uid)
         if uid_str not in all_user_type_info:
             uids_to_update.append(uid)
         else:
             user_data = all_user_type_info[uid_str]
-            # 检查新数据结构是否为字典，并判断时间
             if isinstance(user_data, dict):
                 last_update = user_data.get('update_time', 0)
                 if current_time - last_update > 24 * 3600:
                     uids_to_update.append(uid)
             else:
-                # 兼容旧版本直接存字符串的数据，强制拉取并更新为包含时间戳的新字典结构
                 uids_to_update.append(uid)
 
     if not uids_to_update:
@@ -673,19 +773,15 @@ def update_uid_type():
 
     print(f"检测到 {len(uids_to_update)} 个用户需要更新类型 (新增或已超过24小时)...")
 
-    # 2. 对每个 uids_to_update 的uid保留最新 5 个视频的title，新建 dict
     uid_latest_titles_dict = {}
     for uid in uids_to_update:
         uid_str = str(uid)
         if uid_str in all_video_info:
             video_list = all_video_info[uid_str].get('video_list', [])
-            # 按创建时间 (created) 降序排序，保证最前面的是最新视频
             sorted_videos = sorted(video_list, key=lambda x: x.get('created', 0), reverse=True)
-            # 截取前 5 个视频的 title
             latest_5_titles = [v.get('title', '') for v in sorted_videos[:5]]
             uid_latest_titles_dict[uid_str] = latest_5_titles
 
-    # 3. 对新dict进行batch_size分组，默认为50，每一组都加入batch_list
     batch_size = 50
     batch_list = []
     current_batch = {}
@@ -694,68 +790,59 @@ def update_uid_type():
         current_batch[uid] = titles
         if len(current_batch) == batch_size:
             batch_list.append(current_batch)
-            current_batch = {}  # 重置当前批次
+            current_batch = {}
 
-    # 将最后不满 50 的剩余数据加入 batch_list
     if current_batch:
         batch_list.append(current_batch)
 
-    # 4 & 5. 遍历batch_list，调用 gen_uid_type_llm 并保存
     for index, batch in enumerate(batch_list):
         batch_start_time = time.time()
         try:
-            print(f"\n\n正在处理第 {index + 1} 批次，共 {len(batch_list)} 批次，当前批次包含 {len(batch)} 个用户... 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"\n\n正在处理第 {index + 1} 批次，共 {len(batch_list)} 批次，当前批次包含 {len(batch)} 个用户... 当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             type_result_dict = gen_uid_type_llm(batch)
 
             if type_result_dict:
-                # 5. 每一个batch执行后都需要更新all_user_type_info并且保存
                 for uid, v_type in type_result_dict.items():
                     if v_type in ["体育", "游戏", "娱乐", "军事"]:
-                        # 核心修改：保存为字典对象，记录类型和当前的时间戳
                         all_user_type_info[str(uid)] = {
                             "type": v_type,
                             "update_time": int(time.time())
                         }
 
-                # 覆盖保存 JSON
                 save_json(ALL_USER_TYPE_MAP_FILE, all_user_type_info)
-                print(f"Batch {index + 1}/{len(batch_list)} 更新完毕并保存，本批次处理 {len(type_result_dict)} 个用户。 耗时 {time.time() - batch_start_time:.2f} 秒。")
+                print(
+                    f"Batch {index + 1}/{len(batch_list)} 更新完毕并保存，本批次处理 {len(type_result_dict)} 个用户。 耗时 {time.time() - batch_start_time:.2f} 秒。")
             else:
                 print(f"Batch {index + 1}/{len(batch_list)} gen_uid_type_llm 返回为空，跳过保存。")
 
         except Exception as e:
-            # 加入异常捕获防阻断，一个批次失败不影响下一个批次
             print(f"Batch {index + 1}/{len(batch_list)} 调用 LLM 或保存时发生异常: {e}")
             traceback.print_exc()
 
-    print(f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(uids_to_update)} 个用户的类型。 批次数量: {len(batch_list)}。")
+    print(
+        f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(uids_to_update)} 个用户的类型。 批次数量: {len(batch_list)}。")
 
 
 def get_sorted_high_score_videos(max_hour=24):
-    """
-    处理视频信息：计算得分、根据条件过滤并按得分降序排序。
-    修改点：兼容读取新结构的字典型 video_type 数据，并将题材过滤提前到外层循环以提升效率并统计拦截量
-    """
     all_video_info = load_pure_video_info()
-    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)  # 修改：提前读取用户类型数据
+    all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
 
-    # 初始化统计数据
     stats = {
         "total_users": len(all_video_info),
-        "filter_invalid_type": 0,  # 题材不符合要求的用户数（新增）
-        "filter_update_timeout": 0,  # 更新时间超过 max_hour 的用户数
-        "filter_no_recent_video": 0,  # 24小时内无新视频的用户数
-        "processed_users": 0  # 最终处理的用户数
+        "filter_invalid_type": 0,
+        "filter_update_timeout": 0,
+        "filter_no_recent_video": 0,
+        "processed_users": 0
     }
 
     all_video_score_list = []
-    current_now = time.time()  # 统一使用当前时间，避免循环中微小差异
+    current_now = time.time()
     total_count = 0
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
 
         total_count += len(exist_video_list)
-        # 核心修改：提前获取和判断题材类型
         user_type_data = all_user_type_info.get(str(uid))
         if isinstance(user_type_data, dict):
             video_type = user_type_data.get('type', "未知")
@@ -764,40 +851,32 @@ def get_sorted_high_score_videos(max_hour=24):
         else:
             video_type = "未知"
 
-        # 如果类型不在指定范围内，直接过滤并跳过后续耗时计算
         if video_type not in ['娱乐', '游戏', '体育']:
             stats["filter_invalid_type"] += 1
             continue
 
         update_time = exist_video_info.get('update_time', 0)
 
-        # 过滤原因 1：更新时间太久
         if current_now - update_time > max_hour * 3600:
             stats["filter_update_timeout"] += 1
             continue
 
-        # 要求 24 小时内有视频
         latest_created_time = max((v.get('created', 0) for v in exist_video_list), default=0)
 
-        # 过滤原因 2：24小时内没有发布视频
         if current_now - latest_created_time > 24 * 3600:
             stats["filter_no_recent_video"] += 1
             continue
 
-        # 成功通过过滤
         video_score_list = calculate_video_scores(exist_video_list, current_timestamp=update_time)
 
-        # 将题材信息提前注入到经过计算的视频属性中
         for v in video_score_list:
             v['video_type'] = video_type
 
         stats["processed_users"] += 1
         all_video_score_list.extend(video_score_list)
 
-    # 按得分降序排序 (根据函数名要求补充排序逻辑)
     all_video_score_list.sort(key=lambda x: x.get('score', 0), reverse=True)
 
-    # 打印详细统计结果
     print("-" * 30)
     print(f"【处理统计报告】")
     print(f"1. 总用户数: {stats['total_users']} 过滤前总视频数: {total_count}")
@@ -808,19 +887,16 @@ def get_sorted_high_score_videos(max_hour=24):
     print(f"6. 最终生成视频分数记录数: {len(all_video_score_list)}")
     print("-" * 30)
 
-    # 基础过滤条件
     all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('duration', 0) < 600.0]
     all_video_score_list = [v for v in all_video_score_list if v.get('alive_hours', 0) < 72]
 
-    # 按分数降序排序
     all_video_score_list.sort(key=lambda x: x['score'], reverse=True)
 
     good_video_count = 1000
     type_count_map = {}
     pure_all_video_score_list = []
 
-    # 截断或只提取需使用的字段等
     for v in all_video_score_list:
         video_type = v.get('video_type', '未知')
         if video_type not in type_count_map:
@@ -836,34 +912,25 @@ def get_sorted_high_score_videos(max_hour=24):
     return all_video_score_list, all_video_info
 
 
-
 def update_good_user_video():
-    """
-    主流程：加载数据 -> 获取高分视频 -> 提取用户 -> 更新用户视频
-    """
-
-    # 1. 调用独立出来的函数获取处理后的排序列表
     all_video_score_list, all_video_info = get_sorted_high_score_videos()
 
-    # 2. 获取不重复的uid (注：如果是自带的json库，直接存set可能会报错，建议转为list，如 list(unique_uids))
     unique_uids = set(v['mid'] for v in all_video_score_list)
     save_json(ALL_GOOD_USER_FILE, list(unique_uids))
-    print(f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
+    print(
+        f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
 
     max_hour = 1
     if not (5 <= datetime.now().hour < 24):
         max_hour = 2
 
-    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000, max_hour=max_hour)
+    is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=5, save_interval=1000,
+                                              max_hour=max_hour)
 
     return is_finish
 
 
 def get_good_video(video_type=None):
-    """
-    获取好的视频，包含video_type等信息，按照时间和分数分类，用于前端展示
-    :return: dict 包含 trending (最近蹿升) 和 high_score (高分视频)
-    """
     type_cn_map = {
         "fun": "娱乐",
         "game": "游戏",
@@ -872,16 +939,13 @@ def get_good_video(video_type=None):
     if video_type:
         video_type = type_cn_map.get(video_type, video_type)
 
-    # 假设 read_json 是你已经定义好的函数
     all_video_score_list = read_json(ALL_GOOD_VIDEO_FILE)
 
-    # 1. 直接获取目标视频列表（比原来先全量分组更节省性能）
     if video_type:
         target_video_list = [v for v in all_video_score_list if v.get('video_type', '娱乐') == video_type]
     else:
         target_video_list = all_video_score_list
 
-    # 2. 统一按照分数降序排序 (确保无论有无 video_type，输出的都是最高分)
     target_video_list.sort(key=lambda x: x.get('score', 0), reverse=True)
 
     trending_videos = []
@@ -890,9 +954,7 @@ def get_good_video(video_type=None):
     current_time = time.time()
     one_day_seconds = 4 * 60 * 60
 
-    # 3. 遍历视频进行时间筛选和封装
     for video in target_video_list:
-        # 性能优化：如果两个列表都收集满 100 个了，直接提前结束循环
         if len(trending_videos) >= 100 and len(high_score_videos) >= 100:
             break
 
@@ -902,7 +964,6 @@ def get_good_video(video_type=None):
         bvid = video.get('bvid', '')
         created = video.get('created', 0)
 
-        # 通过created和当前时间计算出视频发布的小时数
         alive_hours_new = (current_time - created) / 3600.0
         if alive_hours_new > 2 * alive_hours:
             continue
@@ -916,7 +977,6 @@ def get_good_video(video_type=None):
             "url": f"https://www.bilibili.com/video/{bvid}"
         }
 
-        # 4. 判断创建时间距离现在的秒数（注：这里假设你的 created 是10位数的秒级时间戳）
         is_recent = (current_time - created) <= one_day_seconds
 
         if is_recent and len(trending_videos) < 100:
@@ -928,72 +988,39 @@ def get_good_video(video_type=None):
         "trending": trending_videos,
         "high_score": high_score_videos
     }
-def get_user_video_count_lightweight(mid: int, proxies: dict = None) -> int:
-    """
-    新增函数：轻量级前置探测 - 获取用户公开视频总数，极低概率触发 412。
-    修改点：直接写死抓包里的真实 Header 和 Cookie，无需依赖 profile 参数解耦加速。
-    返回: 视频总数 (int)。如果失败返回 -1
-    """
-    url = "https://api.bilibili.com/x/space/navnum"
-    params = {
-        "mid": mid,
-        "web_location": "333.1387"
-    }
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Accept-Language": "zh-CN,zh;q=0.9",
-        "Origin": "https://space.bilibili.com",
-        "Referer": f"https://space.bilibili.com/{mid}",
-        "Cookie": "buvid3=3CEF1632-54DE-4D35-CE80-C378FB51067101804infoc; b_nut=1773895601; _uuid=3ED29ECE-C1101-4319-61031-104A4C11C37F704011infoc; home_feed_column=5; buvid_fp=723558e46b5a5d0b02b0f5bb22db0895; browser_resolution=1862-925; buvid4=0CF18BA3-8AE3-F557-86FB-7E80703A20F102641-026031912-XJY3ejH5lbSGGSHm/4GSTA%3D%3D; sid=4trggqol; CURRENT_QUALITY=0; rpdid=|(k))kmuuu)k0J\'u~~J)mlY|); bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzQxNTQ4MTIsImlhdCI6MTc3Mzg5NTU1MiwicGx0IjotMX0.hq396y0roK3Z7pEMeG9oHbEFy0Cnsj6iVoXXTetICBI; bili_ticket_expires=1774154752; CURRENT_FNVAL=2000; b_lsid=3F555719_19D047835DD"
-    }
-
-    try:
-        resp = requests.get(url, params=params, headers=headers, proxies=proxies, timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("code") == 0:
-            return data.get("data", {}).get("video", -1)
-        else:
-            return -1
-    except Exception:
-        return -1
 
 
-COOLDOWN_SECONDS = 4 * 3600
+COOLDOWN_SECONDS = 8 * 3600
 INTERVAL_SLEEP = 30
 
+
 def run_extended_tasks():
-    """封装需要额外执行的三个函数"""
     print(f"[{datetime.now()}] 触发扩展任务执行...")
     search_good_user()
     get_all_user_video_info()
-    # update_uid_type()
+
 
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
-
-    while True:
-        try:
-            # 1. 执行核心任务并更新计数器
-            is_finish = update_good_user_video()
-            counter += 1
-            finish_streak = (finish_streak + 1) if is_finish else 0
-
-            # 2. 检查是否满足触发条件（阈值满足 且 时间间隔满足）
-            threshold_met = (counter >= 100 or finish_streak >= 20)
-            time_met = (time.time() - last_run_time >= COOLDOWN_SECONDS)
-
-            if threshold_met and time_met:
-                run_extended_tasks()
-                # 重置所有状态
-                counter, finish_streak, last_run_time = 0, 0, time.time()
-            elif threshold_met:
-                print(f"阈值已达，但冷却中...剩余 {(COOLDOWN_SECONDS - (time.time()-last_run_time))/60:.1f} 分钟")
-
-        except Exception as e:
-            traceback.print_exc()
-
-        print(f"Wait 30s.. Counter:{counter} Streak:{finish_streak}")
-        time.sleep(INTERVAL_SLEEP)
+    is_finish = update_good_user_video()
+    #
+    # while True:
+    #     try:
+    #         is_finish = update_good_user_video()
+    #         counter += 1
+    #         finish_streak = (finish_streak + 1) if is_finish else 0
+    #
+    #         threshold_met = (counter >= 100 or finish_streak >= 20)
+    #         time_met = (time.time() - last_run_time >= COOLDOWN_SECONDS)
+    #
+    #         if threshold_met and time_met:
+    #             run_extended_tasks()
+    #             counter, finish_streak, last_run_time = 0, 0, time.time()
+    #         elif threshold_met:
+    #             print(f"阈值已达，但冷却中...剩余 {(COOLDOWN_SECONDS - (time.time() - last_run_time)) / 60:.1f} 分钟")
+    #
+    #     except Exception as e:
+    #         traceback.print_exc()
+    #
+    #     print(f"Wait 30s.. Counter:{counter} Streak:{finish_streak}")
+    #     time.sleep(INTERVAL_SLEEP)

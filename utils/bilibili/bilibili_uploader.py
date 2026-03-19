@@ -155,9 +155,10 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
     # --- 修改开始 ---
     # 核心改动：添加 upcdn, zone, ssl 等参数，并更新所有版本号
     # upcdn=txa 是获取高速上传线路的关键
+    upcdn = random.choice(["estx", "akbd"])  # 随机选择一个上传线路，增加成功率
     params = {
         "probe_version": "20250923",
-        "upcdn": "akbd",  # 指定上传线路为腾讯云(推测)，这是提速的关键！
+        "upcdn": upcdn,  # 指定上传线路为腾讯云(推测)，这是提速的关键！
         "zone": "cs",  # 指定上传区域
         "name": name,
         "r": "upos",
