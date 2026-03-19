@@ -937,6 +937,8 @@ def fun(manager):
 
             logging.info(f"  > 正在获取UP主(UID: {uid} {name})的最新动态...")
             temp_found_videos = commenter.get_user_videos(mid=uid, desired_count=40)
+            if not temp_found_videos:
+                continue
             bvid_uid_map.update({video.get('bvid'): uid for video in temp_found_videos if 'bvid' in video})
             all_found_videos.extend(temp_found_videos)
             bvid_file_data[name] = temp_found_videos
