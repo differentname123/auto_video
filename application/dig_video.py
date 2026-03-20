@@ -102,7 +102,8 @@ def query_all_material_videos(manager, is_need_refresh):
                 high_freq_removed_count += 1
 
     # 去除黑名单素材视频
-    block_video_id_list = []
+    block_video_id_list = read_json(BLOCK_VIDEO_ID_FILE)
+
     exist_block_video_info = read_json(BLOCK_VIDEO_BVID_FILE)
     all_bvid_list = list(exist_block_video_info.keys())
     query_4 = {

@@ -778,7 +778,7 @@ def get_final_users(manager, video_info, user_detail_upload_info, all_video_info
     return final_list
 
 
-def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info):
+def get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info, block_video_id_list):
     """
     直接获取时候投稿video_info的用户列表
     :param user_detail_upload_info:
@@ -791,6 +791,11 @@ def get_proper_user_list(manager, user_detail_upload_info, video_info, used_vide
         if video_id not in used_video_list:
             is_all_used = False
         used_video_list.append(video_id)
+    # 判断    block_video_id_list 是否和 video_id_list 有交集，如果有交集说明这个视频包含了敏感素材，直接跳过
+    if set(video_id_list) & set(block_video_id_list):
+        video_info['reason'] = "包含敏感素材，跳过"
+        return []
+
     used_video_list = list(set(used_video_list))
     # if is_all_used:
     #     video_info['reason'] = "视频全部使用过，跳过"
@@ -919,8 +924,8 @@ def send_good_plan(manager):
     need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'xiaocai', 'ning', 'zhuyang', 'junda', 'liuzhu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
-
-
+    BLOCK_VIDEO_ID_FILE = r'W:\project\python_project\auto_video\config\block_video_id_file.json'  # 用于存放被屏蔽的视频bvid列表
+    block_video_id_list = read_json(BLOCK_VIDEO_ID_FILE)
 
     # 获取需要投稿的数据
     to_upload_video_list = build_need_upload_video()
@@ -940,7 +945,7 @@ def send_good_plan(manager):
 
         # if '毁号' in str(video_info):
         #     continue
-        chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info)
+        chosen_user_list = get_proper_user_list(manager, user_detail_upload_info, video_info, used_video_list, all_video_info, block_video_id_list)
         for user_name in chosen_user_list:
             copy_video_info = video_info.copy()
             copy_video_info['user_name'] = user_name
