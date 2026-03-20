@@ -19,6 +19,7 @@ from utils.bilibili.bilibili_uploader import send_bilibili_dm_command
 from utils.bilibili.comment import BilibiliCommenter, get_bilibili_archives
 from utils.bilibili.get_danmu import gen_proper_comment
 from utils.bilibili.watch_video import watch_video
+from utils.bilibili.watch_video1 import delete_video
 from utils.common_utils import get_config, read_json, init_config, save_json, get_simple_play_distribution, \
     calculate_averages, gen_true_type_and_tags, get_user_type
 from utils.mongo_base import gen_db_object
@@ -989,18 +990,43 @@ def fun(manager):
         stop_event.set()
 
 
-if __name__ == '__main__':
-    # config_map = init_config()
-    # mid_list = config_map.keys()
-    # block_all_author(mid_list, action_type=6)
+def loop_delete_video_at_3am():
+    """专门用于每天凌晨3点执行任务的线程函数"""
+    while True:
+        now = datetime.now()
+        # 计算今天的凌晨 3 点
+        target = now.replace(hour=3, minute=0, second=0, microsecond=0)
 
-    # 更好的统计出好视频或者说是好的素材也就是说每次都爆的才证明是好视频
+        # 如果今天的时间已经过了凌晨 3 点，则把目标定为明天的凌晨 3 点
+        if now >= target:
+            target += timedelta(days=1)
+
+        # 计算距离下次凌晨 3 点还需要等待多少秒
+        sleep_seconds = (target - now).total_seconds()
+        print(f"当前时间: {now.isoformat()}，距离下次凌晨 3 点还有 {sleep_seconds / 3600:.2f} 小时，正在进入睡眠...")
+
+        # 线程休眠直到凌晨 3 点
+        time.sleep(sleep_seconds)
+
+        config_map = init_config()
+        mid_list = config_map.keys()
+        block_all_author(mid_list, action_type=6)
+
+        # 首次启动是否需要立刻执行一次？需要的话保留下面这行
+        delete_video()
+
+
+if __name__ == '__main__':
 
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
-    # 启动定时任务线程
+
+    # 启动现有的定时任务线程
     threading.Thread(target=run_periodically, args=(manager,), daemon=True).start()
 
-    # 主线程可用于其他任务，或者继续保持程序运行
+    # ====== 新增：启动每天凌晨3点执行清理任务的线程 ======
+    threading.Thread(target=loop_delete_video_at_3am, daemon=True).start()
+
+    # 主线程继续保持程序运行
     while True:
         time.sleep(10)
