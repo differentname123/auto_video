@@ -224,7 +224,7 @@ def post_video_meta(session: requests.Session, pre: dict, video_path: str) -> di
     return data
 
 
-def upload_chunks(session: requests.Session, video_path: str, pre: dict, meta: dict) -> list:
+def upload_chunks(session: requests.Session, video_path: str, pre: dict, meta: dict, deadline: float = None) -> list:
     """
     分片上传视频，返回分片信息列表。
     """
@@ -240,6 +240,15 @@ def upload_chunks(session: requests.Session, video_path: str, pre: dict, meta: d
     parts = []
     with open(video_path, "rb") as f:
         for i in range(total_chunks):
+            # 动态计算剩余超时时间，防止单次网络请求死等卡住
+            if deadline is not None:
+                remaining_time = deadline - time.time()
+                if remaining_time <= 0:
+                    raise TimeoutError("分片上传超时：已超过设定的最大执行时间！")
+                req_timeout = remaining_time
+            else:
+                req_timeout = None
+
             part = f.read(chunk_size)
             resp = session.put(
                 url_base,
@@ -255,13 +264,13 @@ def upload_chunks(session: requests.Session, video_path: str, pre: dict, meta: d
                 },
                 headers={"X-Upos-Auth": auth, "Content-Type": "application/octet-stream"},
                 data=part,
+                timeout=req_timeout  # 核心修改：将剩余时间赋给请求级别的 timeout
             )
             resp.raise_for_status()
             if resp.text.strip() != "MULTIPART_PUT_SUCCESS":
                 raise RuntimeError(f"分片{i+1}上传失败: {resp.text}")
             parts.append({"partNumber": i + 1, "eTag": "etag"})
     return parts
-
 
 def finalize_upload(session: requests.Session, pre: dict, meta: dict, parts: list) -> dict:
     """
@@ -357,46 +366,68 @@ def submit_post(
 
 
 def upload_to_bilibili(
-    video_path: str,
-    cover_path: str,
-    title: str,
-    description: str,
-    tags: str,
-    copyright_type: int = DEFAULT_COPYRIGHT,
-    tid: int = DEFAULT_TID,
-    recreate: int = DEFAULT_RECREATE,
-    dynamic: str = DEFAULT_DYNAMIC,
-    no_reprint: int = DEFAULT_NO_REPRINT,
-    sessdata=SESSDATA,
-    bili_jct=BILI_JCT,
-    human_type2=1002,
-    topic_detail={"from_topic_id": 1313687,"from_source": "arc.web.recommend"},
-    topic_id: int = 1313687
+        video_path: str,
+        cover_path: str,
+        title: str,
+        description: str,
+        tags: str,
+        copyright_type: int = DEFAULT_COPYRIGHT,
+        tid: int = DEFAULT_TID,
+        recreate: int = DEFAULT_RECREATE,
+        dynamic: str = DEFAULT_DYNAMIC,
+        no_reprint: int = DEFAULT_NO_REPRINT,
+        sessdata=SESSDATA,
+        bili_jct=BILI_JCT,
+        human_type2=1002,
+        topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
+        topic_id: int = 1313687,
+        max_execution_time: int = 1800  # 新增最大执行时间参数，默认半小时 (1800秒)
 ) -> dict:
     """
     一步完成B站投稿流程，返回投稿结果。
     """
+    start_time = time.time()
+    deadline = start_time + max_execution_time
+
     if not all([video_path, cover_path, title, description, tags]):
         raise ValueError("缺少必要参数：视频路径/封面路径/标题/简介/标签")
     if not os.path.exists(video_path) or not os.path.exists(cover_path):
         raise FileNotFoundError("视频或封面文件不存在")
 
     sess = get_session(sessdata, bili_jct)
+
+    # 封装一个内部检查函数，确保主要步骤间不会超时
+    def check_timeout(step_name):
+        if time.time() > deadline:
+            raise TimeoutError(f"【{step_name}】时已超过最大执行时间限制（{max_execution_time}秒），自动终止。")
+
     cover_url = upload_cover(sess, cover_path, bili_jct=bili_jct)
+    check_timeout("上传封面")
+
     # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
     pre = preupload_video(sess, video_path)
+    check_timeout("预上传视频")
+
     biz_id = pre["biz_id"]
     filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
+
     # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
     meta = post_video_meta(sess, pre, video_path)
-    parts = upload_chunks(sess, video_path, pre, meta)
+    check_timeout("提交视频元数据")
+
+    # 传入 deadline，让最容易卡住的分片上传自身具备超时中断能力
+    parts = upload_chunks(sess, video_path, pre, meta, deadline=deadline)
+    check_timeout("分片上传")
+
     finalize_upload(sess, pre, meta, parts)
+    check_timeout("完成上传合并")
+
     return submit_post(
         sess, cover_url, biz_id, filename,
         title, description, tags,
-        copyright_type, tid, recreate, dynamic, no_reprint,bili_jct=bili_jct,human_type2=human_type2, topic_detail=topic_detail,topic_id=topic_id
+        copyright_type, tid, recreate, dynamic, no_reprint,
+        bili_jct=bili_jct, human_type2=human_type2, topic_detail=topic_detail, topic_id=topic_id
     )
-
 
 def get_bili_category_id(cookie_str):
     """
