@@ -1295,7 +1295,8 @@ def dynamic_video_area_blur(
         blur_segments: list,
         blur_strength: int = 50,
         target_quality: int = 24,  # NVENC的CQ值，越小画质越好，24-26通常为视觉无损
-        use_gpu: bool = True
+        use_gpu: bool = False
+
 ):
     """
     高性能版：使用 NVIDIA NVENC 加速，使用高斯模糊提升视觉质感。

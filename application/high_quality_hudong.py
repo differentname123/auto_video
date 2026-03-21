@@ -865,6 +865,8 @@ def update_block_video(config_map):
     """
 
     exist_block_video_info = read_json(BLOCK_VIDEO_BVID_FILE)
+    new_added_info = {}  # 新增：用于记录相较于上次新增加的数据字典
+
     for uid, target_value in config_map.items():
         try:
             arc_video_info = get_bilibili_archives(target_value['total_cookie'])
@@ -872,12 +874,20 @@ def update_block_video(config_map):
             for arc_video_info in arc_video_list:
                 archive_info = arc_video_info.get('Archive', {})
                 bvid = archive_info.get('bvid', '')
+
+                # 新增：如果该 bvid 之前不存在，则判定为新数据并存入 new_added_info
+                if bvid not in exist_block_video_info:
+                    new_added_info[bvid] = arc_video_info
+
                 exist_block_video_info[bvid] = arc_video_info
             print(f"获取用户 {uid} 的视频列表完成，共 {len(arc_video_list)} 个视频。")
             save_json(BLOCK_VIDEO_BVID_FILE, exist_block_video_info)
         except Exception as e:
             print(f"获取用户 {uid} 的视频列表失败: {e}")
             continue
+
+    # 新增：一共返回两个 dict
+    return exist_block_video_info, new_added_info
 
 
 
@@ -916,7 +926,12 @@ def fun(manager):
         bvid_file_data = read_json(USER_BVID_FILE)
         all_bvid_file_data = read_json(ALL_BVID_FILE)
 
-        update_block_video(config_map)
+        exist_block_video_info, new_added_info = update_block_video(config_map)
+
+        if new_added_info:
+            print("检测到新的封禁视频数据，正在查询被污染的任务并删除相关视频...")
+            polluted_bvid_list = get_polluted_bvids(manager, new_added_info)
+            delete_video(polluted_bvid_list)
         bvid_uid_map = {}
         all_found_videos = []
         for uid in config_map.keys():
@@ -990,7 +1005,59 @@ def fun(manager):
         stop_event.set()
 
 
-def loop_delete_video_at_3am():
+def get_polluted_bvids(manager, exist_block_video_info):
+    """
+    根据已知的封禁视频信息，查询所有被污染的任务，并返回对应的 bvid 列表。
+
+    :param manager: 数据库管理器实例，需包含 tasks_collection 和 find_by_custom_query 方法
+    :param exist_block_video_info: 包含已知 block 视频 bvid 的字典
+    :return: 被污染任务的 bvid 列表 (list)
+    """
+    # 1. 提取所有已知 block 的 bvid
+    all_bvid_list = list(exist_block_video_info.keys())
+
+    if not all_bvid_list:
+        return []
+
+    # 2. 查询这些 bvid 对应的任务，并收集它们内部的所有 video_id
+    query_blocked_tasks = {
+        "bvid": {
+            "$in": all_bvid_list
+        }
+    }
+    blocked_task_list = manager.find_by_custom_query(manager.tasks_collection, query_blocked_tasks)
+
+    block_video_id_list = []
+    for task_info in blocked_task_list:
+        block_video_id_list.extend(task_info.get('video_id_list', []))
+
+    # 对提取出的 video_id 进行去重，避免构建过大的 $in 查询数组导致性能下降
+    unique_block_video_ids = list(set(block_video_id_list))
+
+    if not unique_block_video_ids:
+        return []
+
+    # 3. 查询所有被污染的任务 (即其 video_id_list 包含了已封禁的 video_id)
+    # MongoDB 的 $in 操作符作用于数组字段时，只要数组中有任意元素匹配就会返回该文档
+    query_polluted_tasks = {
+        "video_id_list": {
+            "$in": unique_block_video_ids
+        }
+    }
+    polluted_task_list = manager.find_by_custom_query(manager.tasks_collection, query_polluted_tasks)
+
+    # 4. 提取被污染任务的 bvid 并去重返回
+    polluted_bvid_set = set()
+    for task_info in polluted_task_list:
+        bvid = task_info.get('bvid')
+        if bvid:
+            polluted_bvid_set.add(bvid)
+    print(f"根据已知的封禁视频信息，黑名单视频数量为 {len(all_bvid_list)} 涉及到的污染素材数量为{len(unique_block_video_ids)}    污染素材查询到视频数量为 {len(polluted_task_list)} 个被污染的任务，涉及 {len(polluted_bvid_set)} 个唯一的视频。")
+    return list(polluted_bvid_set)
+
+
+
+def loop_delete_video_at_3am(manager):
     """专门用于每天凌晨3点执行任务的线程函数"""
     while True:
         now = datetime.now()
@@ -1012,8 +1079,12 @@ def loop_delete_video_at_3am():
         mid_list = config_map.keys()
         block_all_author(mid_list, action_type=6)
 
-        # 首次启动是否需要立刻执行一次？需要的话保留下面这行
-        delete_video()
+
+
+        exist_block_video_info = read_json(BLOCK_VIDEO_BVID_FILE)
+        polluted_bvid_list = get_polluted_bvids(manager, exist_block_video_info)
+
+        delete_video(polluted_bvid_list)
 
 
 if __name__ == '__main__':
@@ -1025,7 +1096,7 @@ if __name__ == '__main__':
     threading.Thread(target=run_periodically, args=(manager,), daemon=True).start()
 
     # ====== 新增：启动每天凌晨3点执行清理任务的线程 ======
-    threading.Thread(target=loop_delete_video_at_3am, daemon=True).start()
+    threading.Thread(target=loop_delete_video_at_3am, args=(manager,), daemon=True).start()
 
     # 主线程继续保持程序运行
     while True:

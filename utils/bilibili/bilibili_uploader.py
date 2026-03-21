@@ -11,7 +11,7 @@ import time
 import urllib.parse
 
 from utils.bilibili.get_danmu import get_cid_from_bvid
-from utils.common_utils import get_config, init_config
+from utils.common_utils import get_config, init_config, read_json
 
 # --- 配置参数 ---
 SESSDATA = get_config("xiaoxiaosu_bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
@@ -155,7 +155,10 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
     # --- 修改开始 ---
     # 核心改动：添加 upcdn, zone, ssl 等参数，并更新所有版本号
     # upcdn=txa 是获取高速上传线路的关键
-    upcdn = random.choice(["estx", "akbd"])  # 随机选择一个上传线路，增加成功率
+    user_conf = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    upcdn_list = user_conf.get('upcdn_list', ["estx", "akbd"])
+    upcdn = random.choice(upcdn_list)  # 随机选择一个上传线路，增加成功率
+    print(f"选择的上传线路: {upcdn}，这将有助于提升上传速度！")
     params = {
         "probe_version": "20250923",
         "upcdn": upcdn,  # 指定上传线路为腾讯云(推测)，这是提速的关键！
@@ -514,7 +517,7 @@ if __name__ == "__main__":
     #
     start_time = time.time()
     result = upload_to_bilibili(
-        video_path=r"W:\project\python_project\auto_video\utils\test1.mp4",
+        video_path=r"W:\project\python_project\auto_video\utils\test.mp4",
         cover_path=r'W:\project\python_project\auto_video\utils\test.jpg',
         title="我的AI修复视频与精彩瞬间",
         description="这是一个使用AI技术修复后的视频，并加入了有趣的音频，希望大家喜欢！",

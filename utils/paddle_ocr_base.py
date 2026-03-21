@@ -151,12 +151,13 @@ def _select_best_subtitle_strict(
     # --- [修改逻辑结束] ---
 
 
-@safe_process_limit(limit=4, name="run_subtitle_ocr")
+@safe_process_limit(limit=2, name="run_subtitle_ocr")
 def run_subtitle_ocr(image_path_list: list, use_gpu: bool = True, crop_ratio: float = 0.5,
                      confidence: float = 0.8, only_best=True) -> dict:
     """
     对外的主函数：无状态、每次运行初始化、运行完清理。
     """
+    use_gpu = False
     all_start_time = time.time()
     print(f"Starting batch OCR for {len(image_path_list)} images (Stateless Mode)...{image_path_list[0]}")
 

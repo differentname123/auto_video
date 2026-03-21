@@ -670,16 +670,22 @@ def extract_video_dynamics_info(dynamics: list) -> dict:
 
     return extracted_data
 
-def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_count: int = 50) -> None:
+
+def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_count: int = 50,
+                       bvid_list: list = None) -> None:
     """
-    拉取指定账号的动态，并删除超过规定天数的动态。
+    拉取指定账号的动态，并删除超过规定天数的动态，或匹配指定 bvid 列表的动态。
 
     :param host_mid: 目标用户的 UID
     :param cookie_str: 你的 Bilibili Cookie 字符串
     :param days_old: 删除多少天之前的动态 (默认 7 天)
     :param check_count: 每次检查最近的多少条动态 (如果动态多，可以调大)
+    :param bvid_list: 强制删除的 bvid 列表，在列表内的动态无视时间直接删除
     """
-    print(f"\n🚀 开始执行动态清理任务 | UID: {host_mid} | 目标: 删除 {days_old} 天前的动态")
+    if bvid_list is None:
+        bvid_list = []
+
+    print(f"\n🚀 开始执行动态清理任务 | UID: {host_mid} | 目标: 删除 {days_old} 天前的动态及指定bvid列表")
     exist_dynamics_info_file = r'W:\project\python_project\auto_video\config\exist_dynamics_info.json'
     exist_dynamics_info = read_json(exist_dynamics_info_file)
     # 1. 获取动态列表
@@ -691,12 +697,16 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
     if not dynamics:
         print("[-] 未能获取到动态或动态列表为空，清理任务终止。")
         return
-    print(f"[+] 成功获取到 {len(dynamics)} 条动态，开始检查过期情况...")
+    print(f"[+] 成功获取到 {len(dynamics)} 条动态，开始检查过期及指定删除情况...")
     current_ts = int(time.time())
     threshold_sec = days_old * 24 * 3600
-    deleted_count = 0
 
-    # 2. 遍历动态并判断时间
+    # 初始化统计数据
+    deleted_count = 0
+    bvid_deleted_count = 0
+    expired_deleted_count = 0
+
+    # 2. 遍历动态并判断时间与bvid
     for dyn in dynamics:
         try:
             # 提取发布时间戳
@@ -710,14 +720,17 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
             hours_ago = (delta_sec % 86400) // 3600
             pub_time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pub_ts))
 
-            # 尝试提取动态标题或正文内容 (兼容视频、图文等不同类型)
+            # 尝试提取动态标题、bvid (兼容视频、图文等不同类型)
             dyn_title = ""
+            bvid = ""
             module_dynamic = dyn.get('modules', {}).get('module_dynamic', {})
             major = module_dynamic.get('major', {})
 
             if major and major.get('type') == 'MAJOR_TYPE_ARCHIVE':
-                # 如果是视频动态，提取视频标题
-                dyn_title = major.get('archive', {}).get('title', '')
+                # 如果是视频动态，提取视频标题和bvid
+                archive = major.get('archive', {})
+                dyn_title = archive.get('title', '')
+                bvid = archive.get('bvid', '')
 
             if not dyn_title:
                 # 如果不是视频或者视频没标题，提取动态文本描述
@@ -731,8 +744,11 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
             if len(dyn_title) > 30:
                 dyn_title = dyn_title[:30] + "..."
 
-            # 判断是否超过设定的天数
-            if delta_sec > threshold_sec:
+            # 核心判断逻辑：是否在强制删除列表内，或是否过期
+            is_in_bvid_list = bool(bvid and bvid in bvid_list)
+            is_expired = delta_sec > threshold_sec
+
+            if is_in_bvid_list or is_expired:
                 # 提取删除参数 (位于 modules -> module_more -> three_point_items)
                 three_point_items = dyn.get('modules', {}).get('module_more', {}).get('three_point_items', [])
                 del_params = None
@@ -748,9 +764,13 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
                     target_dyn_type = del_params.get('dyn_type')
                     target_rid_str = del_params.get('rid_str')
 
-                    # --- 这里是按照你要求的格式新修改的日志输出 ---
-                    print(
-                        f"[*] 发现过期动态，发布于: {pub_time_str}，距今已 {days_ago} 天 {hours_ago} 小时，超过了 {days_old} 天的过期时间，标题/内容: {dyn_title}，准备删除...")
+                    # 区分因为什么原因触发的删除日志
+                    if is_in_bvid_list:
+                        print(
+                            f"[*] 发现匹配 bvid 列表的动态 (bvid: {bvid})，发布于: {pub_time_str}，标题/内容: {dyn_title}，准备删除...")
+                    else:
+                        print(
+                            f"[*] 发现过期动态，发布于: {pub_time_str}，距今已 {days_ago} 天 {hours_ago} 小时，超过了 {days_old} 天的过期时间，标题/内容: {dyn_title}，准备删除...")
 
                     success = delete_user_dynamic(
                         dyn_id_str=target_dyn_id_str,
@@ -761,29 +781,36 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
 
                     if success:
                         deleted_count += 1
+                        if is_in_bvid_list:
+                            bvid_deleted_count += 1
+                        else:
+                            expired_deleted_count += 1
 
                     # 强制休眠 1.5 秒，避免连续删除触发防刷机制
                     time.sleep(1.5)
                 else:
+                    reason_str = "在指定删除列表中" if is_in_bvid_list else "已过期"
                     print(
-                        f"[-] 动态已过期 (发布于: {pub_time_str}，标题: {dyn_title})，但找不到删除权限 (可能是置顶/系统动态，或不是本人的)。")
+                        f"[-] 动态{reason_str} (发布于: {pub_time_str}，标题: {dyn_title})，但找不到删除权限 (可能是置顶/系统动态，或不是本人的)。")
             else:
-                pass  # 还没到过期时间的动态，忽略
+                pass  # 还没到过期时间且不在列表中的动态，忽略
 
         except Exception as e:
             print(f"[x] 解析/处理单条动态时出错: {e}")
             continue
 
-    print(f"🎉 任务完成 | 共检查了 {len(dynamics)} 条记录，成功删除了 {deleted_count} 条过期动态。\n")
+    print(f"🎉 任务完成 | 共检查了 {len(dynamics)} 条记录，成功删除 {deleted_count} 条动态。")
+    print(f"📊 统计明细: 匹配 bvid 删除 {bvid_deleted_count} 条，正常过期删除 {expired_deleted_count} 条。\n")
+
 
 
 # ========== 使用示例 ==========
-def delete_video():
+def delete_video(bvid_list=None):
     config = init_config()
     for key, value in config.items():
         try:
             user_name = value['name']
-            print(f"\n========== 开始处理用户: {user_name} (config key: {key}) ==========")
+            print(f"\n========== 开始处理用户: {user_name} (config key: {key})  bvid_list: {len(bvid_list)} ==========")
             MY_COOKIE = value['total_cookie']
             TARGET_MID = key  # 你抓包里的那个用户
 
@@ -792,7 +819,8 @@ def delete_video():
                 host_mid=TARGET_MID,
                 cookie_str=MY_COOKIE,
                 days_old=7,
-                check_count=100000
+                check_count=100000,
+                bvid_list=bvid_list
             )
         except Exception as e:
             print(f"处理 config key: {key} 时发生错误: {e}")
