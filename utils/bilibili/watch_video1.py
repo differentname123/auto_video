@@ -1,6 +1,7 @@
 # multiprocess_runner.py
 import concurrent.futures
 import multiprocessing
+import traceback
 from typing import Dict, Any
 # 先: pip install playwright
 # 然后: playwright install
@@ -805,11 +806,18 @@ def clean_old_dynamics(host_mid: int, cookie_str: str, days_old: int = 7, check_
 
 
 # ========== 使用示例 ==========
-def delete_video(bvid_list=None):
+def delete_video(bvid_list=[]):
     config = init_config()
+    user_conf = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
+    user_type_info = user_conf.get('user_type_info', {})
+    fun_user = user_type_info.get('fun', [])
     for key, value in config.items():
         try:
+            days_old = 7
             user_name = value['name']
+            if user_name in fun_user:
+                days_old = 30
+                print(f"用户 {user_name} 在 fun 用户列表中，过期时间设置为 {days_old} 天。")
             print(f"\n========== 开始处理用户: {user_name} (config key: {key})  bvid_list: {len(bvid_list)} ==========")
             MY_COOKIE = value['total_cookie']
             TARGET_MID = key  # 你抓包里的那个用户
@@ -818,11 +826,12 @@ def delete_video(bvid_list=None):
             clean_old_dynamics(
                 host_mid=TARGET_MID,
                 cookie_str=MY_COOKIE,
-                days_old=7,
+                days_old=days_old,
                 check_count=100000,
                 bvid_list=bvid_list
             )
         except Exception as e:
+            traceback.print_exc()
             print(f"处理 config key: {key} 时发生错误: {e}")
             continue
 
