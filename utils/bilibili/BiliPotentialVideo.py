@@ -278,7 +278,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
 
 
 def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
-    need_filed_list = ['created', 'play', 'comment', 'title', 'bvid', 'author', 'mid', 'length']
+    need_filed_list = ['created', 'play', 'title', 'bvid', 'mid', 'length']
     if not video_list:
         return []
 
@@ -441,7 +441,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
         exist_video_list.extend(videos)
 
         exist_video_list.sort(key=lambda x: x.get('created', 0), reverse=True)
-        exist_video_list = exist_video_list[:100]
+        exist_video_list = exist_video_list[:72]
 
         exist_video_info['video_list'] = exist_video_list
         exist_video_info['update_time'] = int(time.time())
@@ -621,7 +621,7 @@ def process_single_tag(tag, all_user_info, max_hour=24):
         return
 
     videos = fetch_from_search(tag, recent_days=2)
-    need_filed_list = ['author', 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
+    need_filed_list = [ 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
 
     for v in videos:
         keys_to_del = [k for k in v if k not in need_filed_list]
@@ -643,7 +643,7 @@ def process_single_tag(tag, all_user_info, max_hour=24):
 
 def load_pure_user_info():
     all_user_info = read_json(ALL_USER_FILE)
-    need_filed_list = ['author', 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
+    need_filed_list = [ 'mid', 'aid', 'bvid', 'title', 'description', 'play', 'pubdate']
 
     for tag, video_info in all_user_info.items():
         video_info_list = video_info.get('video_info_list', [])
@@ -683,7 +683,7 @@ def search_good_user():
 
 def load_pure_video_info():
     all_video_info = read_json(ALL_VIDEO_FILE)
-    need_filed_list = ['created', 'play', 'title', 'bvid', 'author', 'mid', 'length']
+    need_filed_list = ['created', 'play', 'title', 'bvid', 'mid', 'length']
 
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
@@ -710,12 +710,35 @@ def get_all_user_video_info():
             if time.time() - pubdate < 2 * 24 * 3600:
                 all_mid_list.append(video.get('mid'))
 
-    all_mid_list = list(set(all_mid_list))
-    print(f"从所有标签的视频信息中提取到 {len(all_mid_list)} 个唯一用户 mid。")
+    # 1. 先计算并打印仅来自于 tag 搜索的去重个数
+    tag_mids_set = set(all_mid_list)
+    tag_count = len(tag_mids_set)
+    print(f"从所有标签的视频信息中提取到 {tag_count} 个唯一用户 mid。")
+
+    # 必须加载 all_video_info，因为后面的并发函数需要用它来比对和保存数据
     all_video_info = load_pure_video_info()
 
-    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=20, save_interval=1000)
+    # 获取当前小时数 (0-23)
+    current_hour = datetime.now().hour
 
+    # 判断是否在凌晨 0 点到 6 点之间 (即 0:00 到 5:59)
+    if 0 <= current_hour < 6:
+        # 2. 获取历史库中的所有 uid 集合
+        history_mids_set = set(int(uid) for uid in all_video_info.keys())
+
+        # 3. 计算历史库排除了 tag 已有 uid 后，实际额外增加的个数
+        new_added_count = len(history_mids_set - tag_mids_set)
+
+        # 4. 合并两路数据，得到最终的去重列表
+        all_mid_list = list(tag_mids_set | history_mids_set)
+
+        print(f"当前时间 {current_hour} 点，满足凌晨更新条件。从全量历史库又增加了 {new_added_count} 个唯一用户 mid，本次总计待处理 {len(all_mid_list)} 个。")
+    else:
+        # 不在凌晨时段，只处理刚才搜出来的 tag 用户
+        all_mid_list = list(tag_mids_set)
+        print(f"当前时间 {current_hour} 点，未在凌晨(0-6点)时段，跳过全量历史库追加。本次总计待处理 {len(all_mid_list)} 个。")
+
+    process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=20, save_interval=1000)
 
 def gen_uid_type_llm(uid_info_list):
     log_pre = f"批量获取uid的类型 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
@@ -1001,7 +1024,7 @@ def get_good_video(video_type=None):
     }
 
 
-COOLDOWN_SECONDS = 8 * 3600
+COOLDOWN_SECONDS = 4 * 3600
 INTERVAL_SLEEP = 30
 
 
@@ -1014,7 +1037,7 @@ def run_extended_tasks():
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
     # is_finish = update_good_user_video()
-
+    get_all_user_video_info()
     while True:
         try:
             is_finish = update_good_user_video()
