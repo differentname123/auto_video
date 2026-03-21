@@ -482,15 +482,18 @@ def upload_worker(
     video_id_list = task_info.get("video_id_list", [])
     max_retries = 3
     result: Optional[Dict[str, Any]] = None
+    last_e_msg = ""  # 新增：用于记录最后一次异常信息
     t_upload = time.time()
     print(f"🚀 准备为{userName} 投稿 video_id_list={video_id_list} 上传参数：{upload_params}")
     # 上传重试
     for attempt in range(1, max_retries + 1):
         try:
             result = upload_to_bilibili(**upload_params)
+            last_e_msg = ""  # 成功调用接口则清空异常记录
             break
         except Exception as e:
             traceback.print_exc()
+            last_e_msg = str(e)  # 记录当前的异常信息
 
             print(
                 f"❌ 上传接口异常 (第 {attempt} 次重试) user={userName} video_id_list={video_id_list}：{e} {upload_params}"
@@ -538,15 +541,22 @@ def upload_worker(
         manager.upsert_tasks([task_info])
 
     else:
-        # 上传失败：记录 error_user_map，并把错误信息写到 upload_log
+        # 上传失败：获取错误信息，并在包含特定关键字时记录 error_user_map
         try:
-            err = result.get("message", str(result)) if isinstance(result, dict) else str(result)
+            if result is None:
+                err = last_e_msg if last_e_msg else "未知异常"
+            else:
+                err = result.get("message", str(result)) if isinstance(result, dict) else str(result)
         except Exception:
             traceback.print_exc()
-
             err = str(result)
-        error_user_map[userName] = err or "未知错误"
-        print(f"❌ 后台投稿失败 user={userName} video_id_list={video_id_list}：{err}")
+
+        err_str = str(err)
+        # 判断错误信息是否包含“登录”或“封禁”
+        if "登录" in err_str or "封禁" in err_str:
+            error_user_map[userName] = err_str or "未知错误"
+
+        print(f"❌ 后台投稿失败 user={userName} video_id_list={video_id_list}：{err_str}")
 
 
 def print_simple_stats(statistic_data):
