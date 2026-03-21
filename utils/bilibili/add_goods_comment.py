@@ -578,7 +578,7 @@ def run_once(username_list):
     manager = MongoManager(mongo_base_instance)
     query = {
         "status": "已投稿",
-        "create_time": {
+        "uploaded_time": {
             "$gt": datetime.datetime.now() - datetime.timedelta(hours=24 * 2)
         }
     }
