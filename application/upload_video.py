@@ -270,13 +270,14 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
 def gen_video(task_info, config_map, user_config, manager):
     failure_details = {}
     try:
+
         failure_details, video_info_dict, chosen_script = process_single_task(task_info, manager, gen_video=True)
         user_name = task_info.get('userName')
         id = task_info.get('_id', '__')
         all_task_video_path_info = build_task_video_paths(task_info)
         final_output_path = all_task_video_path_info['final_output_path']
         account_config = config_map.get(user_name)
-        upload_params = build_bilibili_params(final_output_path, chosen_script, user_config, user_name, video_info_dict, account_config, id)
+        upload_params = build_bilibili_params(task_info, final_output_path, chosen_script, user_config, user_name, video_info_dict, account_config, id)
 
         return failure_details, video_info_dict, chosen_script, upload_params
     except Exception as e:
@@ -300,35 +301,54 @@ def gen_video(task_info, config_map, user_config, manager):
         task_info['failure_details'] = str(failure_details)
         manager.upsert_tasks([task_info])
 
-def gen_cover_path(final_output_path, video_info_dict, cover_text, id):
+def gen_cover_path(task_info, final_output_path, video_info_dict, cover_text, id):
     """
     生成最终的封面路径
     :return:
     """
     available_cover_path_list = []
-    try:
-        for video_id, video_info in video_info_dict.items():
-            if not video_info.get('metadata'):
+    cover_info_list = task_info.get("cover_info", [])
+    output_dir = os.path.join(os.path.dirname(final_output_path), 'cover')
+    for cover_info in cover_info_list:
+        try:
+            score = float(cover_info.get('score', 0))
+            if score < 5:
                 continue
-            meta_data = video_info.get('metadata')[0]
-            is_duplicate = video_info.get('is_duplicate', False)
-            if is_duplicate:
-                continue
-            abs_cover_path = meta_data.get('abs_cover_path', '')
+            image_name = cover_info.get('image_name', '')
+            abs_cover_path = os.path.join(output_dir, image_name)
             if is_valid_target_file_simple(abs_cover_path):
                 available_cover_path_list.append(abs_cover_path)
-    except Exception as e:
-        traceback.print_exc()
-        print(f"⚠️ 生成封面时发生错误：{e} {id}")
+                break
+        except Exception as e:
+            traceback.print_exc()
+            print(f"⚠️ 生成封面时发生错误：{e} {id}")
 
     if not available_cover_path_list:
-        output_dir = os.path.dirname(final_output_path)
-        target_frame = get_frame_at_time_safe(final_output_path, "00:00")
-        if target_frame is not None:
-            image_filename = f"first_frame.jpg"
-            image_save_path = os.path.join(output_dir, image_filename)
-            cv2.imwrite(image_save_path, target_frame)
-            available_cover_path_list.append(image_save_path)
+        try:
+            for video_id, video_info in video_info_dict.items():
+                if not video_info.get('metadata'):
+                    continue
+                meta_data = video_info.get('metadata')[0]
+                is_duplicate = video_info.get('is_duplicate', False)
+                if is_duplicate:
+                    continue
+                abs_cover_path = meta_data.get('abs_cover_path', '')
+                if is_valid_target_file_simple(abs_cover_path):
+                    available_cover_path_list.append(abs_cover_path)
+        except Exception as e:
+            traceback.print_exc()
+            print(f"⚠️ 生成封面时发生错误：{e} {id}")
+
+        if not available_cover_path_list:
+            output_dir = os.path.dirname(final_output_path)
+            target_frame = get_frame_at_time_safe(final_output_path, "00:00")
+            if target_frame is not None:
+                image_filename = f"first_frame.jpg"
+                image_save_path = os.path.join(output_dir, image_filename)
+                cv2.imwrite(image_save_path, target_frame)
+                available_cover_path_list.append(image_save_path)
+    else:
+        print(f"✅ 任务 {id} 使用了评分高于5的封面，路径为 {available_cover_path_list[0]}")
 
     # 随机选择一个封面
     base_cover_path = random.choice(available_cover_path_list)
@@ -343,7 +363,7 @@ def gen_cover_path(final_output_path, video_info_dict, cover_text, id):
     return output_image_path
 
 
-def build_bilibili_params(video_path, best_script, user_config, userName, video_info_dict, config, id):
+def build_bilibili_params(task_info, video_path, best_script, user_config, userName, video_info_dict, config, id):
     """
     生成投稿需要的参数
     :return:
@@ -376,7 +396,7 @@ def build_bilibili_params(video_path, best_script, user_config, userName, video_
     dynamic = upload_info.get("introduction", {}).get("interaction_guide", "希望大家喜欢")
 
     cover_text = best_script.get("cover_text", "")
-    cover_path = gen_cover_path(video_path, video_info_dict, cover_text, id)
+    cover_path = gen_cover_path(task_info, video_path, video_info_dict, cover_text, id)
 
     human_type2 = upload_info.get("category_id", 1002)
 

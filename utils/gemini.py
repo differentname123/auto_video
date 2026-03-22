@@ -503,7 +503,6 @@ def analyze_images_gemini(
     """
     # 默认使用 flash 模型处理图片，速度快且支持多模态
 
-
     last_error = None
     # 尝试次数限制为 Key 的数量
     num_available_keys = len(API_KEY_MAP)
@@ -534,13 +533,20 @@ def analyze_images_gemini(
             client = genai.Client(api_key=api_key)
 
             # 构建 Prompt Parts (混合文本和图片)
-            parts = [types.Part.from_text(text=prompt),
-                     types.Part.from_text(text="下面我将以'文件名:'的格式，在每个图片前提供其名称，请据此作答。")]
+            parts = [
+                types.Part.from_text(text=prompt),
+                types.Part.from_text(
+                    text="\n【系统提示】：下面将提供多组候选图片。每组图片都会被 <image_data> 标签严格包裹，标签内包含 <file_name> (文件名) 和真实的图片内容。请在评估时严格确保你分析的图片内容与 <file_name> 里的名字绝对对应，绝不能张冠李戴！\n")
+            ]
 
             for path in valid_paths:
-                # 添加文件名提示
-                parts.append(types.Part.from_text(text=f"{os.path.basename(path)}:"))
-                # 读取并添加图片 (使用 types.Part.from_pillow 以兼容不同图片格式)
+                file_name = os.path.basename(path)
+
+                # 使用 XML 标签开启包裹，并注入文件名
+                parts.append(
+                    types.Part.from_text(text=f"\n<image_data>\n<file_name>{file_name}</file_name>\n<image_content>\n"))
+
+                # 读取并添加图片 (保持原逻辑不变)
                 try:
                     # 1. 读取图片
                     img = Image.open(path)
@@ -558,6 +564,9 @@ def analyze_images_gemini(
 
                     # 4. 这里的 image_bytes 就是 raw bytes，和你发的官方示例中 b64decode 的结果类型一致
                     parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
+
+                    # 闭合 XML 标签，彻底隔离下一张图
+                    parts.append(types.Part.from_text(text="\n</image_content>\n</image_data>\n"))
 
                 except Exception as img_err:
                     return f"读取图片失败: {path} -> {img_err}"

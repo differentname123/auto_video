@@ -12,6 +12,7 @@ import copy
 import os
 import random
 import re
+import shutil
 import time
 import traceback
 from collections import Counter
@@ -1882,6 +1883,17 @@ def gen_candidate_cover(task_info, video_info_dict):
         return available_cover_path_list
 
     # ================= 1. 获取原始封面 =================
+    # 【新增】为保存原始封面副本，提前解析一次 output_dir
+    cover_output_dir = ""
+    try:
+        _task_paths = build_task_video_paths(task_info) or {}
+        _final_output = _task_paths.get('final_output_path', '')
+        if _final_output:
+            cover_output_dir = os.path.join(os.path.dirname(_final_output), 'cover')
+            os.makedirs(cover_output_dir, exist_ok=True)
+    except Exception as e_dir:
+        print(f"⚠️ 原始封面输出目录解析异常: {e_dir}")
+
     for video_id, video_info in video_info_dict.items():
         # 将 try-except 放入循环内部：一个视频的元数据异常，不影响下一个视频
         try:
@@ -1892,6 +1904,20 @@ def gen_candidate_cover(task_info, video_info_dict):
             abs_cover_path = meta_data.get('abs_cover_path', '')
 
             if abs_cover_path and is_valid_target_file_simple(abs_cover_path):
+                # 【新增】如果有输出目录，则将图片保存过去，文件名为 video_id
+                if cover_output_dir:
+                    ext = os.path.splitext(abs_cover_path)[1]
+                    if not ext:
+                        ext = '.jpg'
+                    target_cover_path = os.path.join(cover_output_dir, f"{video_id}{ext}")
+
+                    if abs_cover_path != target_cover_path:
+                        try:
+                            shutil.copy2(abs_cover_path, target_cover_path)
+                            abs_cover_path = target_cover_path  # 保存成功后，将记录的路径更新为新副本的路径
+                        except Exception as e_copy:
+                            print(f"⚠️ 视频 {video_id} 复制原始封面异常: {e_copy}")
+
                 available_cover_path_list.append(abs_cover_path)
                 count_original += 1
         except Exception as e:
@@ -1963,10 +1989,9 @@ def gen_candidate_cover(task_info, video_info_dict):
 
     # ================= 3. 单行统计输出 =================
     print(
-        f"✅ 封面生成完毕 | 总计: {len(available_cover_path_list)} 张 (原始封面: {count_original} 张, 视频截图: {count_frames} 张)")
+        f"✅ 封面生成完毕 | 总计: {len(available_cover_path_list)} 张 (原始封面: {count_original} 张, 视频截图: {count_frames} 张) {cover_output_dir}")
 
     return available_cover_path_list
-
 
 def filter_and_sort_images(parsed_results, image_name_list):
     # 1. 转换为集合，提升查找速度
