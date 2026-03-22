@@ -1085,7 +1085,7 @@ def add_watermark_and_ending(video_path, format_ratio, format_path, watermark_pa
         current_video_path = ending_video_path
 
     if format_ratio:
-        format_video_ratio(current_video_path, format_path, format_ratio, mode="blur")
+        format_video_ratio(current_video_path, format_path, format_ratio, mode="black")
         if is_valid_target_file_simple(format_path):
             print(f"成功调整视频格式，输出路径: {format_path}")
             current_video_path = format_path

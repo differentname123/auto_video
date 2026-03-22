@@ -929,7 +929,8 @@ def fun(manager):
         exist_block_video_info, new_added_info = update_block_video(config_map)
 
         if new_added_info:
-            print("检测到新的封禁视频数据，正在查询被污染的任务并删除相关视频...")
+            bvid_list = [bvid for bvid in new_added_info.keys()]
+            print(f"检测到新的封禁视频数据，正在查询被污染的任务并删除相关视频... {bvid_list}")
             polluted_bvid_list = get_polluted_bvids(manager, new_added_info)
             delete_video(polluted_bvid_list)
         bvid_uid_map = {}

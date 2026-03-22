@@ -934,7 +934,7 @@ def send_good_plan(manager):
 
     # 1. 定义敏感词列表
     sensitive_words = ['doinb', 'xdd']
-    sensitive_words = []
+    sensitive_words = ['doinb']
     sensitive_words_lower = [word.lower() for word in sensitive_words]
     for video_info in to_upload_video_list:
         video_str_lower = str(video_info).lower()

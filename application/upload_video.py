@@ -1002,7 +1002,7 @@ def auto_produce(manager, max_produce_count=2):
     if total_candidates == 0:
         return 0
 
-    candidate_tasks = candidate_tasks[:max_produce_count * 2]
+    candidate_tasks = candidate_tasks[:max_produce_count * 5]
 
     # 定义并行的 Worker，增加 index, total, tobe_upload_video_info 参数
     def produce_worker(task, index, total, tobe_info):

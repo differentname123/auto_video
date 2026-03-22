@@ -742,8 +742,13 @@ class Downloader:
         *args,
         **kwargs,
     ) -> dict:
-        return (headers or self.headers_tiktok if tiktok else self.headers).copy()
+        h = (headers or self.headers_tiktok if tiktok else self.headers).copy()
 
+        # 强行给抖音的下载请求加上防盗链 Referer
+        if not tiktok:
+            h["Referer"] = "https://www.douyin.com/"
+
+        return h
     @staticmethod
     def add_count(show: str, id_: str, count: SimpleNamespace):
         if show.startswith(f"【{_('图集')}】"):
