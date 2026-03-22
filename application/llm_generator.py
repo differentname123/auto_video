@@ -15,6 +15,8 @@ import re
 import time
 import traceback
 from collections import Counter
+
+import cv2
 import pypinyin
 from utils.paddle_ocr_base import run_subtitle_ocr
 
@@ -22,16 +24,16 @@ from utils.paddle_ocr_base import run_subtitle_ocr
 import numpy as np
 
 from application.video_common_config import correct_owner_timestamps, build_video_paths, is_contain_owner_speaker, \
-    analyze_scene_content
+    analyze_scene_content, build_task_video_paths
 from utils.auto_web.gemini_auto import generate_gemini_content_playwright
 from utils.bilibili.find_paid_topics import get_all_paid_topics
 from utils.common_utils import read_file_to_str, string_to_object, time_to_ms, ms_to_time, get_top_comments, read_json, \
-    safe_process_limit, simple_cipher
-from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content
+    safe_process_limit, simple_cipher, is_valid_target_file_simple
+from utils.gemini import get_llm_content_gemini_flash_video, get_llm_content, analyze_images_gemini
 from utils.gemini_web import generate_gemini_content_managed
 from utils.paddle_ocr import analyze_and_filter_boxes
 from utils.video_utils import probe_duration, get_scene, \
-    save_frames_around_timestamp_ffmpeg
+    save_frames_around_timestamp_ffmpeg, get_frame_at_time_safe
 
 
 def check_logical_scene(logical_scene_info: dict, video_duration_ms: int, max_scenes, need_remove_frames,
@@ -1829,8 +1831,8 @@ def gen_upload_info_llm(task_info, video_info_dict):
     prompt_file_path = './prompt/投稿相关信息的生成.txt'
     prompt = read_file_to_str(prompt_file_path)
     full_prompt = build_upload_info_prompt(prompt, task_info, video_info_dict)
-    model_name = "gemini-2.5-flash"
-    # model_name = "gemini-3-flash-preview"
+    # model_name = "gemini-2.5-flash"
+    model_name = "gemini-3-flash-preview"
 
     video_script_info = task_info.get('video_script_info', [])
 
@@ -1864,6 +1866,176 @@ def gen_upload_info_llm(task_info, video_info_dict):
             if 'PROHIBITED_CONTENT' in str(e): # <--- 修复在这里
                 print("生成弹幕互动信息 遇到内容禁止错误，停止重试。")
                 break  # 使用 break 更清晰地跳出循环
+    return error_info, None
+
+
+def gen_candidate_cover(task_info, video_info_dict):
+    """
+    获取候选封面：原始封面 + 指定时间戳截图。
+    特点：最细粒度容错、自动复用已存在图片、强校验、单行输出。
+    """
+    available_cover_path_list = []
+    count_original, count_frames = 0, 0
+
+    if not isinstance(video_info_dict, dict):
+        print(f"✅ 封面生成完毕 | 总计: 0 张 (原始封面: 0, 视频截图: 0)")
+        return available_cover_path_list
+
+    # ================= 1. 获取原始封面 =================
+    for video_id, video_info in video_info_dict.items():
+        # 将 try-except 放入循环内部：一个视频的元数据异常，不影响下一个视频
+        try:
+            if not isinstance(video_info, dict) or video_info.get('is_duplicate'):
+                continue
+
+            meta_data = video_info.get('metadata', [{}])[0] if video_info.get('metadata') else {}
+            abs_cover_path = meta_data.get('abs_cover_path', '')
+
+            if abs_cover_path and is_valid_target_file_simple(abs_cover_path):
+                available_cover_path_list.append(abs_cover_path)
+                count_original += 1
+        except Exception as e:
+            traceback.print_exc()
+
+            print(f"⚠️ 视频 {video_id} 提取原始封面异常: {e}")
+            continue
+
+    # ================= 2. 获取指定时间戳截图 =================
+    try:
+        task_paths = build_task_video_paths(task_info) or {}
+        final_output = task_paths.get('final_output_path', '')
+
+        if final_output:
+            output_dir = os.path.join(os.path.dirname(final_output), 'cover')
+            os.makedirs(output_dir, exist_ok=True)
+
+            for video_id, video_info in video_info_dict.items():
+                if not isinstance(video_info, dict): continue
+
+                try:
+                    overlays = video_info.get('video_overlays_text_info', {}).get('overlays', [])
+                    start_list = [ov.get('start') for ov in overlays if isinstance(ov, dict) and ov.get('start')]
+                    start_list.append("00:00")
+
+                    video_paths = build_video_paths(video_id) or {}
+                    static_cut_video = video_paths.get('static_cut_video_path', '')
+                    if not static_cut_video: continue
+
+                    for time_str in set(start_list):
+                        # 将 try-except 下沉到每一帧：某一帧截图失败或文件损坏，继续下一帧
+                        try:
+                            time_key = str(time_str).replace(":", "-").replace(".", "-")
+                            save_path = os.path.join(output_dir, f"{video_id}_{time_key}.jpg")
+
+                            # 【新增】1. 如果图片已存在且正常，直接复用跳过
+                            if os.path.exists(save_path) and is_valid_target_file_simple(save_path):
+                                available_cover_path_list.append(save_path)
+                                count_frames += 1
+                                continue
+
+                            # 执行截图 (如果文件存在但损坏，上面的 if 会拦截，这里会重新生成并覆盖)
+                            target_frame = get_frame_at_time_safe(static_cut_video, time_str)
+                            if target_frame is not None:
+                                if cv2.imwrite(save_path, target_frame):
+                                    # 【新增】2. 截图后进行 is_valid_target_file_simple 判断
+                                    if is_valid_target_file_simple(save_path):
+                                        available_cover_path_list.append(save_path)
+                                        count_frames += 1
+                                    else:
+                                        # 如果生成了但文件是坏的，可以考虑删掉避免残留脏数据，按需保留
+                                        # os.remove(save_path)
+                                        pass
+                        except Exception as e_frame:
+                            traceback.print_exc()
+
+                            print(f"⚠️ 视频 {video_id} 截取 {time_str} 异常: {e_frame}")
+                            continue
+
+                except Exception as e_video:
+                    traceback.print_exc()
+
+                    print(f"⚠️ 视频 {video_id} 截图解析异常: {e_video}")
+                    continue
+
+    except Exception as e_main:
+        traceback.print_exc()
+        print(f"⚠️ 截图主流程初始化异常: {e_main}")
+
+    # ================= 3. 单行统计输出 =================
+    print(
+        f"✅ 封面生成完毕 | 总计: {len(available_cover_path_list)} 张 (原始封面: {count_original} 张, 视频截图: {count_frames} 张)")
+
+    return available_cover_path_list
+
+
+def filter_and_sort_images(parsed_results, image_name_list):
+    # 1. 转换为集合，提升查找速度
+    valid_names = set(image_name_list)
+
+    # 2. 过滤出在有效列表里的图片
+    filtered = [item for item in parsed_results if item.get("image_name") in valid_names]
+
+    # 3. 按 score 降序排序 (如果缺少 score 字段则默认按 0 分处理，防止报错)
+    sorted_results = sorted(filtered, key=lambda x: x.get("score", 0), reverse=True)
+
+    return sorted_results
+
+
+
+def gen_cover_info_llm(task_info, video_info_dict):
+    """
+    生成封面信息
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    log_pre = f"生成封面信息 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}"
+    # 准备候选的图片
+    available_cover_path_list = gen_candidate_cover(task_info, video_info_dict)
+
+    if not available_cover_path_list:
+        error_info = f"{log_pre} 没有可用的封面图片，无法生成封面信息。"
+        print(error_info)
+        return error_info, None
+    image_name_list = [os.path.basename(path) for path in available_cover_path_list]
+    video_script_info_list = task_info.get('video_script_info', [])
+    video_script_info = video_script_info_list[0] if video_script_info_list else {}
+    needed_key_list = ["title", "cover_text", "video_abstract", "solution_idea"]
+
+    # 只保留video_script_info中的必要字段，构建一个新的字典
+    filtered_video_script_info = {key: video_script_info.get(key, '') for key in needed_key_list}
+
+
+    MAX_RETRIES = 3  # 设置最大重试次数
+    prompt_file_path = './prompt/封面相关信息的生成.txt'
+    prompt = read_file_to_str(prompt_file_path)
+    full_prompt = f"{prompt}\n{filtered_video_script_info}\n"
+    # model_name = "gemini-2.5-flash"
+    model_name = "gemini-3-flash-preview"
+
+    error_info = ""
+    # 开始重试循环
+    for attempt in range(1, MAX_RETRIES + 1):
+        print(f"\n--- [第 {attempt}/{MAX_RETRIES} 次尝试] ---  {log_pre}")
+        try:
+            # 1. 调用 LLM 获取原始文本
+            # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
+            raw = analyze_images_gemini(prompt=full_prompt, model_name=model_name, image_paths=available_cover_path_list)
+            # 2. 尝试解析文本为对象
+            try:
+                cover_info_list = string_to_object(raw)
+                sorted_results = filter_and_sort_images(cover_info_list, image_name_list)
+                if not sorted_results:
+                    raise ValueError(f"生成封面信息 结果验证未通过: {sorted_results} {raw} {log_pre}")
+                return error_info, sorted_results
+            except Exception as e:
+                traceback.print_exc()
+                error_info = f" {log_pre} {str(e)}"
+                print(f"生成封面信息 解析返回结果时出错: {str(e)}")
+                # return error_info, None
+
+        except Exception as e:
+            traceback.print_exc()
     return error_info, None
 
 

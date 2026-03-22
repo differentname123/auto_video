@@ -21,7 +21,7 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 
 from application.llm_generator import gen_logical_scene_llm, gen_overlays_text_llm, gen_owner_asr_by_llm, \
-    gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp, gen_upload_info_llm
+    gen_hudong_by_llm, gen_video_script_llm, align_single_timestamp, gen_upload_info_llm, gen_cover_info_llm
 from application.video_process import gen_video_by_script
 from utils.bilibili.bili_utils import check_duplicate_video
 from utils.video_utils import remove_static_background_video, reduce_and_replace_video, probe_duration, get_scene, \
@@ -634,6 +634,35 @@ def gen_upload_info(task_info, video_info_dict, manager):
     return failure_details, cost_time_info
 
 
+
+def gen_cover_info(task_info, video_info_dict, manager):
+    """
+    生成封面的信息
+    :param task_info:
+    :param video_info_dict:
+    :return:
+    """
+    cost_time_info = {}
+    start_time = time.time()
+    task_id = task_info.get('_id', 'N/A')  # 获取任务ID用于日志
+    failure_details = {}
+    cover_info = task_info.get('cover_info', {})
+    if not cover_info:
+        error_info, cover_info = gen_cover_info_llm(task_info, video_info_dict)
+        if not error_info:
+            task_info['cover_info'] = cover_info
+            # task_info = gen_true_type_and_tags(task_info, upload_info)
+        else:
+            failure_details[task_id] = {
+                "error_info": error_info,
+                "error_level": ERROR_STATUS.WARNING
+            }
+            task_info["cover_info_error"] = error_info
+        manager.upsert_tasks([task_info])
+    cost_time_info['生成封面信息'] = time.time() - start_time
+    return failure_details, cost_time_info
+
+
 def process_single_task(task_info, manager, gen_video=False):
     """
     处理单个任务的逻辑，此函数经过了全面的健壮性和效率优化。
@@ -681,6 +710,12 @@ def process_single_task(task_info, manager, gen_video=False):
         return failure_details, video_info_dict, chosen_script
     print(
         f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+
+    # 生成封面的信息
+    failure_details, cost_time_info = gen_cover_info(task_info, video_info_dict, manager)
+    all_cost_time_info.update(cost_time_info)
+    if check_failure_details(failure_details):
+        return failure_details, video_info_dict, chosen_script
 
     # 生成投稿所需的信息
     failure_details, cost_time_info = gen_upload_info(task_info, video_info_dict, manager)

@@ -48,13 +48,13 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     """
     my_lock = None
 
-    # --- 新增：记录整个函数生命周期的起点时间 ---
+    # --- 记录整个函数生命周期的起点时间 ---
     func_start_time = time.time()
 
     # --- 并发控制部分 ---
     print(f"[进程 {os.getpid()}] 正在尝试获取文件锁许可...{model_name}")
     while my_lock is None:
-        # 新增：排队等锁时，检查整个函数的总时间是否已经耗尽
+        # 排队等锁时，检查整个函数的总时间是否已经耗尽
         if time.time() - func_start_time > TOTAL_MAX_TIME:
             error_msg = f"函数整体执行已达到最大限制（{TOTAL_MAX_TIME} 秒），在获取锁阶段被强制终止"
             print(f"[进程 {os.getpid()}] {error_msg}")
@@ -77,7 +77,7 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
     try:
         # vvvvvv 这里是函数核心逻辑 vvvvvv
         try:
-            # 新增：拿到锁后，计算留给真实业务逻辑的“剩余可用时间”
+            # 拿到锁后，计算留给真实业务逻辑的“剩余可用时间”
             remaining_time = TOTAL_MAX_TIME - (time.time() - func_start_time)
 
             # 如果排队等锁把时间都耗光了，直接不执行了
@@ -90,34 +90,52 @@ def ask_gemini(prompt, model_name='gemini-2.5-flash'):
                 npm_path = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'npm')
                 gemini_executable = os.path.join(npm_path, 'gemini.cmd' if os.name == 'nt' else 'gemini')
                 command = [gemini_executable, '-m', model_name, '-o', 'json']
-                env = os.environ.copy()
-                env["GOOGLE_CLOUD_PROJECT"] = "jovial-analyst-480104-m9"
-                # 兼容老版本
-                env["GOOGLE_CLOUD_PROJECT_ID"] = "jovial-analyst-480104-m9"
-                result = subprocess.run(
-                    command,
-                    input=prompt,
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    encoding='utf-8',
-                    cwd=temp_dir,
-                    timeout=remaining_time  # ←←← 核心修改：动态传入剩余时间，保证整个函数卡死也一定在总时间内被杀掉
-                    # env=env  # ←←← 就是这一行
+                # env = os.environ.copy()
+                # env["GOOGLE_CLOUD_PROJECT"] = "jovial-analyst-480104-m9"
+                # env["GOOGLE_CLOUD_PROJECT_ID"] = "jovial-analyst-480104-m9"
 
+                # --- 核心修改区：弃用 subprocess.run，改为 Popen 手动掌控生命周期 ---
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding='utf-8',
+                    cwd=temp_dir
                 )
 
-                response_data = json.loads(result.stdout)
-                text_content = response_data.get('response')
-                return text_content.strip()
+                try:
+                    # 使用 communicate 进行交互并监听超时
+                    stdout, stderr = process.communicate(input=prompt, timeout=remaining_time)
 
-        except subprocess.TimeoutExpired as e:
-            # 新增：捕获子进程执行的超时异常
-            print("=" * 20 + " gemini-cli 执行超时，已被系统强制终止 " + "=" * 20)
-            print(f"命令: {' '.join(e.cmd)}")
-            print(f"执行分配的剩余时间: {e.timeout:.2f} 秒已耗尽 (总限制 {TOTAL_MAX_TIME} 秒)")
-            print("=" * 70)
-            raise e
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(process.returncode, command, stdout, stderr)
+
+                    response_data = json.loads(stdout)
+                    text_content = response_data.get('response')
+                    return text_content.strip()
+
+                except subprocess.TimeoutExpired as e:
+                    # 【终极防卡死手段】：超时后强杀进程树 (杀掉 cmd 及其衍生的 node 等所有子进程)
+                    if os.name == 'nt':
+                        # Windows特供：/F 强制终止，/T 终止整棵进程树
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    else:
+                        process.kill()
+
+                    # 【防死锁核心】：不管子进程死没死透，强制关闭 Python 这边的管道
+                    if process.stdin: process.stdin.close()
+                    if process.stdout: process.stdout.close()
+                    if process.stderr: process.stderr.close()
+
+                    print("=" * 20 + " gemini-cli 执行超时，已被系统强制终止 " + "=" * 20)
+                    print(f"命令: {' '.join(command)}")
+                    print(f"执行分配的剩余时间: {remaining_time:.2f} 秒已耗尽 (总限制 {TOTAL_MAX_TIME} 秒)")
+                    print("=" * 70)
+                    # 抛出异常供上层处理
+                    raise TimeoutError(f"gemini-cli 进程执行超时（已强杀进程树）")
 
         except subprocess.CalledProcessError as e:
             # 当 gemini-cli 调用失败时，捕获异常并打印详细信息
