@@ -1037,7 +1037,7 @@ def run_extended_tasks():
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
     # is_finish = update_good_user_video()
-    get_all_user_video_info()
+    # get_all_user_video_info()
     while True:
         try:
             is_finish = update_good_user_video()
