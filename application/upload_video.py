@@ -728,7 +728,6 @@ def gen_all_statistic_info(already_upload_users, user_upload_info, need_process_
     return user_statistic_info
 
 
-
 def gen_all_files_to_cleanup(task_info):
     """
     梳理出投稿后需要删除的文件
@@ -766,10 +765,17 @@ def gen_all_files_to_cleanup(task_info):
     final_output_path = task_path_info.get('final_output_path')
 
     if final_output_path:
+        cover_dir = os.path.join(os.path.dirname(final_output_path), 'cover')
         final_output_file_name = os.path.basename(final_output_path)
         exclude_file_list.append(final_output_file_name)
         base_dir = os.path.dirname(final_output_path)
         file_path_list.append(base_dir)
+
+        # --- 新增逻辑：将 cover_dir 下的所有文件名提前加入白名单 ---
+        if os.path.exists(cover_dir):
+            for _, _, cover_files in os.walk(cover_dir):
+                exclude_file_list.extend(cover_files)
+        # --------------------------------------------------------
 
     clean_files = []
     keep_files = []
@@ -1022,7 +1028,7 @@ def auto_produce(manager, max_produce_count=2):
     if total_candidates == 0:
         return 0
 
-    candidate_tasks = candidate_tasks[:max_produce_count * 5]
+    candidate_tasks = candidate_tasks[:max_produce_count * 3]
 
     # 定义并行的 Worker，增加 index, total, tobe_upload_video_info 参数
     def produce_worker(task, index, total, tobe_info):
@@ -1076,7 +1082,7 @@ def upload_loop(manager):
 def produce_loop(manager):
     """后台线程循环：永不停歇的生产车间"""
     while True:
-        produced_count = auto_produce(manager, max_produce_count=2)
+        produced_count = auto_produce(manager, max_produce_count=3)
         if produced_count == 0:
             time.sleep(60)
         else:

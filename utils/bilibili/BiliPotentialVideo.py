@@ -459,17 +459,24 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     return -1, used_index, light_status, used_proxy
 
 
-def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24):
+def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
+                                  max_run_time=14400):
     """
-    修改点：增加 proxy_stats 字典，统计并打印每种代理的成功、失败及总量情况。
+    修改点：
+    1. 增加 proxy_stats 字典，统计并打印每种代理的成功、失败及总量情况。
+    2. 增加 max_run_time 默认 14400 秒 (4小时) 的全局超时控制。
     """
     total_mids = len(all_mid_list)
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
     proxies_list = get_proxy()
+
+    global_start_time = time.time()  # 新增：记录整个函数的全局开始时间
+    timeout_triggered = False  # 新增：全局超时标志位
+
     for attempt in range(1, max_retries + 1):
-        start_time = time.time()
+        round_start_time = time.time()  # 保持原有的单轮计时用于日志打印
         success_count = 0
         fail_count = 0
         jump_count = 0
@@ -493,12 +500,26 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_mid = {
-                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list, proxies_list): mid
+                executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list,
+                                proxies_list): mid
                 for mid in all_mid_list
             }
 
             for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
                 mid = future_to_mid[future]
+
+                # 修改点：全局超时检测与等待队列清空
+                if not timeout_triggered:
+                    if (time.time() - global_start_time) > max_run_time:
+                        print(f"\n[超时控制] 全局运行时间已超过最大限制 ({max_run_time}秒)，正在清空等待队列...")
+                        cancel_count = 0
+                        for f in future_to_mid:
+                            # cancel() 只会取消等待中的任务，不会打断正在执行的线程
+                            if f.cancel():
+                                cancel_count += 1
+                        print(f"[超时控制] 成功清理 {cancel_count} 个排队中的任务，正在等待当前运行中的任务收尾...")
+                        timeout_triggered = True
+
                 try:
                     # 修改点：解包接收 4 个返回值，包含了使用的代理信息
                     result, used_index, light_status, used_proxy = future.result()
@@ -561,6 +582,9 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                         print(f"\n>>>> 触发批量定时保存：最新 {processed_since_save} 个用户数据已落盘 <<<<\n")
                         processed_since_save = 0
 
+                except concurrent.futures.CancelledError:
+                    # 被超时机制 cancel 的任务在获取 result() 时会触发此异常，直接跳过即可
+                    continue
                 except Exception as e:
                     traceback.print_exc()
                     print(f"处理用户 mid: {mid} 发生异常: {e}")
@@ -572,7 +596,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 save_json(ALL_VIDEO_FILE, all_video_info)
             print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
-        print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - start_time:.2f} 秒。 ---")
+        print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - round_start_time:.2f} 秒。 ---")
         print(
             f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count})\n")
 
@@ -598,6 +622,11 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(">>> -------------------------------------- <<<\n")
 
+        # 修改点：判断全局超时标志
+        if timeout_triggered:
+            print(f"[超时退出] 全局运行时间已超过最大限制({max_run_time}秒)，自动结束本阶段执行，不再重试。")
+            break
+
         if fail_count <= 200:
             print(f"失败数量({fail_count})在可接受范围内(<=200)，无需重试，正常结束本阶段处理。")
             break
@@ -607,8 +636,8 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 time.sleep(10)
             else:
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
-    return fail_count < 200
 
+    return fail_count < 200
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()

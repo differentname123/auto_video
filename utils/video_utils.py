@@ -713,6 +713,166 @@ def clip_video_ms(
         output_path: str
 ):
     """
+    使用 ffmpeg 精确截取指定时间段的视频片段（融合优化版：GPU加速优先 + CPU防崩回退）。
+
+    优点:
+    - 【极速定位】采用 Input Seeking (-ss 放在 -i 前) 和 -t (时长)，彻底解决越靠后截取越慢的问题。
+    - 【智能硬件加速】优先尝试调用 NVIDIA GPU (NVENC) 进行重编码，极大提升速度，释放 CPU。
+    - 【绝对兼容】如果当前环境不支持 GPU 加速，会自动静默回退到纯 CPU 编码模式，确保任务一定能完成。
+    - 【全长流复制】如果截取全长，会自动切换为无损流复制，速度极快。
+    - 时间点精确到毫秒，保证输出的视频文件能正常播放。
+
+    Args:
+        input_path (str): 输入视频文件的完整路径。
+        start_time (Union[str, int, float]): 截取片段的开始时间。
+        end_time (Union[str, int, float]): 截取片段的结束时间。
+        output_path (str): 输出视频文件的保存路径。
+
+    Returns:
+        bool: 如果截取成功返回 True，否则返回 False。
+        str: 返回 ffmpeg 的输出信息（成功时）或错误信息（失败时）。
+    """
+    current_time = time.time()
+
+    # 1. 时间格式化与截取时长计算
+    try:
+        # 依赖你原本环境中的 _format_time 函数
+        start_sec = float(_format_time(start_time))
+        end_sec = float(_format_time(end_time))
+
+        if end_sec <= start_sec:
+            error_msg = "错误：结束时间必须大于开始时间。"
+            print(error_msg)
+            return False, error_msg
+
+        duration = end_sec - start_sec
+        # 统一转为字符串供 ffmpeg 命令调用
+        start_formatted = str(start_sec)
+        duration_formatted = str(duration)
+
+    except Exception as e:
+        print(f"时间解析错误: {e}")
+        return False, str(e)
+
+    # 2. 判断是否为全视频截取
+    is_full_video = False
+    try:
+        probe_command = [
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', input_path
+        ]
+        probe_result = subprocess.run(
+            probe_command,
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        total_duration = float(probe_result.stdout.strip())
+        if start_sec <= 0.2 and end_sec >= (total_duration - 0.2):
+            is_full_video = True
+    except Exception:
+        # 静默失败，回退到重编码模式
+        pass
+
+    output_path_obj = Path(output_path)
+    output_path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+    # 3. 策略分发与命令构建
+    if is_full_video:
+        print("检测到截取范围覆盖整个视频，已切换至【流复制模式】(速度极快，无画质损失)...")
+        command = [
+            'ffmpeg', '-i', input_path, '-c', 'copy', '-y', str(output_path)
+        ]
+        strategy_name = "全长流复制"
+    else:
+        # 【主策略】：GPU 硬件加速 + 极速跳转
+        command = [
+            'ffmpeg',
+            '-hwaccel', 'cuda',  # GPU解码
+            '-ss', start_formatted,  # 极速跳转定位
+            '-i', input_path,  # 输入
+            '-t', duration_formatted,  # 截取时长
+            '-c:v', 'h264_nvenc',  # GPU编码
+            '-preset', 'p4',  # 速度与质量平衡
+            '-cq', '23',  # 恒定质量模式
+            '-c:a', 'copy',  # 音频流复制
+            '-y', str(output_path)
+        ]
+        strategy_name = "GPU加速重编码"
+
+        # 【备用策略】：CPU 高兼容性回退 + 极速跳转
+        cpu_fallback_command = [
+            'ffmpeg',
+            '-ss', start_formatted,  # 依然保持极速跳转
+            '-i', input_path,
+            '-t', duration_formatted,
+            '-c:v', 'libx264',  # 纯 CPU 编码
+            '-crf', '23',
+            '-preset', 'ultrafast',  # 原来的高兼容速度预设
+            '-c:a', 'copy',
+            '-y', str(output_path)
+        ]
+
+    # 4. 执行与回退逻辑
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        time_cost = time.time() - current_time
+        success_message = f"视频截取完成 ({strategy_name})：已保存至: {output_path} | 截取时长: {duration:.2f}秒 | 耗时 {time_cost:.2f} 秒"
+        print(success_message)
+        return True, result.stderr or success_message
+
+    except subprocess.CalledProcessError as e:
+        # 如果是全长流复制失败，直接报错
+        if is_full_video:
+            error_message = f"流复制执行出错：\n{e.stderr}"
+            print(error_message)
+            return False, error_message
+
+        # 【核心容错】：如果是 GPU 编码失败，立刻触发 CPU 回退机制
+        print(f"[{strategy_name}] 失败，当前环境可能不支持该硬件加速。正在无缝回退至【CPU 高兼容模式】...")
+        try:
+            fallback_time = time.time()
+            result_fallback = subprocess.run(
+                cpu_fallback_command,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding='utf-8'
+            )
+            time_cost = time.time() - fallback_time
+            success_message = f"视频截取完成 (CPU回退模式)：已保存至: {output_path} | 截取时长: {duration:.2f}秒 | 耗时 {time_cost:.2f} 秒"
+            print(success_message)
+            return True, result_fallback.stderr or success_message
+
+        except subprocess.CalledProcessError as fallback_e:
+            error_message = f"CPU回退模式执行出错：\n{fallback_e.stderr}"
+            print(error_message)
+            return False, error_message
+
+    except FileNotFoundError:
+        error_message = "错误：找不到 ffmpeg 或 ffprobe 命令。请确保它们已正确安装并已添加到系统环境变量 PATH 中。"
+        print(error_message)
+        return False, error_message
+
+    except Exception as e:
+        error_message = f"发生未知错误: {e}"
+        print(error_message)
+        return False, error_message
+
+
+def clip_video_ms_old(
+        input_path: str,
+        start_time: Union[str, int, float],
+        end_time: Union[str, int, float],
+        output_path: str
+):
+    """
     使用 ffmpeg 精确截取指定时间段的视频片段。
 
     此函数通过重新编码视频来确保截取的起点绝对精确，从而避免
@@ -834,6 +994,90 @@ def clip_video_ms(
         error_message = f"发生未知错误: {e}"
         print(error_message)
         return False, error_message
+
+
+def clip_video_ms_gpu_only(
+        input_path: str,
+        start_time: Union[str, int, float],
+        end_time: Union[str, int, float],
+        output_path: str
+):
+    """
+    纯 GPU 加速版本：使用 ffmpeg 和 NVIDIA GPU (NVENC) 精确截取视频片段。
+    【专为跑分对比设计，无 CPU 回退机制】
+    """
+    current_time = time.time()
+
+    try:
+        start_sec = float(_format_time(start_time))
+        end_sec = float(_format_time(end_time))
+
+        if end_sec <= start_sec:
+            return False, "错误：结束时间必须大于开始时间。"
+
+        duration = end_sec - start_sec
+        # 统一格式化为字符串，传递给 ffmpeg
+        start_formatted = str(start_sec)
+        duration_formatted = str(duration)
+
+    except Exception as e:
+        print(f"时间解析错误: {e}")
+        return False, str(e)
+
+    # 判断是否为全视频截取（保留原逻辑，因为流复制永远是最快的）
+    is_full_video = False
+    try:
+        probe_command = [
+            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1', input_path
+        ]
+        probe_result = subprocess.run(probe_command, check=True, capture_output=True, text=True)
+        total_duration = float(probe_result.stdout.strip())
+        if start_sec <= 0.2 and end_sec >= (total_duration - 0.2):
+            is_full_video = True
+    except Exception:
+        pass
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_full_video:
+        print("检测到截取范围覆盖整个视频，使用【流复制模式】...")
+        command = ['ffmpeg', '-i', input_path, '-c', 'copy', '-y', str(output_path)]
+    else:
+        # 核心：纯 GPU 硬件加速 + 极速跳转 命令
+        command = [
+            'ffmpeg',
+            '-hwaccel', 'cuda',  # 【GPU解码】将视频解码工作交给显卡
+            '-ss', start_formatted,  # 【极速跳转】放在 -i 前，实现 O(1) 瞬间定位
+            '-i', input_path,  # 输入文件
+            '-t', duration_formatted,  # 截取时长 (配合前置 -ss 使用)
+            '-c:v', 'h264_nvenc',  # 【GPU编码】使用 NVIDIA 编码器，彻底解放 CPU
+            '-preset', 'p4',  # NVENC 的速度质量平衡预设
+            '-cq', '23',  # NVENC 的质量控制 (类似 crf)
+            '-c:a', 'copy',  # 音频流复制
+            '-y', str(output_path)  # 覆盖输出文件
+        ]
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'
+        )
+        time_cost = time.time() - current_time
+        success_message = f"[GPU 版本] 截取完成：{output_path.name} | 耗时: {time_cost:.2f} 秒"
+        print(success_message)
+        return True, result.stderr or success_message
+
+    except subprocess.CalledProcessError as e:
+        error_message = f"[GPU 版本] ffmpeg 执行出错 (请检查是否支持 NVIDIA GPU)：\n{e.stderr}"
+        print(error_message)
+        return False, error_message
+    except Exception as e:
+        return False, str(e)
 
 
 def _merge_chunk_ffmpeg(video_paths, output_path, probe_fn, preset='ultrafast'):
@@ -1295,7 +1539,7 @@ def dynamic_video_area_blur(
         blur_segments: list,
         blur_strength: int = 50,
         target_quality: int = 24,  # NVENC的CQ值，越小画质越好，24-26通常为视觉无损
-        use_gpu: bool = False
+        use_gpu: bool = True
 
 ):
     """
@@ -3714,7 +3958,7 @@ def create_enhanced_cover(
 
     longest_line = max(text_lines, key=len)
     longest_line_size = max(8, len(longest_line))  # 避免极端短文本导致字体过大
-    target_text_width = img_w * 0.95
+    target_text_width = img_w * 0.9
     estimated_char_width_ratio = 1.0
     font_size = int(min((target_text_width / longest_line_size), img_h / 4) * font_size_ratio)
 
