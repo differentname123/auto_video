@@ -921,7 +921,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'dahao', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'qiqixiao', 'ning', 'junda', 'liuzhu']
+    need_process_users = ['hong', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'qiqixiao', 'ning', 'junda', 'liuzhu']
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
     BLOCK_VIDEO_ID_FILE = r'W:\project\python_project\auto_video\config\block_video_id_file.json'  # 用于存放被屏蔽的视频bvid列表

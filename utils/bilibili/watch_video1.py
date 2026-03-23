@@ -813,7 +813,7 @@ def delete_video(bvid_list=[]):
     fun_user = user_type_info.get('fun', [])
     for key, value in config.items():
         try:
-            days_old = 7
+            days_old = 15
             user_name = value['name']
             if user_name in fun_user:
                 days_old = 30

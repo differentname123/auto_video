@@ -306,12 +306,14 @@ def gen_cover_path(task_info, final_output_path, video_info_dict, cover_text, id
     生成最终的封面路径
     :return:
     """
+    color_theme = 'auto'
     available_cover_path_list = []
     cover_info_list = task_info.get("cover_info", [])
     output_dir = os.path.join(os.path.dirname(final_output_path), 'cover')
     for cover_info in cover_info_list:
         try:
             score = float(cover_info.get('score', 0))
+            color_theme = cover_info.get('color_theme', 'auto')
             if score < 5:
                 continue
             image_name = cover_info.get('image_name', '')
@@ -324,6 +326,7 @@ def gen_cover_path(task_info, final_output_path, video_info_dict, cover_text, id
             print(f"⚠️ 生成封面时发生错误：{e} {id}")
 
     if not available_cover_path_list:
+        print(f"⚠️ 任务 {id} 没有评分高于5的封面，尝试使用视频信息中的封面或第一帧作为封面。")
         try:
             for video_id, video_info in video_info_dict.items():
                 if not video_info.get('metadata'):
@@ -359,6 +362,7 @@ def gen_cover_path(task_info, final_output_path, video_info_dict, cover_text, id
         input_image_path=base_cover_path,
         output_image_path=output_image_path,
         text_lines=[cover_text],
+        color_theme=color_theme
     )
     return output_image_path
 

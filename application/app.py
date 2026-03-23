@@ -577,6 +577,19 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         mongo_manager.upsert_tasks([task_data])
 
         # =========================================================
+        # [修改] 落库后，直接查询出带有 _id 的完整数据库对象覆盖 task_data
+        # =========================================================
+        query_condition = {
+            "userName": user_name,
+            "create_time": task_data.get('create_time')
+        }
+        all_task = mongo_manager.find_by_custom_query(mongo_manager.tasks_collection, query_condition)
+        if all_task:
+            # 直接使用查询出来的原装数据库对象（自带 _id）去走后续的入队逻辑
+            task_data = all_task[0]
+        # =========================================================
+
+        # =========================================================
         # [修改] 成功保存后，将 video_id 入队并维护 running_task_ids
         # =========================================================
         if task_queue is not None:
@@ -603,7 +616,6 @@ def process_one_click_generate(request_data: Dict) -> Tuple[Dict, int]:
         response_structure['message'] = "系统内部错误: 数据库保存失败"
         response_structure['errors'].append(str(e))
         return response_structure, 500
-
 
 def process_check_video_status(request_data: Dict) -> Tuple[Dict, int]:
     """

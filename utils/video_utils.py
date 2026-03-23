@@ -3925,29 +3925,23 @@ def create_enhanced_cover(
             shutil.copy(input_image_path, output_image_path)
         return output_image_path
 
-    # !! 关键修改 1: 优化颜色主题，并增强阴影对比度 !!
     color_themes = {
-        # # 主题1: 经典白字黑边 (最通用，最清晰)
-        'classic_white': {'fontcolor': 'White', 'shadowcolor': 'black@0.8'},
-        # # 主题2: 活力黄黑配 (最醒目，适合娱乐内容)
-        'vibrant_yellow': {'fontcolor': '#FFD700', 'shadowcolor': 'black@0.85'},
-        'cyber_cyan': {'fontcolor': '0x00FFFF', 'shadowcolor': 'black@0.4'},
-        'energetic_orange': {'fontcolor': '#FF6347', 'shadowcolor': 'white@0.8'},
-        'neon_magenta': {'fontcolor': '#FF00FF', 'shadowcolor': 'black@0.7'},  # 强烈、骚动感，适合潮流/娱乐
-        'electric_purple': {'fontcolor': '#8A2BE2', 'shadowcolor': 'black@0.6'},  # 科幻/科技风
-        'hot_pink': {'fontcolor': '#FF1493', 'shadowcolor': 'black@0.7'},  # 青年/时尚向
-        'neon_orange': {'fontcolor': '#FF4500', 'shadowcolor': 'black@0.75'},  # 活力火爆型（通知/CTA）
-        'lime_neon': {'fontcolor': '#CCFF00', 'shadowcolor': 'black@0.8'},  # 非常抓眼球的高亮绿
-        'teal_turquoise': {'fontcolor': '#00CED1', 'shadowcolor': 'black@0.5'},  # 清爽又醒目，适合科技/医疗类
-        'cobalt_blue': {'fontcolor': '#0047AB', 'shadowcolor': 'white@0.85'},  # 稳重但显眼，适合专业/财经
-        'crimson_red': {'fontcolor': '#DC143C', 'shadowcolor': 'black@0.6'},  # 强烈紧迫感（促销/警示）
-        'neon_blue': {'fontcolor': '#1E90FF', 'shadowcolor': 'black@0.6'},  # 网络感强，适合视频标题
-        'solar_gold': {'fontcolor': '#FFB400', 'shadowcolor': 'black@0.8'},  # 黄金感，传达价值/热度
-        'icy_cyan': {'fontcolor': '#B0F2FF', 'shadowcolor': 'black@0.9'},  # 冰爽高亮，适合科技/潮流背景
-        'pink_purple_gradient': {'fontcolor': '#FF6EC7', 'shadowcolor': 'black@0.6'},  # 单色代替：建议配合轻微渐变背景
+        # 1. 绝对主力 (万能底牌)
+        'classic_white': {'fontcolor': 'White', 'shadowcolor': 'black@0.9'},  # 提升阴影不透明度到0.9，更扎实
+        'vibrant_yellow': {'fontcolor': '#FFD700', 'shadowcolor': 'black@0.9'},  # 爆款/搞笑/娱乐必备
 
+        # 2. 情绪与警告
+        'alert_red': {'fontcolor': '#FF2400', 'shadowcolor': 'black@0.85'},  # 猩红色：辟谣、警告、严重事件、跌停
+        'success_green': {'fontcolor': '#00FF00', 'shadowcolor': 'black@0.85'},  # 纯绿色：赚钱、增长、通行、科技
+
+        # 3. 科技与潮流
+        'cyber_cyan': {'fontcolor': '#00FFFF', 'shadowcolor': 'black@0.8'},  # 赛博青：数码、未来感、冷静分析
+        'brand_orange': {'fontcolor': '#FF6600', 'shadowcolor': 'black@0.85'},  # 高亮橘：知识分享、干货、开箱
+        'toxic_magenta': {'fontcolor': '#FF00FF', 'shadowcolor': 'black@0.8'},  # 猛男粉/洋红：猎奇、美妆、Vlog、骚操作
+
+        # 4. 极端亮度兜底 (新增)
+        'dark_inverse': {'fontcolor': '#111111', 'shadowcolor': 'white@0.9'},  # 极黑字+白阴影：专门对付纯白/极亮背景
     }
-
     # 如果指定的主题不存在，或为 'auto'，则从预设中随机选择
     if color_theme not in color_themes or color_theme == 'auto':
         # 默认随机选择，但可以优先选择最经典的

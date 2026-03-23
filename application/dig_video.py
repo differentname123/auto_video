@@ -25,7 +25,7 @@ from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
 NEED_REFRESH = False
-USE_CLI = True
+USE_CLI = False
 
 def query_all_material_videos(manager, is_need_refresh):
     """
