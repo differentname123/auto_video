@@ -11,7 +11,7 @@ import time
 import urllib.parse
 
 from utils.bilibili.get_danmu import get_cid_from_bvid
-from utils.common_utils import get_config, init_config, read_json
+from utils.common_utils import get_config, init_config, read_json, save_json
 
 # --- 配置参数 ---
 SESSDATA = get_config("xiaoxiaosu_bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
@@ -143,26 +143,27 @@ def fetch_bili_topics(cookie: str, type_pid=1029, type_id=21):
             print(f"响应文本: {response.text}")
         return None
 
+
 def preupload_video(session: requests.Session, video_path: str) -> dict:
     """
     预上传视频，获取上传参数。
-    【优化】增加日志和超时，并更新为与最新浏览器一致的API参数以获取高速上传线路。
     """
-    # print("正在预上传视频，获取上传参数...")
     size = os.path.getsize(video_path)
     name = os.path.basename(video_path)
 
-    # --- 修改开始 ---
-    # 核心改动：添加 upcdn, zone, ssl 等参数，并更新所有版本号
-    # upcdn=txa 是获取高速上传线路的关键
     user_conf = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     upcdn_list = user_conf.get('upcdn_list', ["estx", "akbd"])
-    upcdn = random.choice(upcdn_list)  # 随机选择一个上传线路，增加成功率
-    print(f"选择的上传线路: {upcdn}，这将有助于提升上传速度！")
+
+    # --- 调度逻辑变得非常清晰 ---
+    upcdn = get_best_upcdn(upcdn_list)
+    if not upcdn:
+        upcdn = random.choice(upcdn_list)
+        print(f"无有效/达标历史记录，随机选择上传线路: {upcdn} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+
     params = {
         "probe_version": "20250923",
-        "upcdn": upcdn,  # 指定上传线路为腾讯云(推测)，这是提速的关键！
-        "zone": "cs",  # 指定上传区域
+        "upcdn": upcdn,
+        "zone": "cs",
         "name": name,
         "r": "upos",
         "profile": "ugcfx/bup",
@@ -173,7 +174,6 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
         "webVersion": "2.14.0",
     }
 
-    # 增加与浏览器一致的 Referer
     headers = {
         "Referer": "https://member.bilibili.com/platform/upload/video/frame"
     }
@@ -184,15 +184,16 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
         headers=headers,
         timeout=30
     )
-    # --- 修改结束 ---
 
     resp.raise_for_status()
     data = resp.json()
     if data.get("OK") != 1:
         raise RuntimeError(f"预上传失败：{data}")
-    # print(f"✅ 预上传成功，获取到上传节点: {data.get('endpoint')}")
-    return data
 
+    # 悄悄携带选中的 upcdn 给主流程，用于记录耗时
+    data['_chosen_upcdn'] = upcdn
+
+    return data
 
 def post_video_meta(session: requests.Session, pre: dict, video_path: str) -> dict:
     """
@@ -365,6 +366,67 @@ def submit_post(
     return data["data"]
 
 
+def get_best_upcdn(upcdn_list: list) -> str:
+    """
+    根据24小时内的历史记录，筛选速度最快且 >= 100KB/s 的 CDN 节点。
+    如果没有合适的节点，返回 None。
+    """
+    cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
+    cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
+    if not isinstance(cdn_info, dict) or not cdn_info:
+        return None
+
+    best_upcdn = None
+    max_speed = -1
+    current_time = time.time()
+    SPEED_THRESHOLD = 100 * 1024  # 100 KB/s
+
+    for cdn in upcdn_list:
+        record = cdn_info.get(cdn)
+        if record:
+            record_time = record.get("timestamp", 0)
+            # 检查是否在24小时（86400秒）内
+            if current_time - record_time <= 86400:
+                speed = record.get("speed", 0)
+                # 必须满足最低阈值，且比当前找到的最大速度还要快
+                if speed >= SPEED_THRESHOLD and speed > max_speed:
+                    max_speed = speed
+                    best_upcdn = cdn
+
+    if best_upcdn:
+        print(f"基于历史记录(24h内)，选择最快上传线路: {best_upcdn} (测速: {max_speed / 1024 / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+
+    return best_upcdn
+
+
+def save_cdn_record(upcdn: str, file_size: int, duration: float):
+    """
+    计算上传速度（字节/秒）并保存到本地记录中。
+    """
+    if duration <= 0:
+        return
+
+    speed = file_size / duration
+    cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
+
+    try:
+        cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
+        if not isinstance(cdn_info, dict):
+            cdn_info = {}
+
+        # 保存时直接将速度计算好存入
+        cdn_info[upcdn] = {
+            "size": file_size,
+            "duration": duration,
+            "speed": speed,
+            "timestamp": time.time()
+        }
+        save_json(cdn_info_path, cdn_info)
+        print(f"成功记录节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / (1024 * 1024):.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+    except Exception as e:
+        print(f"记录 CDN 状态时发生错误: {e}")
+
+
 def upload_to_bilibili(
         video_path: str,
         cover_path: str,
@@ -381,7 +443,7 @@ def upload_to_bilibili(
         human_type2=1002,
         topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
         topic_id: int = 1313687,
-        max_execution_time: int = 1800  # 新增最大执行时间参数，默认半小时 (1800秒)
+        max_execution_time: int = 1800
 ) -> dict:
     """
     一步完成B站投稿流程，返回投稿结果。
@@ -396,7 +458,6 @@ def upload_to_bilibili(
 
     sess = get_session(sessdata, bili_jct)
 
-    # 封装一个内部检查函数，确保主要步骤间不会超时
     def check_timeout(step_name):
         if time.time() > deadline:
             raise TimeoutError(f"【{step_name}】时已超过最大执行时间限制（{max_execution_time}秒），自动终止。")
@@ -404,23 +465,31 @@ def upload_to_bilibili(
     cover_url = upload_cover(sess, cover_path, bili_jct=bili_jct)
     check_timeout("上传封面")
 
-    # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
+    video_upload_start_time = time.time()  # 记录纯视频上传开始时间
+
     pre = preupload_video(sess, video_path)
     check_timeout("预上传视频")
 
     biz_id = pre["biz_id"]
     filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
+    chosen_upcdn = pre.pop('_chosen_upcdn', None)  # 提取 upcdn
 
-    # time.sleep(random.uniform(1, 1))  # 模拟人类操作，等待1-3秒
     meta = post_video_meta(sess, pre, video_path)
     check_timeout("提交视频元数据")
 
-    # 传入 deadline，让最容易卡住的分片上传自身具备超时中断能力
     parts = upload_chunks(sess, video_path, pre, meta, deadline=deadline)
     check_timeout("分片上传")
 
     finalize_upload(sess, pre, meta, parts)
     check_timeout("完成上传合并")
+
+    video_upload_end_time = time.time()   # 记录纯视频上传结束时间
+
+    # --- 调用独立的保存函数 ---
+    if chosen_upcdn:
+        upload_duration = video_upload_end_time - video_upload_start_time
+        video_size = os.path.getsize(video_path)
+        save_cdn_record(chosen_upcdn, video_size, upload_duration)
 
     return submit_post(
         sess, cover_url, biz_id, filename,
@@ -428,6 +497,8 @@ def upload_to_bilibili(
         copyright_type, tid, recreate, dynamic, no_reprint,
         bili_jct=bili_jct, human_type2=human_type2, topic_detail=topic_detail, topic_id=topic_id
     )
+
+
 
 def get_bili_category_id(cookie_str):
     """
