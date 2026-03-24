@@ -379,7 +379,7 @@ def get_best_upcdn(upcdn_list: list) -> str:
     best_upcdn = None
     max_speed = -1
     current_time = time.time()
-    SPEED_THRESHOLD = 100 * 1024  # 100 KB/s
+    SPEED_THRESHOLD = 100  # 100 KB/s
 
     for cdn in upcdn_list:
         record = cdn_info.get(cdn)
@@ -394,7 +394,7 @@ def get_best_upcdn(upcdn_list: list) -> str:
                     best_upcdn = cdn
 
     if best_upcdn:
-        print(f"基于历史记录(24h内)，选择最快上传线路: {best_upcdn} (测速: {max_speed / 1024 / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+        print(f"基于历史记录(24h内)，选择最快上传线路: {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
 
     return best_upcdn
 
@@ -406,7 +406,7 @@ def save_cdn_record(upcdn: str, file_size: int, duration: float):
     if duration <= 0:
         return
 
-    speed = file_size / duration
+    speed = file_size / duration / 1024
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
 
     try:
