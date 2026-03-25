@@ -436,6 +436,7 @@ def gen_user_detail_upload_info(manager, user_list):
     user_config = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
 
     simple_need_process_users = user_config.get('simple_need_process_users', [])
+    self_user_list = user_config.get('self_user_list', [])
     max_exist_similar_count, max_total_count = get_send_count_by_hour()
 
     for user_name, detail_info in user_detail_upload_info.items():
@@ -445,7 +446,7 @@ def gen_user_detail_upload_info(manager, user_list):
         platform_upload_count = user_statistic_info.get(user_name, {}).get('platform_upload_count', 0)
         total_today = total_count + platform_upload_count
         target_count = max_total_count
-        if user_name in simple_need_process_users:
+        if user_name not in self_user_list or user_name in simple_need_process_users:
             target_count = 1
         need_count = max(target_count - total_today, 0)
         need_count = min(need_count, 1)
