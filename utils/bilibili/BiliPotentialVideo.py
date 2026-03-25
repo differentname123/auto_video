@@ -695,12 +695,19 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
-    proxies_list = get_proxy()
-    proxies_list = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
     global_start_time = time.time()  # 新增：记录整个函数的全局开始时间
     timeout_triggered = False  # 新增：全局超时标志位
 
     for attempt in range(1, max_retries + 1):
+        proxies_list = get_proxy()
+        proxies_list = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
+        if not proxies_list:
+            print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
+            fail_count += 1
+            time.sleep(5)
+            continue
+
+
         round_start_time = time.time()  # 保持原有的单轮计时用于日志打印
         success_count = 0
         fail_count = 0
