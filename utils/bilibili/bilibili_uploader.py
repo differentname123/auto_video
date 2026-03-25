@@ -422,7 +422,7 @@ def save_cdn_record(upcdn: str, file_size: int, duration: float):
             "timestamp": time.time()
         }
         save_json(cdn_info_path, cdn_info)
-        print(f"成功记录节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / (1024 * 1024):.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+        print(f"成功记录节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / (1024):.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
     except Exception as e:
         print(f"记录 CDN 状态时发生错误: {e}")
 
