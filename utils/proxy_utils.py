@@ -123,37 +123,39 @@ def get_top_proxies(count=None):
 
 def get_proxy():
     """"""
-    base_proxy_list = [
-        {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"},
+    base_proxy_list = []
 
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611"},
-        {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185",
-         "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
-    ]  # 来源于https://dashboard.webshare.io/
-
-    proxies = get_webshare_proxy_list()
-
-    if proxies:
-        print(f"从 webshare.io 获取到 {len(proxies)} 个代理，正在合并到基础列表中...")
-        base_proxy_list = proxies
-
+    # base_proxy_list = [
+    #     {"http": "http://115.190.54.74:8888", "https": "http://115.190.54.74:8888"},
+    #
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611"},
+    #     {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185",
+    #      "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
+    # ]  # 来源于https://dashboard.webshare.io/
+    #
+    # proxies = get_webshare_proxy_list()
+    # return proxies
+    #
+    # if proxies:
+    #     print(f"从 webshare.io 获取到 {len(proxies)} 个代理，正在合并到基础列表中...")
+    #     base_proxy_list = proxies
     best_proxies = get_top_proxies()  # 来源于 https://docs.proxyscrape.com/api-reference/public-api/get-proxy-list
     if best_proxies:
         # 加入到base_proxy_list中

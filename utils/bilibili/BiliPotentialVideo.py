@@ -157,6 +157,136 @@ BASE_PROFILES = [
     }
 ]
 
+def get_user_videos_via_worker(mid: int,
+                               worker_url: str = "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
+                               desired_count: int = 30,
+                               order: str = 'pubdate',
+                               local_proxy: str = "http://127.0.0.1:7890") -> list:
+    """
+    纯粹的 Cloudflare Worker 转发版，专注拉取数据。
+    满足要求：
+    1. 代理仅在 session 级别生效，不污染全局环境变量
+    2. 只有 mid 是必填参数
+    3. 极致稳健，任何报错均返回空列表 []
+    """
+    # 【核心 3：绝对稳健】全量逻辑被 Try/Except 包裹，阻断一切崩溃可能
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+            "Accept": "*/*",
+            "Accept-Language": "zh-CN,zh;q=0.9,zh-TW;q=0.8,zh-HK;q=0.7,en-US;q=0.6,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Origin": "https://space.bilibili.com",
+            "Sec-GPC": "1",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Priority": "u=4",
+            "TE": "trailers",
+            "Cookie": "buvid3=ADC48BBC-C48D-32BD-6E56-4BFB55D0DE9603414infoc; b_nut=1772839403; __at_once=18129603945248101006; buvid4=B47E505C-ED4B-8166-D3D2-A6A677005C3404828-026030707-tPguV4f7Z30ul7OW%2FTU71Q%3D%3D; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NzMwOTg2MDUsImlhdCI6MTc3MjgzOTM0NSwicGx0IjotMX0.ZzJwVNy04i8RjUhw9kpXI_CBY-n2vfmL8BWtEfKIgGU; bili_ticket_expires=1773098545; buvid_fp=446700a5f2f4f41f3e38bd98cabbc908; CURRENT_FNVAL=2000; sid=gqvw5gl7",
+            "Referer": f"https://space.bilibili.com/{mid}/upload/video"
+        }
+
+        session = requests.Session()
+        session.headers.update(headers)
+
+        # 【核心 1：隔离代理影响】通过 Session 局部注入代理，用完即毁，绝不污染系统环境变量
+        if local_proxy:
+            session.proxies = {
+                "http": local_proxy,
+                "https": local_proxy
+            }
+
+        # ---------------- 内部工具函数 ----------------
+        def get_mixin_key(orig: str) -> str:
+            mixin_key_enc_tab = [
+                46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+                33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+                61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+                36, 20, 34, 44, 52
+            ]
+            return ''.join([orig[i] for i in mixin_key_enc_tab])[:32]
+
+        def get_wbi_keys() -> tuple:
+            nav_url = "https://api.bilibili.com/x/web-interface/nav"
+            resp = session.get(worker_url, params={"url": nav_url}, timeout=30)
+            resp.raise_for_status()
+
+            wbi_img = resp.json().get('data', {}).get('wbi_img', {})
+            return wbi_img.get('img_url', '').rsplit('/', 1)[1].split('.')[0], \
+                wbi_img.get('sub_url', '').rsplit('/', 1)[1].split('.')[0]
+
+        def sign_params_for_wbi(params: dict, img_key: str, sub_key: str) -> dict:
+            mixin_key = get_mixin_key(img_key + sub_key)
+            params['wts'] = round(time.time())
+            sorted_params = dict(sorted(params.items()))
+            encoded_parts = []
+            for k, v in sorted_params.items():
+                filtered_value = ''.join(filter(lambda chr: chr not in "!'()*", str(v)))
+                encoded_parts.append(f"{k}={urllib.parse.quote(filtered_value, safe='')}")
+            query = '&'.join(encoded_parts)
+            params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
+            return params
+
+        # ---------------- 主逻辑 ----------------
+        img_key, sub_key = get_wbi_keys()
+
+        collected_videos = []
+        current_page = 1
+        page_size = 40
+
+        while len(collected_videos) < desired_count:
+            unsigned_params = {
+                'pn': current_page, 'ps': page_size, 'tid': 0, 'special_type': '',
+                'order': order, 'mid': mid, 'index': 0, 'keyword': '', 'order_avoided': 'true',
+                'platform': 'web',
+                'web_location': '333.1387',
+                'dm_img_list': '[]',
+                'dm_img_str': 'V2ViR0wgMS',
+                'dm_cover_img_str': 'QU5HTEUgKE5WSURJQSwgTlZJRElBIEdlRm9yY2UgR1RYIDk4MCBEaXJlY3QzRDExIHZzXzVfMCBwc181XzApLCBvciBzaW1pbGFyR29vZ2xlIEluYy4gKE5WSURJQS',
+                'dm_img_inter': '{"ds":[],"wh":[5235,7405,15],"of":[491,982,491]}'
+            }
+
+            signed_params = sign_params_for_wbi(unsigned_params, img_key, sub_key)
+
+            target_api = "https://api.bilibili.com/x/space/wbi/arc/search"
+
+            req = requests.Request('GET', target_api, params=signed_params)
+            prepared_url = req.prepare().url
+
+            response = session.get(worker_url, params={"url": prepared_url}, timeout=30)
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get("code") != 0:
+                print(f"❌ 接口报错: {result.get('message')}")
+                break
+
+            data = result.get("data")
+            if not data: break
+
+            new_videos = data.get('list', {}).get('vlist', [])
+            if not new_videos:
+                print("✅ 已经到底部，没有更多视频了。")
+                break
+
+            collected_videos.extend(new_videos)
+
+            if len(collected_videos) >= data.get('page', {}).get('count', 0):
+                print("✅ 已获取该用户所有公开视频。")
+                break
+
+            current_page += 1
+            time.sleep(1)
+
+        return collected_videos
+
+    except Exception as e:
+        print(f"⚠️ 函数执行期间发生异常，已静默拦截拦截: {e} {local_proxy} {worker_url}")
+        return []
+
+
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
                            use_proxy: bool = False, proxies: dict = None,
@@ -423,12 +553,41 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
             return 2, random_index, light_status, None
         else:  # 时间冷却跳过 (skip_code == 0)
             return 0, -1, 0, None
+
+    # ==== 1. 先随机选择代理 ====
     proxies = None
     if proxies_list:
         proxies = random.choice(proxies_list)
+
+    # ==== 2. 随机决定路线 (抛硬币：True代表Worker，False代表老办法) ====
+    use_worker = random.choice([True, False, False])
+
     # ==== 3. 真正需要拉取的用户进入这里 ====
-    videos, used_index, used_proxy = get_user_videos_public(mid=uid, desired_count=40, use_proxy=True,
-                                                new_profile_list=new_profile_list, proxies=proxies)
+    if use_worker:
+        # 【按您的绝佳思路】：直接提取字典里的 'http' 字符串传给 local_proxy，原函数完全不用改！
+        proxy_str = proxies.get("http") if proxies else None
+        random_value = random.random()
+        if random_value > 0.5:
+            proxy_str = "http://127.0.0.1:7890"
+
+        worker_url_list = ["https://clear-emu-39.zhuxiaohu98.deno.net/",
+                           "https://vercel-proxy-kappa-ruddy.vercel.app/api",
+                           "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/"]
+        worker_url = random.choice(worker_url_list)  # 随机选择一个 Worker URL，增加冗余和稳定性
+        videos = get_user_videos_via_worker(mid=uid, desired_count=40, local_proxy=proxy_str, worker_url=worker_url)
+        used_index = random_index
+        used_proxy = f'{proxy_str}_{worker_url}'  # 依然如实记录这次使用了哪个代理字典
+    else:
+        # 走老方法
+        videos, used_index, used_proxy = get_user_videos_public(
+            mid=uid,
+            desired_count=40,
+            use_proxy=True,
+            new_profile_list=new_profile_list,
+            proxies=proxies
+        )
+
+    # ==== 下方逻辑一字未改，严格遵守您的要求 ====
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -457,6 +616,8 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
         return 1, used_index, light_status, used_proxy
 
     return -1, used_index, light_status, used_proxy
+
+
 
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
