@@ -225,7 +225,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
     try:
         img_key, sub_key = get_wbi_keys()
     except Exception as e:
-        print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e}")
+        print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e} {proxies}")
         return [], random_index, proxies  # 修改点：将 proxies 随错误一起返回
 
     collected_videos = []
@@ -611,13 +611,20 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             print("  本轮没有使用任何 Profile (可能是用户数据都在未过期跳过范围内)。")
         print(">>> -------------------------------------- <<<")
 
-        # 修改点：在此处新增打印本轮 IP代理（Proxies） 的详细统计报表
+        # 修改点：在此处新增打印本轮 IP代理（Proxies） 的详细统计报表 (已增加成功率降序排序逻辑)
         print(">>> 🌐 本轮 IP代理 (Proxies) 详细统计 <<<")
         if proxy_stats:
-            for p_str, stats in proxy_stats.items():
+            # 按照成功率 (success/total) 降序排序
+            sorted_proxy_stats = sorted(
+                proxy_stats.items(),
+                key=lambda x: (x[1]['success'] / x[1]['total']) if x[1]['total'] > 0 else 0,
+                reverse=True
+            )
+            for p_str, stats in sorted_proxy_stats:
+                success_rate = (stats['success'] / stats['total']) * 100 if stats['total'] > 0 else 0
                 fail_rate = (stats['failed'] / stats['total']) * 100 if stats['total'] > 0 else 0
                 print(
-                    f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 失败率: {fail_rate:.2f}%")
+                    f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 成功率: {success_rate:>6.2f}% | 失败率: {fail_rate:>6.2f}%")
         else:
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(">>> -------------------------------------- <<<\n")

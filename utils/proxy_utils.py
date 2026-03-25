@@ -147,6 +147,13 @@ def get_proxy():
         {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185",
          "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
     ]  # 来源于https://dashboard.webshare.io/
+
+    proxies = get_webshare_proxy_list()
+
+    if proxies:
+        print(f"从 webshare.io 获取到 {len(proxies)} 个代理，正在合并到基础列表中...")
+        base_proxy_list = proxies
+
     best_proxies = get_top_proxies()  # 来源于 https://docs.proxyscrape.com/api-reference/public-api/get-proxy-list
     if best_proxies:
         # 加入到base_proxy_list中
@@ -156,11 +163,98 @@ def get_proxy():
     return base_proxy_list
 
 
-if __name__ == "__main__":
-    # 调用时传入 count 参数，例如获取最快的 5 个代理
-    # 注意：确保不要在当前脚本中使用 os.environ 全局代理！
-    best_proxies = get_top_proxies(count=5)
+def get_webshare_proxy_list():
+    """
+    深度复制并执行 webshare.io 的代理列表请求
+    返回格式: [{"http": "...", "https": "..."}, ...]
+    """
+    # 1. 配置请求参数
+    url = "https://proxy.webshare.io/api/v2/proxy/list/"
+    params = {
+        "mode": "direct",
+        "page": 1,
+        "page_size": 10,
+        "plan_id": "13005892"
+    }
 
-    print("-" * 50)
-    print("最终返回的规范化代理列表：")
-    print(best_proxies)
+    # 2. 复制捕捉到的核心 Header
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+        # 核心认证 Token
+        "authorization": "Token p2lzyd9041sy0lriebv4jl8j6202bdrewb9pqmiu",
+        "origin": "https://dashboard.webshare.io",
+        "referer": "https://dashboard.webshare.io/",
+        "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
+    }
+
+    proxy_list = []
+
+    try:
+        # 3. 发送请求 (设置 10 秒超时)
+        response = requests.get(
+            url,
+            params=params,
+            headers=headers,
+            proxies=LOCAL_PROXY,
+            timeout=15
+        )
+
+        # 检查状态码
+        if response.status_code == 200:
+            data = response.json()
+            results = data.get("results", [])
+
+            # 4. 转换数据格式
+            for item in results:
+                # 拼接用户名密码认证格式的代理字符串
+                # 格式: http://username:password@ip:port
+                username = item.get("username")
+                password = item.get("password")
+                ip = item.get("proxy_address")
+                port = item.get("port")
+
+                proxy_str = f"http://{username}:{password}@{ip}:{port}"
+
+                proxy_list.append({
+                    "http": proxy_str,
+                    "https": proxy_str
+                })
+        else:
+            print(f"请求失败，状态码: {response.status_code}")
+
+    except requests.exceptions.RequestException as e:
+        # 捕获所有网络异常 (连接超时, DNS 错误等)
+        print(f"发生网络异常: {e}")
+    except ValueError:
+        # 捕获 JSON 解析错误
+        print("返回结果不是有效的 JSON 格式")
+    except Exception as e:
+        # 捕获其他不可预知的错误
+        print(f"发生未知错误: {e}")
+
+    # 5. 始终返回列表，即使为空
+    return proxy_list
+
+
+if __name__ == "__main__":
+    # # 调用时传入 count 参数，例如获取最快的 5 个代理
+    # # 注意：确保不要在当前脚本中使用 os.environ 全局代理！
+    # best_proxies = get_top_proxies(count=5)
+    #
+    # print("-" * 50)
+    # print("最终返回的规范化代理列表：")
+    # print(best_proxies)
+    #
+    # proxies = get_webshare_proxy_list()
+    # for p in proxies:
+    #     print(p)
+
+    proxy_list = get_proxy()
+    print()
