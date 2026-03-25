@@ -618,6 +618,67 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     return -1, used_index, light_status, used_proxy
 
 
+def filter_proxies(history_stats, proxies_list, max_count=20):
+    """
+    根据历史统计数据过滤代理列表，加入探索与利用机制。
+
+    规则：
+    1. 优质节点：24小时前更新的、或无记录的、或成功率 > 0 的。
+    2. 淘汰节点：24小时内更新且成功率 == 0 的（进入候选列表）。
+    3. 排序截取：按成功率降序排序，最多返回 max_count 个。
+    4. 保底机制：如果优质节点不足 10 个，从候选列表补齐至 10 个。
+    """
+    valid_proxies_with_rate = []
+    candidate_proxies_with_rate = []
+
+    current_time = time.time()
+    # 24小时对应的秒数
+    TWENTY_FOUR_HOURS = 12 * 3600
+
+    for proxy in proxies_list:
+        p_str = proxy.get("http")
+        stats = history_stats.get(p_str)
+
+        if stats:
+            last_update = stats.get('update_time', 0)
+            success_rate = stats.get('success_rate', 0.2)
+
+            # 判断逻辑：24小时前更新 OR 成功率 > 0
+            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate > 0:
+                # 存入元组 (代理字典, 成功率) 以便后续排序
+                valid_proxies_with_rate.append((proxy, success_rate))
+            else:
+                # 24小时内更新，且成功率为0，属于近期明确失效节点
+                candidate_proxies_with_rate.append((proxy, success_rate))
+        else:
+            # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
+            valid_proxies_with_rate.append((proxy, 0))
+
+    # 按照成功率降序排序 (成功率高的排前面)
+    valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
+
+    initial_valid_count = len(valid_proxies_with_rate)
+    padded_count = 0
+
+    # 检查是否需要保底补齐 (10个)
+    if initial_valid_count < 10:
+        needed = 10 - initial_valid_count
+        # 从候选列表(死节点)中取所需数量来补齐
+        pad_list = candidate_proxies_with_rate[:needed]
+        valid_proxies_with_rate.extend(pad_list)
+        padded_count = len(pad_list)
+
+    # 截取最大数量 max_count (默认15个)
+    final_proxies_with_rate = valid_proxies_with_rate[:max_count]
+
+    # 提取纯代理字典用于返回
+    final_proxies = [item[0] for item in final_proxies_with_rate]
+
+    # 打印重要信息报表
+    print(
+        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count})")
+
+    return final_proxies
 
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
@@ -626,13 +687,16 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     修改点：
     1. 增加 proxy_stats 字典，统计并打印每种代理的成功、失败及总量情况。
     2. 增加 max_run_time 默认 14400 秒 (4小时) 的全局超时控制。
+    3. 新增将 proxy_stats 增量持久化到本地 json 的逻辑，供 get_proxy 过滤使用。
     """
+    proxy_stats_file = r"W:\project\python_project\auto_video\config\proxy_stats.json"
+    history_stats = read_json(proxy_stats_file)
     total_mids = len(all_mid_list)
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
     proxies_list = get_proxy()
-
+    proxies_list = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
     global_start_time = time.time()  # 新增：记录整个函数的全局开始时间
     timeout_triggered = False  # 新增：全局超时标志位
 
@@ -790,6 +854,33 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(">>> -------------------------------------- <<<\n")
 
+        # ================== 新增：代理统计持久化落盘逻辑 ==================
+        if proxy_stats:
+            history_stats = read_json(proxy_stats_file)
+
+            current_timestamp = time.time()
+            for p_str, stats in proxy_stats.items():
+                if p_str not in history_stats:
+                    history_stats[p_str] = {'total': 0, 'success': 0, 'failed': 0}
+
+                # 累加历史数据
+                h_stats = history_stats[p_str]
+                if h_stats['total'] > 100:
+                    h_stats['total'] = 0
+                    h_stats['success'] = 0
+                    h_stats['failed'] = 0
+
+                h_stats['total'] += stats['total']
+                h_stats['success'] += stats['success']
+                h_stats['failed'] += stats['failed']
+
+                # 更新时间和成功/失败率
+                h_stats['update_time'] = current_timestamp
+                h_stats['success_rate'] = h_stats['success'] / h_stats['total'] if h_stats['total'] > 0 else 0
+                h_stats['fail_rate'] = h_stats['failed'] / h_stats['total'] if h_stats['total'] > 0 else 0
+            save_json(proxy_stats_file, history_stats)
+
+
         # 修改点：判断全局超时标志
         if timeout_triggered:
             print(f"[超时退出] 全局运行时间已超过最大限制({max_run_time}秒)，自动结束本阶段执行，不再重试。")
@@ -806,6 +897,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
 
     return fail_count < 200
+
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
