@@ -11,7 +11,7 @@ from application.dig_video import query_all_material_videos
 from application.video_common_config import USER_STATISTIC_INFO_PATH, STATISTIC_PLAY_COUNT_FILE, \
     DIG_HOT_VIDEO_PLAN_FILE, VIDEO_MAX_RETRY_TIMES, TaskStatus
 from utils.common_utils import read_json, save_json, get_user_type, gen_true_type_and_tags, \
-    has_continuous_common_substring, has_long_common_substring
+    has_continuous_common_substring, has_long_common_substring, init_config
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 
@@ -621,7 +621,7 @@ def match_user(user_detail_upload_info, video_info, all_video_info):
         hot_topic_count += 1
 
     for user_name, detail_info in user_detail_upload_info.items():
-        if user_name in ['dan', 'nana', 'taoxiao', 'junda', 'jun'] and final_score < 5000:
+        if user_name in ['dan', 'nana', 'taoxiao', 'junda', 'jun', 'xiaocai', 'jj'] and final_score < 5000:
             continue
         if user_name in ['zhuyang'] and final_score < 1000:
             continue
@@ -922,6 +922,15 @@ def send_good_plan(manager):
     :return:
     """
     need_process_users = ['hong', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'qiqixiao', 'ning', 'taoxiao', 'junda', 'liuzhu', 'jj', 'xiaocai']
+    config_map = init_config()
+    allow_user_list = []
+    for uid, detail in config_map.items():
+        name = detail.get('name')
+        allow_user_list.append(name)
+
+    # 调整need_process_users，删除不在allow_user_list中的用户
+    need_process_users = [user for user in need_process_users if user in allow_user_list]
+
     user_detail_upload_info = gen_user_detail_upload_info(manager, need_process_users)
     all_video_info = query_all_material_videos(manager, False)
     BLOCK_VIDEO_ID_FILE = r'W:\project\python_project\auto_video\config\block_video_id_file.json'  # 用于存放被屏蔽的视频bvid列表
