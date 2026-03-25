@@ -644,7 +644,7 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
             success_rate = stats.get('success_rate', 0.2)
 
             # 判断逻辑：24小时前更新 OR 成功率 > 0
-            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate > 0:
+            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate >= 0.5:
                 # 存入元组 (代理字典, 成功率) 以便后续排序
                 valid_proxies_with_rate.append((proxy, success_rate))
             else:
@@ -652,7 +652,7 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
                 candidate_proxies_with_rate.append((proxy, success_rate))
         else:
             # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
-            valid_proxies_with_rate.append((proxy, 0))
+            valid_proxies_with_rate.append((proxy, 0.5))
 
     # 按照成功率降序排序 (成功率高的排前面)
     valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
@@ -676,7 +676,7 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
 
     # 打印重要信息报表
     print(
-        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count})")
+        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count}) 最低成功率: {final_proxies_with_rate[-1] if final_proxies_with_rate else 'N/A'}")
 
     return final_proxies
 
@@ -822,8 +822,6 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             print(f"\n>>>> 触发最终扫尾保存：剩余的 {processed_since_save} 个新用户数据已落盘 <<<<\n")
 
         print(f"\n--- 第 {attempt} 轮多线程处理完成！总耗时: {time.time() - round_start_time:.2f} 秒。 ---")
-        print(
-            f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count})\n")
 
         print(">>> 📊 本轮 PROFILES (Index) 详细统计 <<<")
         if profile_stats:
@@ -852,6 +850,9 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                     f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 成功率: {success_rate:>6.2f}% | 失败率: {fail_rate:>6.2f}%")
         else:
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
+        print(
+            f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count})\n")
+
         print(">>> -------------------------------------- <<<\n")
 
         # ================== 新增：代理统计持久化落盘逻辑 ==================
