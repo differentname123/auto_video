@@ -1251,9 +1251,21 @@ def update_good_user_video():
     print(
         f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
 
-    max_hour = 0.5
-    if not (5 <= datetime.now().hour < 24):
+    hour = datetime.now().hour
+
+    if 1 <= hour < 5:
         max_hour = 2
+    elif 5 <= hour < 6:
+        max_hour = 0.5
+    elif 6 <= hour < 11:
+        max_hour = 1
+    elif 11 <= hour < 13:
+        max_hour = 0.5
+    elif 13 <= hour < 17:
+        max_hour = 1
+    else:
+        # 17点到24点 + 0点到1点
+        max_hour = 0.5
 
     is_finish = process_mid_list_concurrently(unique_uids, all_video_info, max_workers=20, save_interval=1000,
                                               max_hour=max_hour)
