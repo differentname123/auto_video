@@ -721,12 +721,13 @@ def gen_overlays_text_llm(video_path, video_info):
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None  # 达到最大重试次数后返回 None
 
+
 def check_owner_asr(owner_asr_info, video_duration, check_owner):
     """
         检查生成的asr文本是否正确，第一是验证每个时间是否合理（1.最长跨度不能够超过20s 2.时长的合理性（也就是最快和最慢的语速就能够知道文本对应的时长是否合理） 3.owner语音和本地speaker说话人日志的差异不能够太大）
 
     :param owner_asr_info: 包含 ASR 信息的字典列表
-    :return: 错误信息列表，若没有错误则返回空列表
+    :return: (检查是否通过, 错误信息, 是否包含owner)
     """
     max_end_time_ms = 0
     error_info = 'asr文本检查通过'
@@ -745,7 +746,7 @@ def check_owner_asr(owner_asr_info, video_duration, check_owner):
             # 检查 start 和 end 是否为字符串，如果不是，则格式错误
             if not isinstance(start_str, str) or not isinstance(end_str, str):
                 error_info = f"[ERROR] 片段 {i} 的时间格式不正确，应为字符串。数据: {segment}"
-                return False, error_info
+                return False, error_info, has_owner
 
             start_time_ms = time_to_ms(start_str)
             end_time_ms = time_to_ms(end_str)
@@ -763,19 +764,18 @@ def check_owner_asr(owner_asr_info, video_duration, check_owner):
             # 1. 最大文案长度不能超过 20s
             if len(owner_asr_info[i]['final_text']) > 200 and owner_asr_info[i]['speaker'] == 'owner':
                 error_info = f"[ERROR] 片段 {i} 文案长度：{len(owner_asr_info[i]['final_text'])} 跨度过长: {duration_ms} ms 文案为:{owner_asr_info[i]['final_text']}"
-                return False, error_info
+                return False, error_info, has_owner
 
         except (ValueError, TypeError) as e:
             error_info = f"[ERROR] 处理片段 {i} 时发生时间转换错误: {e}. 数据: {segment}"
-            return False, error_info
+            return False, error_info, has_owner
 
     # 循环结束后，检查 ASR 的最大时间是否超过视频总时长（允许1秒的误差）
     if max_end_time_ms > video_duration + 1000:
         error_info = f"[ERROR] ASR 最大结束时间 {max_end_time_ms} ms 超过视频总时长 {video_duration} ms"
-        return False, error_info
-    if has_owner is False:
-        error_info = f"[ERROR] ASR 文本中未检测到任何 'owner' 说话人内容"
-        return False, error_info
+        return False, error_info, has_owner
+
+    # 【已删除】旧逻辑中针对 has_owner is False 直接返回 False 并中断的校验
 
     # 为owner_asr_info增加source_clip_id字段，从1开始
     source_clip_id = 0
@@ -783,8 +783,7 @@ def check_owner_asr(owner_asr_info, video_duration, check_owner):
         source_clip_id += 1
         segment['source_clip_id'] = source_clip_id
 
-    return True, error_info
-
+    return True, error_info, has_owner
 
 def check_video_script(video_script_info, final_scene_info, is_need_narration=True):
     """
@@ -963,6 +962,8 @@ def gen_owner_asr_by_llm(video_path, video_info):
 
     # 记录是否已经成功解析出带有长无声的结果
     has_seen_large_gap_previously = False
+    # 记录是否已经成功解析出无owner的结果 (新增校验标志)
+    has_seen_no_owner_previously = False
 
     # --- 5. 带重试机制的核心逻辑 ---
     for attempt in range(1, max_retries + 1):
@@ -982,11 +983,20 @@ def gen_owner_asr_by_llm(video_path, video_info):
             # 解析和校验
             owner_asr_info = string_to_object(raw_response)
 
-            # 第一步：基础校验（原汁原味）
-            check_result, check_info = check_owner_asr(owner_asr_info, video_duration_ms, check_owner)
+            # 第一步：基础校验（原汁原味） -- 接收第三个参数 has_owner
+            check_result, check_info, has_owner = check_owner_asr(owner_asr_info, video_duration_ms, check_owner)
             if not check_result:
                 error_info = f"asr 检查未通过: {check_info} {raw_response} {log_pre}"
                 raise ValueError(error_info)
+
+            # 针对 has_owner 的二次校验机制
+            if not has_owner:
+                if has_seen_no_owner_previously:
+                    print(f"两次成功解析均未检测到 'owner' 说话人内容，推测为真实无owner段落，允许放行。 {log_pre}")
+                else:
+                    has_seen_no_owner_previously = True
+                    error_info = f"首次成功解析未检测到 'owner' 说话人内容，疑似漏识别，触发重试确认 {log_pre}"
+                    raise ValueError(error_info)
 
             has_large_gap = check_long_silence(owner_asr_info, video_duration_ms, max_silence_duration_ms)
             if has_large_gap:
@@ -1013,6 +1023,7 @@ def gen_owner_asr_by_llm(video_path, video_info):
             else:
                 print(f"达到最大重试次数，失败. {log_pre}")
                 return error_str, None  # 达到最大重试次数后返回 None
+
 
 
 def check_long_silence(owner_asr_info, video_duration_ms, max_silence_duration_ms):
