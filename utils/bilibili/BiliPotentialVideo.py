@@ -858,7 +858,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         else:
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(
-            f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count})\n")
+            f"统计汇总 -> 时间冷却跳过: {jump_count} | 轻量探测发起: {light_total_count} (失败: {light_fail_count}) -> 成功拦截重度请求: {light_skip_count} | 实际发起WBI重度请求: {heavy_request_count} (成功: {success_count}, 失败: {fail_count}) 当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} max_hour:{max_hour}\n")
 
         print(">>> -------------------------------------- <<<\n")
 
