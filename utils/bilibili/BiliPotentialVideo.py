@@ -618,7 +618,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     return -1, used_index, light_status, used_proxy
 
 
-def filter_proxies(history_stats, proxies_list, max_count=20):
+def filter_proxies(history_stats, proxies_list, max_count=15):
     """
     根据历史统计数据过滤代理列表，加入探索与利用机制。
 
@@ -652,7 +652,7 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
                 candidate_proxies_with_rate.append((proxy, success_rate))
         else:
             # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
-            valid_proxies_with_rate.append((proxy, 0.5))
+            candidate_proxies_with_rate.append((proxy, 0.1))
 
     # 按照成功率降序排序 (成功率高的排前面)
     valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
@@ -1251,7 +1251,7 @@ def update_good_user_video():
     print(
         f"筛选完成，当前共有 {len(all_video_score_list)} 个符合条件的高分视频。 来源于 {len(unique_uids)} 个不同的用户。")
 
-    max_hour = 1
+    max_hour = 0.5
     if not (5 <= datetime.now().hour < 24):
         max_hour = 2
 
