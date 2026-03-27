@@ -435,14 +435,14 @@ def get_llm_content_sub(prompt: str = '你好，Gemini！请介绍一下你自�
 
 
 @with_proxy
-def get_llm_content(prompt: str = '你好，Gemini！请介绍一下你自己。', model_name: str = "gemini-2.5-pro") -> str | None:
+def get_llm_content(prompt: str = '你好，Gemini！请介绍一下你自己。', model_name: str = "gemini-2.5-pro", back_model="gemini-2.5-flash-lite") -> str | None:
     try:
         try:
             return get_llm_content_sub(prompt, model_name)
         except Exception as e1:
             print(f"[WARN] 主模型失败: {e1}")
             try:
-                return get_llm_content_sub(prompt, "gemini-flash-latest")
+                return get_llm_content_sub(prompt, back_model)
             except Exception as e2:
                 print(f"[WARN] 备用模型失败: {e2}")
                 return get_llm_content_gemini2flash(prompt)

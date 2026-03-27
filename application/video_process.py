@@ -1479,45 +1479,45 @@ def crop_and_save_images(image_paths, output_dir, box_info):
             print(f"处理图片 {img_path} 时出错: {e}")
 
 if __name__ == "__main__":
-    mongo_base_instance = gen_db_object()
-    manager = MongoManager(mongo_base_instance)
-    video_path = r"W:\project\python_project\auto_video\videos\material\7602199964915552936\7602199964915552936_low_resolution.mp4"
-    # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
-    # output_path = os.path.join(output_dir, 'clip_video.mp4')
-    # clip_video_ms(video_path, 0, 5000, output_path)
-
-    # extract_audio(video_path)
-
-    # box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
-    # # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
-    # # detected_box = find_overall_subtitle_box_target_number(
-    # #     video_path, merged_timerange_list, output_dir=box_dir, video_duration_ms=78000
-    # # )
-    # # print(detected_box)
+    # mongo_base_instance = gen_db_object()
+    # manager = MongoManager(mongo_base_instance)
+    # video_path = r"W:\project\python_project\auto_video\videos\material\7602199964915552936\7602199964915552936_low_resolution.mp4"
+    # # output_dir = os.path.join(os.path.dirname(video_path), f'test_scenes')
+    # # output_path = os.path.join(output_dir, 'clip_video.mp4')
+    # # clip_video_ms(video_path, 0, 5000, output_path)
     #
-    # # 获取box_dir下面的所有jpg列表
-    # image_paths = []
-    # for file_name in os.listdir(box_dir):
-    #     if file_name.lower().endswith('.jpg'):
-    #         image_paths.append(os.path.join(box_dir, file_name))
+    # # extract_audio(video_path)
     #
-    # box = [[208, 963], [1712, 963], [1712, 1042], [208, 1042]]
-    # crop_and_save_images(image_paths, os.path.join(box_dir, 'cropped_images'), box)
-
-
-
-    video_info_list = manager.find_materials_by_ids(['7602198039888989481'])
-    for video_info in video_info_list:
-        video_id = video_info.get('video_id')
-        # fix_owner_asr_by_subtitle(video_info)
-        _process_single_video(video_id, video_info, is_need_narration=True)
+    # # box_dir = os.path.join(os.path.dirname(video_path), f'test_subtitle_box')
+    # # # merged_timerange_list = [{"startTime": 0, "endTime": 78000}]
+    # # # detected_box = find_overall_subtitle_box_target_number(
+    # # #     video_path, merged_timerange_list, output_dir=box_dir, video_duration_ms=78000
+    # # # )
+    # # # print(detected_box)
+    # #
+    # # # 获取box_dir下面的所有jpg列表
+    # # image_paths = []
+    # # for file_name in os.listdir(box_dir):
+    # #     if file_name.lower().endswith('.jpg'):
+    # #         image_paths.append(os.path.join(box_dir, file_name))
+    # #
+    # # box = [[208, 963], [1712, 963], [1712, 1042], [208, 1042]]
+    # # crop_and_save_images(image_paths, os.path.join(box_dir, 'cropped_images'), box)
+    #
+    #
+    #
+    # video_info_list = manager.find_materials_by_ids(['7602198039888989481'])
+    # for video_info in video_info_list:
+    #     video_id = video_info.get('video_id')
+    #     # fix_owner_asr_by_subtitle(video_info)
+    #     _process_single_video(video_id, video_info, is_need_narration=True)
 
     # time_list = [11167, 12433, 11750]
     # my_video_path = r"W:\project\python_project\auto_video\videos\material\7597766646886927679\7597766646886927679_low_resolution.mp4"
     # for timestamp in time_list:
     #     timestamp = timestamp / 1000
     #     save_frames_around_timestamp(my_video_path, timestamp, 3, str(os.path.join(os.path.dirname(my_video_path), 'scenes', f"{timestamp}")))
-    # video_dir = r"W:\project\python_project\auto_video\videos"
-    # # 删除所有超时的MP4
-    # batch_cleanup_mp4(video_dir, dry_run=False)
+    video_dir = r"W:\project\python_project\auto_video\videos"
+    # 删除所有超时的MP4
+    batch_cleanup_mp4(video_dir, dry_run=False)
 

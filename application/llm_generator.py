@@ -705,7 +705,19 @@ def gen_overlays_text_llm(video_path, video_info):
             model_name = random.choice(model_name_list)
             print(f"正在视频覆盖文字生成 (尝试 {attempt}/{max_retries}) {log_pre}")
             raw = get_llm_content_gemini_flash_video(prompt=full_prompt, video_path=video_path, model_name=model_name)
-            video_overlays_text_info = string_to_object(raw)
+
+            # --- 修改部分：增加内部异常捕获及备用模型回退逻辑 ---
+            try:
+                video_overlays_text_info = string_to_object(raw)
+            except Exception as parse_e:
+                backup_model = "gemini-2.5-flash-lite"
+                print(f"raw数据解析异常，启用备用模型 {backup_model} 重试: {parse_e} {log_pre}")
+                # 调用备用模型分析
+                raw = analyze_images_gemini(prompt=full_prompt, video_path=video_path, model_name=backup_model)
+                # 再次尝试解析
+                video_overlays_text_info = string_to_object(raw)
+            # ---------------------------------------------------
+
             check_result, check_info = check_overlays_text(video_overlays_text_info, video_duration_ms)
             if not check_result:
                 error_info = f"优化方案检查未通过: {check_info} {raw} {log_pre} {check_info}"
@@ -1110,7 +1122,7 @@ def gen_hudong_by_llm(video_path, video_info):
     desc = f"\n已有评论列表 (数字表示已获赞数量): {temp_comments}"
     # 模型选择逻辑（与原版保持一致）
     max_duration = 600
-    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+    model_name_list = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
     model_name = random.choice(model_name_list)
 
     if duration > max_duration:
@@ -2017,7 +2029,6 @@ def filter_and_sort_images(parsed_results, image_name_list):
     return sorted_results
 
 
-
 def gen_cover_info_llm(task_info, video_info_dict):
     """
     生成封面信息
@@ -2041,7 +2052,6 @@ def gen_cover_info_llm(task_info, video_info_dict):
     # 只保留video_script_info中的必要字段，构建一个新的字典
     filtered_video_script_info = {key: video_script_info.get(key, '') for key in needed_key_list}
 
-
     MAX_RETRIES = 3  # 设置最大重试次数
     prompt_file_path = './prompt/封面相关信息的生成.txt'
     prompt = read_file_to_str(prompt_file_path)
@@ -2056,7 +2066,8 @@ def gen_cover_info_llm(task_info, video_info_dict):
         try:
             # 1. 调用 LLM 获取原始文本
             # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
-            raw = analyze_images_gemini(prompt=full_prompt, model_name=model_name, image_paths=available_cover_path_list)
+            raw = analyze_images_gemini(prompt=full_prompt, model_name=model_name,
+                                        image_paths=available_cover_path_list)
             # 2. 尝试解析文本为对象
             try:
                 cover_info_list = string_to_object(raw)
@@ -2068,6 +2079,25 @@ def gen_cover_info_llm(task_info, video_info_dict):
                 traceback.print_exc()
                 error_info = f" {log_pre} {str(e)}"
                 print(f"生成封面信息 解析返回结果时出错: {str(e)}")
+
+                # === 新增：当返回的raw不对导致解析异常时，使用备用模型再运行一次 ===
+                fallback_model = "gemini-2.5-flash-lite"
+                print(f"尝试使用备用模型 {fallback_model} 重新运行...")
+                try:
+                    fallback_raw = analyze_images_gemini(prompt=full_prompt, model_name=fallback_model,
+                                                         image_paths=available_cover_path_list)
+                    fallback_cover_info_list = string_to_object(fallback_raw)
+                    fallback_sorted_results = filter_and_sort_images(fallback_cover_info_list, image_name_list)
+                    if not fallback_sorted_results:
+                        raise ValueError(
+                            f"生成封面信息 备用模型结果验证未通过: {fallback_sorted_results} {fallback_raw} {log_pre}")
+                    return "", fallback_sorted_results  # 备用模型成功，清空当前错误并返回
+                except Exception as fallback_e:
+                    traceback.print_exc()
+                    error_info = f" {log_pre} 备用模型也出错: {str(fallback_e)}"
+                    print(f"生成封面信息 备用模型解析也出错: {str(fallback_e)}")
+                # ====================================================================
+
                 # return error_info, None
 
         except Exception as e:
