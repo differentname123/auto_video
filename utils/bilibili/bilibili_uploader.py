@@ -13,17 +13,42 @@ import urllib.parse
 from utils.bilibili.get_danmu import get_cid_from_bvid
 from utils.common_utils import get_config, init_config, read_json, save_json
 
+
+# --- 新增的并发控制锁 ---
+class SimpleFileLock:
+    def __init__(self, lock_file, timeout=10):
+        self.lock_file = lock_file
+        self.timeout = timeout
+
+    def __enter__(self):
+        start_time = time.time()
+        while True:
+            try:
+                self.fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                return self
+            except FileExistsError:
+                if time.time() - start_time > self.timeout:
+                    raise TimeoutError(f"获取文件锁超时: {self.lock_file}")
+                time.sleep(0.1)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            os.close(self.fd)
+            os.remove(self.lock_file)
+        except OSError:
+            pass
+
+
 # --- 配置参数 ---
 SESSDATA = get_config("xiaoxiaosu_bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
 BILI_JCT = get_config("xiaoxiaosu_bilibili_csrf_token")
 
-
 # 默认投稿设置
-DEFAULT_COPYRIGHT = 1       # 1: 自制, 2: 转载
-DEFAULT_TID = 21            # 21-日常
-DEFAULT_RECREATE = -1       # -1: 允许二创, 1: 不允许
+DEFAULT_COPYRIGHT = 1  # 1: 自制, 2: 转载
+DEFAULT_TID = 21  # 21-日常
+DEFAULT_RECREATE = -1  # -1: 允许二创, 1: 不允许
 DEFAULT_DYNAMIC = "我的第一个B站投稿，希望大家喜欢！"
-DEFAULT_NO_REPRINT = 1     # 1: 允许转载, 0: 不允许
+DEFAULT_NO_REPRINT = 1  # 1: 允许转载, 0: 不允许
 
 HEADERS = {
     "User-Agent": (
@@ -94,6 +119,7 @@ def upload_cover(session: requests.Session, image_path: str, bili_jct=BILI_JCT) 
         raise RuntimeError(f"封面上传失败：{result.get('message')}")
     return result["data"]["url"]
 
+
 def fetch_bili_topics(cookie: str, type_pid=1029, type_id=21):
     """
     使用给定的 Cookie 获取 B 站创作中心话题类型信息。
@@ -154,11 +180,8 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
     user_conf = read_json(r'W:\project\python_project\auto_video\config\user_config.json')
     upcdn_list = user_conf.get('upcdn_list', ["estx", "akbd"])
 
-    # --- 调度逻辑变得非常清晰 ---
-    upcdn = get_best_upcdn(upcdn_list)
-    if not upcdn:
-        upcdn = random.choice(upcdn_list)
-        print(f"无有效/达标历史记录，随机选择上传线路: {upcdn} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+    # 独占模式获取最优节点
+    upcdn = get_best_upcdn(upcdn_list, size)
 
     params = {
         "probe_version": "20250923",
@@ -194,6 +217,7 @@ def preupload_video(session: requests.Session, video_path: str) -> dict:
     data['_chosen_upcdn'] = upcdn
 
     return data
+
 
 def post_video_meta(session: requests.Session, pre: dict, video_path: str) -> dict:
     """
@@ -269,9 +293,10 @@ def upload_chunks(session: requests.Session, video_path: str, pre: dict, meta: d
             )
             resp.raise_for_status()
             if resp.text.strip() != "MULTIPART_PUT_SUCCESS":
-                raise RuntimeError(f"分片{i+1}上传失败: {resp.text}")
+                raise RuntimeError(f"分片{i + 1}上传失败: {resp.text}")
             parts.append({"partNumber": i + 1, "eTag": "etag"})
     return parts
+
 
 def finalize_upload(session: requests.Session, pre: dict, meta: dict, parts: list) -> dict:
     """
@@ -304,22 +329,22 @@ def finalize_upload(session: requests.Session, pre: dict, meta: dict, parts: lis
 
 
 def submit_post(
-    session: requests.Session,
-    cover_url: str,
-    biz_id: int,
-    filename: str,
-    title: str,
-    description: str,
-    tags: str,
-    copyright_type: int,
-    tid: int,
-    recreate: int,
-    dynamic: str,
-    no_reprint: int,
-    bili_jct: str = BILI_JCT,
-    human_type2=1002,
-    topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
-    topic_id: int = 1313687
+        session: requests.Session,
+        cover_url: str,
+        biz_id: int,
+        filename: str,
+        title: str,
+        description: str,
+        tags: str,
+        copyright_type: int,
+        tid: int,
+        recreate: int,
+        dynamic: str,
+        no_reprint: int,
+        bili_jct: str = BILI_JCT,
+        human_type2=1002,
+        topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
+        topic_id: int = 1313687
 
 ) -> dict:
     """
@@ -366,76 +391,123 @@ def submit_post(
     return data["data"]
 
 
-def get_best_upcdn(upcdn_list: list) -> str:
+def get_best_upcdn(upcdn_list: list, size=1) -> str:
     """
-    优先选择24小时没有记录或者一直没有记录的节点，以保证每个节点每天都有机会被测速。
-    如果都在24小时内有记录，则筛选速度最快且 >= 100KB/s 的 CDN 节点。
-    如果没有合适的节点，返回 None。
+    优先选择没被使用的节点：
+    1. 超过24小时未使用或从未测试过的节点。
+    2. 如果都在24小时内，选择速度最快且 >= 100KB/s 的 CDN 节点。
+    如果没有满足条件的节点，最多等待5分钟（有节点被释放且满足条件），超时抛错。
+    增加死锁兜底机制：如果某个节点被占用超过1小时，强制释放加入可用列表。
     """
+    file_size = size / 1024 /1024
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
-    cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
+    lock_file_path = cdn_info_path + '.lock'
 
-    # 移除原本的 'or not cdn_info'，因为如果记录为空（从未测速），我们正好需要把它们选出来
-    if not isinstance(cdn_info, dict):
-        cdn_info = {}
-
-    best_upcdn = None
-    max_speed = -1
-    current_time = time.time()
     SPEED_THRESHOLD = 100  # 100 KB/s
+    wait_timeout = 300  # 最大等待时间 300 秒 (5分钟)
+    max_occupied_time = 1800
+    start_wait_time = time.time()
 
-    for cdn in upcdn_list:
-        record = cdn_info.get(cdn)
+    while True:
+        with SimpleFileLock(lock_file_path):
+            cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
+            if not isinstance(cdn_info, dict):
+                cdn_info = {}
 
-        # 新增逻辑：如果一直没有记录，或者记录的时间已经超过24小时（86400秒），优先直接选择它
-        if not record or (current_time - record.get("timestamp", 0) > 86400):
-            print(f"选择上传线路: {cdn} (无有效记录或记录过期) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
-            cdn_info[cdn] = {"timestamp": current_time, "speed": 0}  # 初始化记录，避免重复选择
-            save_json(cdn_info_path, cdn_info)  # 立即保存，确保下次能看到这个记录
-            return cdn
+            current_time = time.time()
+            best_upcdn = None
+            max_speed = -1
 
-        # 原有逻辑：如果在24小时内有记录，比较速度找最快的
-        if record:
-            record_time = record.get("timestamp", 0)
-            if current_time - record_time <= 86400:
-                speed = record.get("speed", 0)
-                # 必须满足最低阈值，且比当前找到的最大速度还要快
-                if speed >= SPEED_THRESHOLD and speed > max_speed:
-                    max_speed = speed
-                    best_upcdn = cdn
+            # 1. 过滤出没被占用使用的节点，并处理死锁的节点
+            available_cdns = []
+            for cdn in upcdn_list:
+                record = cdn_info.get(cdn, {})
+                if record.get('occupied', False):
+                    occupied_at = record.get('occupied_at', 0)
+                    if current_time - occupied_at > max_occupied_time:
+                        print(
+                            f"发现节点 {cdn} 被占用超过1小时，判定为异常死锁，强制回收加入可用列表 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        available_cdns.append(cdn)
+                else:
+                    available_cdns.append(cdn)
 
-    if best_upcdn:
-        print(f"基于历史记录(24h内)，选择最快上传线路: {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+            if available_cdns:
+                # 2. 检查是否有超过24小时未使用或完全没有记录的节点
+                for cdn in available_cdns:
+                    record = cdn_info.get(cdn, {})
+                    if not record or (current_time - record.get("timestamp", 0) > 24 * 3600):
+                        best_upcdn = cdn
+                        print(
+                            f"选择上传线路: {cdn} 线路节点速度 (无有效记录或记录过期) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  file_size:{file_size}")
+                        break
 
-    return best_upcdn
+                # 3. 如果都在有效期内，选择速度最快且 >= 100KB/s 的节点
+                if not best_upcdn:
+                    for cdn in available_cdns:
+                        record = cdn_info.get(cdn, {})
+                        speed = record.get("speed", 0)
+                        if speed >= SPEED_THRESHOLD and speed > max_speed:
+                            max_speed = speed
+                            best_upcdn = cdn
+
+                    if best_upcdn:
+                        print(
+                            f"基于历史记录(24h内)，选择最快上传线路: 线路节点速度 {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} file_size:{file_size}")
+
+            # 如果找到了节点，标记为占用，并返回
+            if best_upcdn:
+                if best_upcdn not in cdn_info:
+                    cdn_info[best_upcdn] = {"timestamp": current_time, "speed": 0}
+                cdn_info[best_upcdn]['occupied'] = True
+                cdn_info[best_upcdn]['occupied_at'] = current_time  # 记录具体的占用时间戳
+                save_json(cdn_info_path, cdn_info)
+                return best_upcdn
+
+        # 如果未选到节点，检查是否超过 5 分钟
+        if time.time() - start_wait_time > wait_timeout:
+            raise RuntimeError("分配 CDN 节点超时：5 分钟内无满足条件的节点被释放。")
+
+        # 短暂等待后重新尝试获取
+        time.sleep(2)
 
 
 def save_cdn_record(upcdn: str, file_size: int, duration: float):
     """
     计算上传速度（字节/秒）并保存到本地记录中。
+    重要：无论时长是否有效，都必须将节点的占用的状态释放掉！
     """
-    if duration <= 0:
-        return
-
-    speed = file_size / duration / 1024
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
+    lock_file_path = cdn_info_path + '.lock'
 
-    try:
-        cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
-        if not isinstance(cdn_info, dict):
-            cdn_info = {}
+    with SimpleFileLock(lock_file_path):
+        try:
+            cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
+            if not isinstance(cdn_info, dict):
+                cdn_info = {}
 
-        # 保存时直接将速度计算好存入
-        cdn_info[upcdn] = {
-            "size": file_size,
-            "duration": duration,
-            "speed": speed,
-            "timestamp": time.time()
-        }
-        save_json(cdn_info_path, cdn_info)
-        print(f"成功记录节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / (1024):.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
-    except Exception as e:
-        print(f"记录 CDN 状态时发生错误: {e}")
+            if upcdn not in cdn_info:
+                cdn_info[upcdn] = {}
+
+            # 核心机制：释放节点的占用状态
+            cdn_info[upcdn]['occupied'] = False
+            # occupied_at 不必清理，因为下一次被占用时会被新时间戳覆盖，且此处 occupied 已经是 False
+
+            if duration > 0:
+                speed = file_size / duration / 1024
+                cdn_info[upcdn].update({
+                    "size": file_size,
+                    "duration": duration,
+                    "speed": speed,
+                    "timestamp": time.time()
+                })
+                print(
+                    f"成功记录并释放节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / 1024:.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+            else:
+                print(f"释放节点 {upcdn} (未产生有效测速) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            save_json(cdn_info_path, cdn_info)
+        except Exception as e:
+            print(f"记录/释放 CDN 状态时发生错误: {e}")
 
 
 def upload_to_bilibili(
@@ -485,22 +557,31 @@ def upload_to_bilibili(
     filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
     chosen_upcdn = pre.pop('_chosen_upcdn', None)  # 提取 upcdn
 
-    meta = post_video_meta(sess, pre, video_path)
-    check_timeout("提交视频元数据")
+    video_upload_end_time = None
 
-    parts = upload_chunks(sess, video_path, pre, meta, deadline=deadline)
-    check_timeout("分片上传")
+    # 将上传逻辑使用 try-finally 包裹，保证不论成功失败，节点占用必定被释放
+    try:
+        meta = post_video_meta(sess, pre, video_path)
+        check_timeout("提交视频元数据")
 
-    finalize_upload(sess, pre, meta, parts)
-    check_timeout("完成上传合并")
+        parts = upload_chunks(sess, video_path, pre, meta, deadline=deadline)
+        check_timeout("分片上传")
 
-    video_upload_end_time = time.time()   # 记录纯视频上传结束时间
+        finalize_upload(sess, pre, meta, parts)
+        check_timeout("完成上传合并")
 
-    # --- 调用独立的保存函数 ---
-    if chosen_upcdn:
-        upload_duration = video_upload_end_time - video_upload_start_time
-        video_size = os.path.getsize(video_path)
-        save_cdn_record(chosen_upcdn, video_size, upload_duration)
+        video_upload_end_time = time.time()  # 记录纯视频上传结束时间
+
+    finally:
+        # --- 调用独立的保存函数去记录速度并释放被占用的节点 ---
+        if chosen_upcdn:
+            if video_upload_end_time:
+                upload_duration = video_upload_end_time - video_upload_start_time
+                video_size = os.path.getsize(video_path)
+                save_cdn_record(chosen_upcdn, video_size, upload_duration)
+            else:
+                # 说明中间上传出现了中断或失败，传入 0 确保只释放节点不更新错误测速
+                save_cdn_record(chosen_upcdn, 0, 0)
 
     return submit_post(
         sess, cover_url, biz_id, filename,
@@ -508,7 +589,6 @@ def upload_to_bilibili(
         copyright_type, tid, recreate, dynamic, no_reprint,
         bili_jct=bili_jct, human_type2=human_type2, topic_detail=topic_detail, topic_id=topic_id
     )
-
 
 
 def get_bili_category_id(cookie_str):
@@ -553,6 +633,7 @@ def get_bili_category_id(cookie_str):
         return resp.json()
     except ValueError:
         return resp.text
+
 
 def send_bilibili_dm_command(cookie_str, csrf, question, duration, optionA, optionB, bvid, aid):
     """
@@ -609,7 +690,6 @@ def send_bilibili_dm_command(cookie_str, csrf, question, duration, optionA, opti
 
 
 if __name__ == "__main__":
-
     # config_map = init_config()
     # user_name = 'mama'
     # target_value = None
