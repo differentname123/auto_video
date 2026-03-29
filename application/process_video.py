@@ -16,6 +16,7 @@ import os
 import shutil
 import time
 import traceback
+import queue  # [新增] 引入 queue 用于处理队列超时异常
 from datetime import datetime, timezone, timedelta
 
 from bson import ObjectId
@@ -634,7 +635,6 @@ def gen_upload_info(task_info, video_info_dict, manager):
     return failure_details, cost_time_info
 
 
-
 def gen_cover_info(task_info, video_info_dict, manager):
     """
     生成封面的信息
@@ -669,8 +669,9 @@ def process_single_task(task_info, manager, gen_video=False):
 
     - manager: 外部传入的 MongoManager 实例，用于数据库操作。
     """
+    # [修改点] 增加 PID 日志
     print(
-        f"🚀 视频开始视频处理任务{task_info.get('userName', 'N/A')} {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        f"🚀 [PID: {os.getpid()}] 视频开始视频处理任务{task_info.get('userName', 'N/A')} {task_info.get('_id', 'N/A')} {task_info.get('video_id_list', 'N/A')}。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
     # [新增] 初始化计时变量
     all_cost_time_info = {}
     start_time = time.time()
@@ -700,16 +701,18 @@ def process_single_task(task_info, manager, gen_video=False):
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
+    # [修改点] 增加 PID 日志
     print(
-        f"2️⃣ 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+        f"2️⃣ [PID: {os.getpid()}] 任务 {video_info_dict.keys()} 单视频信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     # 生成新的视频脚本方案
     failure_details, cost_time_info = gen_video_script(task_info, video_info_dict, manager)
     all_cost_time_info.update(cost_time_info)
     if check_failure_details(failure_details):
         return failure_details, video_info_dict, chosen_script
+    # [修改点] 增加 PID 日志
     print(
-        f"3️⃣ 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+        f"3️⃣ [PID: {os.getpid()}] 任务 {video_info_dict.keys()} 脚本生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     # 生成封面的信息
     failure_details, cost_time_info = gen_cover_info(task_info, video_info_dict, manager)
@@ -724,8 +727,9 @@ def process_single_task(task_info, manager, gen_video=False):
         return failure_details, video_info_dict, chosen_script
     task_info['status'] = TaskStatus.PLAN_GENERATED
     manager.upsert_tasks([task_info])
+    # [修改点] 增加 PID 日志
     print(
-        f"4️⃣任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
+        f"4️⃣ [PID: {os.getpid()}] 任务 {video_info_dict.keys()} 投稿信息生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')} 耗时 {cost_time_info}")
 
     if gen_video:
         # 根据方案生成最终视频
@@ -736,11 +740,13 @@ def process_single_task(task_info, manager, gen_video=False):
         task_info['status'] = TaskStatus.TO_UPLOADED
         manager.upsert_tasks([task_info])
         update_video_info(video_info_dict, manager, failure_details, error_key='gen_video_error')
+        # [修改点] 增加 PID 日志
         print(
-            f"任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
+            f"🎬 [PID: {os.getpid()}] 任务 {video_info_dict.keys()} 最终视频生成完成。当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}  耗时 {cost_time_info}")
 
+    # [修改点] 增加 PID 日志
     print(
-        f"✅完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
+        f"✅ [PID: {os.getpid()}] 完成视频完成 成功视频成功 完成所有完成处理耗时统计 (Task Keys: {list(video_info_dict.keys())}) 任务总耗时: {time.time() - start_time:.2f}s {all_cost_time_info}")
 
     return failure_details, video_info_dict, chosen_script
 
@@ -767,11 +773,18 @@ def _task_process_worker(task_queue, running_task_ids):
         try:
             # 放在循环头部判断，确保上一个任务完全善后（无论成功还是通过 continue 重试）后再退出进程
             if processed_count >= MAX_TASKS_PER_WORKER:
-                print(f"♻️ [消费者-{os.getpid()}] 累计处理了 {processed_count} 个任务，触发内存释放机制，主动退出。")
+                print(f"♻️ [PID: {os.getpid()}] 累计处理了 {processed_count} 个任务，触发内存释放机制，主动退出。")
                 break
 
             start_time = time.time()
-            task_info = task_queue.get()
+
+            # [修改点] 增加超时机制和心跳日志
+            try:
+                task_info = task_queue.get(timeout=60)
+            except queue.Empty:
+                print(f"💓 [心跳] [PID: {os.getpid()}] 等待 60 秒未拿到任务，进程存活，继续等待...")
+                continue
+
             if task_info is None:
                 break
 
@@ -802,8 +815,9 @@ def _task_process_worker(task_queue, running_task_ids):
                     task_info['failed_count'] = current_failed_count
 
                     if current_failed_count < 3:
+                        # [修改点] 增加 PID 日志
                         print(
-                            f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                            f"⚠️ [PID: {os.getpid()}] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败 {current_failed_count} 次，准备重试...当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
                         task_info['failure_details'] = str(failure_details)
                         manager.upsert_tasks([task_info])
@@ -813,12 +827,14 @@ def _task_process_worker(task_queue, running_task_ids):
                         task_queue.put(task_info)
                         continue
                     else:
+                        # [修改点] 增加 PID 日志
                         print(
-                            f"任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                            f"❌ [PID: {os.getpid()}] 任务 {task_info.get('userName')}{task_info.get('video_id_list')} {task_info.get('_id')} 失败次数已达 {current_failed_count} 次，标记为失败。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                         task_info['status'] = TaskStatus.FAILED
                 else:
+                    # [修改点] 增加 PID 日志
                     print(
-                        f"任务成功 {task_info.get('userName')}{task_info.get('video_id_list')} 成功完成。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                        f"✅ [PID: {os.getpid()}] 任务成功 {task_info.get('userName')}{task_info.get('video_id_list')} 成功完成。当前队列大小: {task_queue.qsize()} 耗时 {time.time() - start_time:.2f}s 当前时间 {time.strftime('%Y-%m-%d %H:%M:%S')}")
                     pass
                 task_info['failure_details'] = str(failure_details)
                 manager.upsert_tasks([task_info])
@@ -828,7 +844,8 @@ def _task_process_worker(task_queue, running_task_ids):
 
         except Exception as outer_e:
             traceback.print_exc()
-            print(f"Worker 进程发生未捕获异常: {outer_e}")
+            # [修改点] 增加 PID 日志
+            print(f"⚠️ [PID: {os.getpid()}] Worker 进程发生未捕获异常: {outer_e}")
             time.sleep(1)
 
 
