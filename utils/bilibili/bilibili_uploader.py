@@ -399,7 +399,7 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
     如果没有满足条件的节点，最多等待5分钟（有节点被释放且满足条件），超时抛错。
     增加死锁兜底机制：如果某个节点被占用超过1小时，强制释放加入可用列表。
     """
-    file_size = size / 1024 / 1024 # 单位变成了MB
+    file_size = size / 1024 / 1024  # 单位变成了MB
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
     lock_file_path = cdn_info_path + '.lock'
 
@@ -407,6 +407,10 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
     wait_timeout = 1000  # 最大等待时间 300 秒 (5分钟)
     max_occupied_time = 1800
     start_wait_time = time.time()
+
+    # 新增限制常量
+    DEFAULT_SPEED_MB = 0.1  # 默认速度 0.1Mb/s
+    MAX_EST_TIME = 1800  # 最大允许预估时间 1800秒
 
     while True:
         with SimpleFileLock(lock_file_path):
@@ -436,9 +440,15 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
                 for cdn in available_cdns:
                     record = cdn_info.get(cdn, {})
                     if not record or (current_time - record.get("timestamp", 0) > 24 * 3600):
+                        # 计算预计时间：无数据节点使用默认速度 0.1Mb
+                        est_time = file_size / DEFAULT_SPEED_MB
+                        if est_time > MAX_EST_TIME:
+                            raise RuntimeError(
+                                f"节点 {cdn} 预估上传时间 {est_time:.2f}s 超过最大限制 {MAX_EST_TIME}s (文件大小: {file_size:.2f}MB, 默认速度: {DEFAULT_SPEED_MB}MB/s)")
+
                         best_upcdn = cdn
                         print(
-                            f"选择上传线路: {cdn} 线路节点速度 (无有效记录或记录过期) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  file_size:{file_size}")
+                            f"选择上传线路: {cdn} 线路节点速度 (无有效记录或记录过期) 预估上传时间 {est_time:.2f}s  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}  file_size:{file_size}")
                         break
 
                 # 3. 如果都在有效期内，选择速度最快且 >= 100KB/s 的节点
@@ -451,8 +461,16 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
                             best_upcdn = cdn
 
                     if best_upcdn:
+                        # 计算预计时间：历史记录速度单位转换后计算
+                        speed_mb = max_speed / 1024
+                        # 防止除以0
+                        est_time = file_size / speed_mb if speed_mb > 0 else file_size / DEFAULT_SPEED_MB
+                        if est_time > MAX_EST_TIME:
+                            raise RuntimeError(
+                                f"节点 {best_upcdn} 预估上传时间 {est_time:.2f}s 超过最大限制 {MAX_EST_TIME}s (文件大小: {file_size:.2f}MB, 记录速度: {speed_mb:.2f}MB/s)")
+
                         print(
-                            f"基于历史记录(24h内)，选择最快上传线路: 线路节点速度 {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} file_size:{file_size}")
+                            f"基于历史记录(24h内)，选择最快上传线路: 线路节点速度 {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 预估上传时间 {est_time:.2f}s  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} file_size:{file_size}")
 
             # 如果找到了节点，标记为占用，并返回
             if best_upcdn:
@@ -548,10 +566,10 @@ def upload_to_bilibili(
     cover_url = upload_cover(sess, cover_path, bili_jct=bili_jct)
     check_timeout("上传封面")
 
-    video_upload_start_time = time.time()  # 记录纯视频上传开始时间
 
     pre = preupload_video(sess, video_path)
     check_timeout("预上传视频")
+    video_upload_start_time = time.time()  # 记录纯视频上传开始时间
 
     biz_id = pre["biz_id"]
     filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]

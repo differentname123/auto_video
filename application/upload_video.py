@@ -103,9 +103,21 @@ def sort_tasks(existing_video_tasks, not_existing_video_tasks, user_info_map):
 
         return (count, schedule_date_str, create_time)
 
+    def get_file_size_sort_key(task):
+        # 1. 获取 userName
+        user_name = task.get('userName')
+
+        count = user_info_map.get(user_name, 0)
+        file_size = task.get('file_size', 100 * 1024 * 1024)
+
+        # 默认是小的时间
+        create_time = task.get('create_time', datetime.min)
+
+        return (count, file_size, create_time)
+
     # 分别对两个列表执行排序
     # Python的sort是原地排序(in-place)，无需重新赋值
-    existing_video_tasks.sort(key=get_sort_key)
+    existing_video_tasks.sort(key=get_file_size_sort_key)
     not_existing_video_tasks.sort(key=get_sort_key)
 
     # 合并列表，existing 在前
@@ -236,16 +248,16 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) >= len(user_config.get('upcdn_list', [1])):
+    if len(already_upload_users) >= 10:
         # print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
     right_now_user_list = user_config.get('right_now_user_list', [])
     if user_name not in right_now_user_list:
-        if not (5 <= datetime.now().hour < 24):
-            cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
-            # print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
-            return False
+        # if not (5 <= datetime.now().hour < 24):
+        #     cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
+        #     # print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
+        #     return False
 
         need_waite_minutes = get_wait_minutes()
         latest_upload_time = user_upload_info.get(user_name, {}).get('latest_upload_time', datetime.min)
@@ -468,6 +480,8 @@ def statistic_tasks_with_video(tasks_to_upload_list, allowed_user_name_list):
             continue
 
         if is_valid_target_file_simple(final_output_path) and status == TaskStatus.TO_UPLOADED:
+            file_size = os.path.getsize(final_output_path)
+            task_info['file_size'] = file_size
             existing_video_tasks.append(task_info)
             if user_name not in tobe_upload_video_info:
                 tobe_upload_video_info[user_name] = 0
