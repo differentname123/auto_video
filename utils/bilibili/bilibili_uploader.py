@@ -399,12 +399,12 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
     如果没有满足条件的节点，最多等待5分钟（有节点被释放且满足条件），超时抛错。
     增加死锁兜底机制：如果某个节点被占用超过1小时，强制释放加入可用列表。
     """
-    file_size = size / 1024 /1024
+    file_size = size / 1024 / 1024 # 单位变成了MB
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
     lock_file_path = cdn_info_path + '.lock'
 
-    SPEED_THRESHOLD = 100  # 100 KB/s
-    wait_timeout = 300  # 最大等待时间 300 秒 (5分钟)
+    SPEED_THRESHOLD = 50  # 100 KB/s
+    wait_timeout = 1000  # 最大等待时间 300 秒 (5分钟)
     max_occupied_time = 1800
     start_wait_time = time.time()
 
