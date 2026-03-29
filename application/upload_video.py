@@ -236,7 +236,7 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         if error_info:
             print(f"{user_name} 检查题材报错 {error_info}，跳过 {log_pre}")
             return False
-    if len(already_upload_users) >= 5:
+    if len(already_upload_users) >= user_config.get('already_upload_users', 5):
         # print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 

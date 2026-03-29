@@ -618,7 +618,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     return -1, used_index, light_status, used_proxy
 
 
-def filter_proxies(history_stats, proxies_list, max_count=15):
+def filter_proxies(history_stats, proxies_list, max_count=20):
     """
     根据历史统计数据过滤代理列表，加入探索与利用机制。
 
@@ -661,8 +661,8 @@ def filter_proxies(history_stats, proxies_list, max_count=15):
     padded_count = 0
 
     # 检查是否需要保底补齐 (10个)
-    if initial_valid_count < 10:
-        needed = 10 - initial_valid_count
+    if initial_valid_count < 15:
+        needed = 15 - initial_valid_count
         # 从候选列表(死节点)中取所需数量来补齐
         pad_list = candidate_proxies_with_rate[:needed]
         valid_proxies_with_rate.extend(pad_list)

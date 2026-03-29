@@ -1076,7 +1076,7 @@ def add_watermark_and_ending(video_path, format_ratio, format_path, watermark_pa
                                                                                  "感谢观看本视频，欢迎点赞、评论、关注、投币、分享！")
     start_time = time.time()
     gen_ending_video(ending_text, temp_ending_video_path, origin_ending_video_path, voice_info)
-    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset="ultrafast")
+    merge_videos_ffmpeg([video_path, temp_ending_video_path], output_path=ending_video_path, preset="medium")
     print(f"生成结尾视频完成，耗时 {time.time() - start_time:.2f} 秒，输出路径: {ending_video_path}")
 
     # 尝试生成结尾视频
@@ -1085,7 +1085,7 @@ def add_watermark_and_ending(video_path, format_ratio, format_path, watermark_pa
         current_video_path = ending_video_path
 
     if format_ratio:
-        format_video_ratio(current_video_path, format_path, format_ratio, mode="black")
+        format_video_ratio(current_video_path, format_path, format_ratio, mode="black", preset="medium")
         if is_valid_target_file_simple(format_path):
             print(f"成功调整视频格式，输出路径: {format_path}")
             current_video_path = format_path

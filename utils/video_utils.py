@@ -4550,7 +4550,7 @@ def burn_ocr_subtitles_to_video(
                 pass
 
 
-def format_video_ratio(input_path, output_path, target_ratio, mode="black"):
+def format_video_ratio(input_path, output_path, target_ratio, mode="black", preset="medium"):
     start_time = time.time()
     ratio = target_ratio.replace(":", "/")
 
@@ -4576,7 +4576,7 @@ def format_video_ratio(input_path, output_path, target_ratio, mode="black"):
 
     cmd.extend([
         "-c:v", "libx264",
-        "-preset", "veryfast",
+        "-preset", preset,
         "-crf", "23",
         "-c:a", "copy",
         output_path

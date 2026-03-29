@@ -368,13 +368,16 @@ def submit_post(
 
 def get_best_upcdn(upcdn_list: list) -> str:
     """
-    根据24小时内的历史记录，筛选速度最快且 >= 100KB/s 的 CDN 节点。
+    优先选择24小时没有记录或者一直没有记录的节点，以保证每个节点每天都有机会被测速。
+    如果都在24小时内有记录，则筛选速度最快且 >= 100KB/s 的 CDN 节点。
     如果没有合适的节点，返回 None。
     """
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
     cdn_info = read_json(cdn_info_path) if os.path.exists(cdn_info_path) else {}
-    if not isinstance(cdn_info, dict) or not cdn_info:
-        return None
+
+    # 移除原本的 'or not cdn_info'，因为如果记录为空（从未测速），我们正好需要把它们选出来
+    if not isinstance(cdn_info, dict):
+        cdn_info = {}
 
     best_upcdn = None
     max_speed = -1
@@ -383,9 +386,17 @@ def get_best_upcdn(upcdn_list: list) -> str:
 
     for cdn in upcdn_list:
         record = cdn_info.get(cdn)
+
+        # 新增逻辑：如果一直没有记录，或者记录的时间已经超过24小时（86400秒），优先直接选择它
+        if not record or (current_time - record.get("timestamp", 0) > 86400):
+            print(f"选择上传线路: {cdn} (无有效记录或记录过期) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
+            cdn_info[cdn] = {"timestamp": current_time, "speed": 0}  # 初始化记录，避免重复选择
+            save_json(cdn_info_path, cdn_info)  # 立即保存，确保下次能看到这个记录
+            return cdn
+
+        # 原有逻辑：如果在24小时内有记录，比较速度找最快的
         if record:
             record_time = record.get("timestamp", 0)
-            # 检查是否在24小时（86400秒）内
             if current_time - record_time <= 86400:
                 speed = record.get("speed", 0)
                 # 必须满足最低阈值，且比当前找到的最大速度还要快

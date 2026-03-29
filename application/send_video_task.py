@@ -922,7 +922,7 @@ def send_good_plan(manager):
     :param manager:
     :return:
     """
-    need_process_users = ['hong', 'mama', 'xue', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'qiqixiao', 'ning', 'taoxiao', 'junda', 'liuzhu', 'jj', 'xiaocai']
+    need_process_users = ['hong', 'mama', 'danzhu', 'nana', 'shun', 'ping', 'qizhu', 'xiaoxue', 'dan', 'jun', 'ningtao', 'lin', 'qiqixiao', 'ning', 'taoxiao', 'junda', 'liuzhu', 'jj', 'xiaocai']
     config_map = init_config()
     allow_user_list = []
     for uid, detail in config_map.items():
