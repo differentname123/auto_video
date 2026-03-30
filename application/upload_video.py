@@ -30,9 +30,10 @@ from application.video_common_config import TaskStatus, ERROR_STATUS, check_fail
 from utils.bilibili.bilibili_uploader import upload_to_bilibili
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json, get_top_comments, \
     extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu
+from utils.image_utils import create_enhanced_cover_auto
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
-from utils.video_utils import get_frame_at_time_safe, create_enhanced_cover, probe_duration
+from utils.video_utils import get_frame_at_time_safe, probe_duration
 
 config_map = {}
 error_user_map = {}
@@ -370,7 +371,7 @@ def gen_cover_path(task_info, final_output_path, video_info_dict, cover_text, id
     output_image_path = base_cover_path.replace(".jpg", f"_{id}_enhanced.jpg")
     if is_valid_target_file_simple(output_image_path):
         return output_image_path
-    create_enhanced_cover(
+    create_enhanced_cover_auto(
         input_image_path=base_cover_path,
         output_image_path=output_image_path,
         text_lines=[cover_text],
