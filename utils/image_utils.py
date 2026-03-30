@@ -222,13 +222,28 @@ def create_enhanced_cover_layered(
         fg_alpha = fg_img.convert("RGBA").split()[3]
 
     color_themes = {
-        'vibrant_yellow': {'fontcolor': '#FFD700', 'shadowcolor': 'black@0.9'},
-        'classic_white': {'fontcolor': 'White', 'shadowcolor': 'black@0.9'},
-        'alert_red': {'fontcolor': '#FF2400', 'shadowcolor': 'black@0.85'},
-        'cyber_cyan': {'fontcolor': '#00FFFF', 'shadowcolor': 'black@0.8'},
+        # 1. 绝对主力 (万能底牌，最高清晰度：黑底/黑边/黑阴影压阵)
+        'classic_white': {'fontcolor': 'white', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+        'vibrant_yellow': {'fontcolor': '#FFD700', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+
+        # 2. 情绪与警告 (高饱和度+白边反差：红/粉等颜色必须加白边才能在暗色或花哨背景中跳脱出来)
+        'alert_red': {'fontcolor': '#FF0000', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
+        'toxic_magenta': {'fontcolor': '#FF00FF', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
+        'brand_orange': {'fontcolor': '#FF6600', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
+
+        # 3. 科技与潮流 (冷色调强对比：适合科普、数码)
+        'success_green': {'fontcolor': '#00FF00', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+        'cyber_cyan': {'fontcolor': '#00FFFF', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+
+        # 4. 极端亮度兜底 (亮色/纯白背景专用：极黑字+纯白边，去除阴影防止画面显脏)
+        'dark_inverse': {'fontcolor': '#111111', 'bordercolor': 'white', 'shadowcolor': 'black@0.0'},
     }
-    chosen_theme = color_themes.get(color_theme, random.choice(list(color_themes.values())))
-    if color_theme == 'auto': chosen_theme = random.choice(list(color_themes.values()))
+
+    # 修复 Auto 逻辑：优先使用最稳妥的黄/白，而不是全局随机
+    if color_theme not in color_themes or color_theme == 'auto':
+        chosen_theme = color_themes[random.choice(['classic_white', 'vibrant_yellow'])]
+    else:
+        chosen_theme = color_themes[color_theme]
 
     # ================= 核心性能优化 =================
     # print("\n>>> [Pass 0] 预处理遮罩: 生成 Alpha 通道积分图 (SAT)...")
@@ -301,6 +316,9 @@ def create_enhanced_cover_layered(
     # print(f"✅ 计算完毕！敲定统一字号: {best_fs}px (字距/行距已完全数学锁定)")
 
     escaped_font_path = font_path.replace(':', '\\:') if os.name == 'nt' else font_path
+
+    # !! 关键修改：增加描边宽度计算，配合阴影打造极强可读性 !!
+    border_width = max(2, int(best_fs * 0.04))
     shadow_offset = max(2, int(best_fs * 0.06))
 
     drawtexts = []
@@ -320,6 +338,8 @@ def create_enhanced_cover_layered(
                     'fontcolor': chosen_theme['fontcolor'],
                     'x': str(int(p['x'])),
                     'y': str(int(line_info['y'])),
+                    'borderw': str(border_width),  # <-- 引入描边宽度
+                    'bordercolor': chosen_theme['bordercolor'],  # <-- 引入描边颜色
                     'shadowcolor': chosen_theme['shadowcolor'],
                     'shadowx': str(shadow_offset),
                     'shadowy': str(shadow_offset)
@@ -449,22 +469,21 @@ def create_enhanced_cover(
         return output_image_path
 
     color_themes = {
-        # 1. 绝对主力 (万能底牌)
-        'classic_white': {'fontcolor': 'White', 'shadowcolor': 'black@0.9'},  # 提升阴影不透明度到0.9，更扎实
-        'vibrant_yellow': {'fontcolor': '#FFD700', 'shadowcolor': 'black@0.9'},  # 爆款/搞笑/娱乐必备
+        # 1. 绝对主力 (万能底牌，最高清晰度：黑底/黑边/黑阴影压阵)
+        'classic_white': {'fontcolor': 'white', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+        'vibrant_yellow': {'fontcolor': '#FFD700', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
 
-        # 2. 情绪与警告
-        'alert_red': {'fontcolor': '#FF2400', 'shadowcolor': 'black@0.85'},  # 猩红色：辟谣、警告、严重事件、跌停
-        'success_green': {'fontcolor': '#00FF00', 'shadowcolor': 'black@0.85'},  # 纯绿色：赚钱、增长、通行、科技
+        # 2. 情绪与警告 (高饱和度+白边反差：红/粉等颜色必须加白边才能在暗色或花哨背景中跳脱出来)
+        'alert_red': {'fontcolor': '#FF0000', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
+        'toxic_magenta': {'fontcolor': '#FF00FF', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
+        'brand_orange': {'fontcolor': '#FF6600', 'bordercolor': 'white', 'shadowcolor': 'black@0.6'},
 
-        # 3. 科技与潮流
-        'cyber_cyan': {'fontcolor': '#00FFFF', 'shadowcolor': 'black@0.8'},  # 赛博青：数码、未来感、冷静分析
-        'brand_orange': {'fontcolor': '#FF6600', 'shadowcolor': 'black@0.85'},  # 高亮橘：知识分享、干货、开箱
-        'toxic_magenta': {'fontcolor': '#FF00FF', 'shadowcolor': 'black@0.8'},  # 猛男粉/洋红：猎奇、美妆、Vlog、骚操作
+        # 3. 科技与潮流 (冷色调强对比：适合科普、数码)
+        'success_green': {'fontcolor': '#00FF00', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
+        'cyber_cyan': {'fontcolor': '#00FFFF', 'bordercolor': 'black', 'shadowcolor': 'black@0.8'},
 
-        # 4. 极端亮度兜底 (新增)
-        'dark_inverse': {'fontcolor': '#111111', 'shadowcolor': 'white@0.9'},  # 极黑字+白阴影：专门对付纯白/极亮背景
-    }
+        # 4. 极端亮度兜底 (亮色/纯白背景专用：极黑字+纯白边，去除阴影防止画面显脏)
+        'dark_inverse': {'fontcolor': '#111111', 'bordercolor': 'white', 'shadowcolor': 'black@0.0'},    }
     # 如果指定的主题不存在，或为 'auto'，则从预设中随机选择
     if color_theme not in color_themes or color_theme == 'auto':
         # 默认随机选择，但可以优先选择最经典的
