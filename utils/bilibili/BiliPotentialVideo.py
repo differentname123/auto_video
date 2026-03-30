@@ -571,7 +571,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
             proxy_str = "http://127.0.0.1:7890"
 
         worker_url_list =  [
-        "https://clear-emu-39.zhuxiaohu98.deno.net/",
+        "https://far-dolphin-10.differentname123.deno.net/",
         "https://vercel-proxy-kappa-ruddy.vercel.app/api",
         "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
         "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
@@ -1367,6 +1367,9 @@ if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
     # is_finish = update_good_user_video()
     # get_all_user_video_info()
+    hour = datetime.now().hour
+    if 1 <= hour < 5:
+        run_extended_tasks()
 
     # 创建并启动独立线程，设置 daemon=True 确保主程序退出时它也会随之退出
     uid_thread = threading.Thread(target=run_update_uid_type_periodically, daemon=True)
