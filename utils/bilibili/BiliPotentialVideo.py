@@ -1334,7 +1334,7 @@ def get_good_video(video_type=None):
     }
 
 
-COOLDOWN_SECONDS = 1 * 3600
+COOLDOWN_SECONDS = 4 * 3600
 INTERVAL_SLEEP = 30
 
 
