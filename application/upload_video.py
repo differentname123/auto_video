@@ -950,7 +950,7 @@ def auto_upload(manager):
         not_existing_video_tasks,
         tobe_upload_video_info
     )
-
+    print(f"⏱️ 统计和排序任务耗时 {time.time() - start_time:.2f} 秒。 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} 待上传视频分布情况：{len(sort_existing_video_tasks)} ")
     # 2. 核心：遍历已有视频的任务，触发上传
     for task_info in sort_existing_video_tasks:
         # 使用 already_upload_users 完美限制单轮单用户的重复投稿
@@ -962,6 +962,7 @@ def auto_upload(manager):
             continue
 
         user_name = task_info.get('userName')
+        print(f"🚀 准备上传 任务 {task_info.get('video_id_list', [])} id {task_info.get('_id', [])} 用户 {user_name} 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} 已投用户 {already_upload_users} ")
 
         failure_details, video_info_dict, chosen_script, upload_params = gen_video(task_info, config_map, user_config, manager)
         if check_failure_details(failure_details):

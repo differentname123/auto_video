@@ -1073,7 +1073,7 @@ def gen_uid_type_llm(uid_info_list):
 
 def update_uid_type():
     start_time = time.time()
-    all_video_score_list, all_video_info = get_sorted_high_score_videos()
+    all_video_score_list, all_video_info = get_sorted_high_score_videos(check_video_type=False)
 
     all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
     if not isinstance(all_user_type_info, dict):
@@ -1155,7 +1155,7 @@ def update_uid_type():
         f"所有批次处理完成！总耗时: {time.time() - start_time:.2f} 秒。总共更新了 {len(uids_to_update)} 个用户的类型。 批次数量: {len(batch_list)}。")
 
 
-def get_sorted_high_score_videos(max_hour=24):
+def get_sorted_high_score_videos(max_hour=24, check_video_type=True):
     all_video_info = load_pure_video_info()
     all_user_type_info = read_json(ALL_USER_TYPE_MAP_FILE)
 
@@ -1182,9 +1182,10 @@ def get_sorted_high_score_videos(max_hour=24):
         else:
             video_type = "未知"
 
-        if video_type not in ['娱乐', '游戏', '体育']:
-            stats["filter_invalid_type"] += 1
-            continue
+        if check_video_type:
+            if video_type not in ['娱乐', '游戏', '体育']:
+                stats["filter_invalid_type"] += 1
+                continue
 
         update_time = exist_video_info.get('update_time', 0)
 
@@ -1333,7 +1334,7 @@ def get_good_video(video_type=None):
     }
 
 
-COOLDOWN_SECONDS = 4 * 3600
+COOLDOWN_SECONDS = 1 * 3600
 INTERVAL_SLEEP = 30
 
 
@@ -1343,10 +1344,26 @@ def run_extended_tasks():
     get_all_user_video_info()
 
 
+# 抽取出的独立函数，用于每隔1小时循环执行
+def run_update_uid_type_periodically():
+    while True:
+        try:
+            update_uid_type()
+        except Exception as e:
+            traceback.print_exc()
+        # 挂起 1 小时 (3600秒)
+        time.sleep(3600)
+
+
 if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
     # is_finish = update_good_user_video()
     # get_all_user_video_info()
+
+    # 创建并启动独立线程，设置 daemon=True 确保主程序退出时它也会随之退出
+    uid_thread = threading.Thread(target=run_update_uid_type_periodically, daemon=True)
+    uid_thread.start()
+
     while True:
         try:
             is_finish = update_good_user_video()
