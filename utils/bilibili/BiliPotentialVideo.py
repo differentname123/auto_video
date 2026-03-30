@@ -570,9 +570,13 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
         if random_value > 0.5:
             proxy_str = "http://127.0.0.1:7890"
 
-        worker_url_list = ["https://clear-emu-39.zhuxiaohu98.deno.net/",
-                           "https://vercel-proxy-kappa-ruddy.vercel.app/api",
-                           "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/"]
+        worker_url_list =  [
+        "https://clear-emu-39.zhuxiaohu98.deno.net/",
+        "https://vercel-proxy-kappa-ruddy.vercel.app/api",
+        "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
+        "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
+        "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
+    ]
         worker_url = random.choice(worker_url_list)  # 随机选择一个 Worker URL，增加冗余和稳定性
         videos = get_user_videos_via_worker(mid=uid, desired_count=40, local_proxy=proxy_str, worker_url=worker_url)
         used_index = random_index
@@ -1169,6 +1173,7 @@ def get_sorted_high_score_videos(max_hour=24, check_video_type=True):
 
     all_video_score_list = []
     current_now = time.time()
+    user_type_map_count = {}
     total_count = 0
     for uid, exist_video_info in all_video_info.items():
         exist_video_list = exist_video_info.get('video_list', [])
@@ -1181,7 +1186,9 @@ def get_sorted_high_score_videos(max_hour=24, check_video_type=True):
             video_type = user_type_data
         else:
             video_type = "未知"
-
+        if video_type not in user_type_map_count:
+            user_type_map_count[video_type] = 0
+        user_type_map_count[video_type] += 1
         if check_video_type:
             if video_type not in ['娱乐', '游戏', '体育']:
                 stats["filter_invalid_type"] += 1
@@ -1217,6 +1224,7 @@ def get_sorted_high_score_videos(max_hour=24, check_video_type=True):
     print(f"4. 过滤-24h内无新视频: {stats['filter_no_recent_video']}")
     print(f"5. 最终处理用户数: {stats['processed_users']}")
     print(f"6. 最终生成视频分数记录数: {len(all_video_score_list)}")
+    print(f"7. 用户类型分布统计:{user_type_map_count}")
     print("-" * 30)
 
     all_video_score_list = [v for v in all_video_score_list if v.get('avg_daily_videos', 0) > 1.0]

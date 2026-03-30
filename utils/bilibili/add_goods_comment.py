@@ -18,7 +18,7 @@ from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
 from utils.taobao.search_engine import update_and_search
 
-BASE_DIR = r'W:\project\python_project\auto_video\utils\temp\goods'
+BASE_DIR = r'W:\project\python_project\auto_video\utils\temp\goods\user_details'
 
 RECORD_EXPIRATION_DAYS = 2
 DEFAULT_MAX_REPLIES_PER_RUN = 1
