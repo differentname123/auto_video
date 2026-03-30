@@ -321,25 +321,43 @@ def create_enhanced_cover_layered(
     border_width = max(2, int(best_fs * 0.04))
     shadow_offset = max(2, int(best_fs * 0.06))
 
+    # ================= 终极基线修复 =================
+    # 实例化 Pillow Font，用于在 Python 层提前算出每个字的绝对 Y 轴下沉量
+    align_font = ImageFont.truetype(font_path, best_fs)
+    # ===============================================
+
     drawtexts = []
     if best_layout:
         for i, line_info in enumerate(best_layout):
             if not line_info['placements']: continue
             placements = line_info['placements']
 
-            # print(f"  - 刚性块 第 {i + 1} 行 -> Y轴: {int(line_info['y'])}, X轴跨度: {int(placements[0]['x'])} 至 {int(placements[-1]['x'])}")
-
             for p in placements:
-                char = p['char'].replace(':', '\\:').replace('%', '\\%').replace('\'', '')
+                raw_char = p['char']  # 取出原始单字用于获取排版边界
+                char_escaped = raw_char.replace(':', '\\:').replace('%', '\\%').replace('\'', '')
+
+                # ------ 计算单字的精确顶部下沉量 (Top Offset) ------
+                try:
+                    # 获取该字在排版框内的边界，bbox[1] 即为字顶端到行顶端的距离
+                    bbox = align_font.getbbox(raw_char)
+                    char_top_offset = bbox[1] if bbox else 0
+                except AttributeError:
+                    # 兼容老版本 Pillow
+                    char_top_offset = align_font.getoffset(raw_char)[1]
+
+                # 行基准Y坐标 + 该字的下沉量 = 完美的底部对齐
+                final_y = int(line_info['y']) + char_top_offset
+                # -------------------------------------------------
+
                 opts = {
                     'fontfile': f"'{escaped_font_path}'",
-                    'text': f"'{char}'",
+                    'text': f"'{char_escaped}'",
                     'fontsize': str(best_fs),
                     'fontcolor': chosen_theme['fontcolor'],
                     'x': str(int(p['x'])),
-                    'y': str(int(line_info['y'])),
-                    'borderw': str(border_width),  # <-- 引入描边宽度
-                    'bordercolor': chosen_theme['bordercolor'],  # <-- 引入描边颜色
+                    'y': str(final_y),  # ✅ 换成我们在 Python 中算好的绝对 Y 坐标
+                    'borderw': str(border_width),
+                    'bordercolor': chosen_theme['bordercolor'],
                     'shadowcolor': chosen_theme['shadowcolor'],
                     'shadowx': str(shadow_offset),
                     'shadowy': str(shadow_offset)
