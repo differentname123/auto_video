@@ -15,7 +15,7 @@ LOCAL_PROXY = {
 }
 
 # 测试代理存活的目标网站（B站基础接口）
-TEST_TARGET_URL = "https://www.bilibili.com/"
+TEST_TARGET_URL = "https://api.bilibili.com/x/web-interface/nav"
 
 # 基础超时宽容度（秒）：超过这个时间的代理直接判定死亡，不再参与排序
 BASE_TIMEOUT = 15.0  # 建议稍微调低到10秒，提高筛选效率
@@ -272,13 +272,15 @@ def get_top_proxies(count=10):
     # 由于 GitHub 源加起来可能有上万个 IP，建议把最大线程数拉高到 300-500 以加快速度
     max_threads = min(500, len(unique_proxies))
     print(f"🚀 启动 {max_threads} 个线程进行轰炸式测速...")
-
+    success_count = 0
     start_time = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
         results = executor.map(format_and_test_proxy, unique_proxies)
 
         for res in results:
             proxy_str, p_dict, delay = res
+            if delay < 100.0:
+                success_count += 1
 
             # 初始化代理字典结构（兼容旧版本数据）
             if proxy_str not in proxy_status:
@@ -325,6 +327,8 @@ def get_top_proxies(count=10):
                 valid_proxies_with_time.append((p_dict, avg_delay))
 
     # 执行完毕后，处理要保存的 JSON 数据
+    print(f"\n✅ 测速完成，成功连接的代理数量: {success_count} / {len(unique_proxies)} (成功率: {success_count / len(unique_proxies) * 100:.2f}%)。正在更新状态记录...")
+
     # 将整个代理字典按照 delay 升序排列，并强制让所有节点的 delay 字段都排在前面
     sorted_proxy_status = {}
     sorted_items = sorted(proxy_status.items(), key=lambda x: x[1].get("delay", 100.0))
@@ -392,7 +396,8 @@ def _check_single_high_anon(proxy_dict, real_ip):
             return (proxy_dict, True, origin_ip)
     except:
         pass
-    return (proxy_dict, False, "")
+    # 【修改点】超时或异常时，出口 IP 返回 None，作为该代理不稳定的明确信号
+    return (proxy_dict, False, None)
 
 
 def batch_update_anon_status(anon_status_records):
@@ -480,9 +485,16 @@ def filter_and_record_high_anon(best_free_proxies, count):
     seen_exit_ips_anon = set()
     same_base_count = 0
     same_high_anon_count = 0
+    failed_count = 0
     for p_dict, is_high_anon, exit_ip, rank in results:
-        # 若测速失败未能获取出口IP，我们退化为使用代理本尊配置IP作为去重标识
-        eff_exit_ip = exit_ip if exit_ip else p_dict["http"]
+        # 【修改点】如果 exit_ip 为空 (None 或 "")，代表在 _check_single_high_anon 中超时或失败
+        # 这意味着代理极不稳定，直接丢弃，不加入任何后续列表
+        if not exit_ip:
+            failed_count += 1
+            continue
+
+        # 既然没有 continue，说明 exit_ip 存在，直接作为有效去重 IP
+        eff_exit_ip = exit_ip
 
         # 1. 填充常规代理列表 (按实际出口IP严格去重)
         if eff_exit_ip not in seen_exit_ips_base and len(base_proxy_list) < count:
@@ -498,10 +510,9 @@ def filter_and_record_high_anon(best_free_proxies, count):
         else:
             if is_high_anon:
                 same_high_anon_count += 1
-    print(f"🔍 高匿过滤与出口IP去重完成：常规列表中 {len(base_proxy_list)} 个独立出口IP，{same_base_count} 个同IP节点被排除；高匿列表中 {len(high_anon_proxy_list)} 个独立出口IP，{same_high_anon_count} 个同IP节点被排除。")
+    print(f"🔍 高匿过滤与出口IP去重完成：常规列表中 {len(base_proxy_list)} 个独立出口IP，{same_base_count} 个同IP节点被排除；高匿列表中 {len(high_anon_proxy_list)} 个独立出口IP，{same_high_anon_count} 个同IP节点被排除。 {failed_count} 个节点因测试失败未记录出口IP。")
 
     return base_proxy_list, high_anon_proxy_list
-
 
 # =========================================================================
 
