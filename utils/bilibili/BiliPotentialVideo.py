@@ -290,7 +290,7 @@ def get_user_videos_via_worker(mid: int,
 
 def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubdate', keyword: str = '',
                            use_proxy: bool = False, proxies: dict = None,
-                           new_profile_list=None) -> tuple:
+                           new_profile_list=BASE_PROFILES) -> tuple:
     """
     独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
     修改点：增加返回使用的 proxies 字典，方便调用层进行代理质量统计。

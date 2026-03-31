@@ -234,7 +234,7 @@ def format_and_test_proxy(proxy_address):
 
 def get_top_proxies(count=10):
     """
-    主控函数：多源拉取 -> 去重 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
+    主控函数：多源拉取 -> 去重 -> 聚合历史优质节点 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
     """
     print("=== 第一阶段：从各个数据源聚合代理 ===")
 
@@ -255,16 +255,33 @@ def get_top_proxies(count=10):
     unique_proxies = list(set(raw_proxies))
     print(f"\n🔄 聚合完毕，去重后共获得 {len(unique_proxies)} 个独立代理 IP。")
 
+    # ================= 新增区：聚合历史优质节点 =================
+    # 提前载入现有的代理状态记录
+    proxy_status = read_json(PROXY_STATUS_FILE)
+    if not isinstance(proxy_status, dict):
+        proxy_status = {}
+
+    # 查找 delay < 50 且尚未在 unique_proxies 中的历史优质节点
+    unique_proxies_set = set(unique_proxies)
+    added_from_history = 0
+
+    for proxy_str, status_data in proxy_status.items():
+        if status_data.get("delay", 100.0) < 50.0:
+            if proxy_str not in unique_proxies_set:
+                unique_proxies.append(proxy_str)
+                unique_proxies_set.add(proxy_str)
+                added_from_history += 1
+
+    if added_from_history > 0:
+        print(
+            f"♻️ 从历史记录中成功唤回 {added_from_history} 个延迟 < 50 的优质节点。当前总测试数量提升至: {len(unique_proxies)}")
+    # ============================================================
+
     if not unique_proxies:
         print("❌ 没有任何原始代理，退出。")
         return []
 
     print(f"\n=== 第二阶段：并发测速 (宽容超时: {BASE_TIMEOUT}秒) ===")
-
-    # 载入现有的代理状态记录
-    proxy_status = read_json(PROXY_STATUS_FILE)
-    if not isinstance(proxy_status, dict):
-        proxy_status = {}
 
     current_time = time.time()
     valid_proxies_with_time = []
@@ -327,7 +344,8 @@ def get_top_proxies(count=10):
                 valid_proxies_with_time.append((p_dict, avg_delay))
 
     # 执行完毕后，处理要保存的 JSON 数据
-    print(f"\n✅ 测速完成，成功连接的代理数量: {success_count} / {len(unique_proxies)} (成功率: {success_count / len(unique_proxies) * 100:.2f}%)。正在更新状态记录...")
+    print(
+        f"\n✅ 测速完成，成功连接的代理数量: {success_count} / {len(unique_proxies)} (成功率: {success_count / len(unique_proxies) * 100:.2f}%)。正在更新状态记录...")
 
     # 将整个代理字典按照 delay 升序排列，并强制让所有节点的 delay 字段都排在前面
     sorted_proxy_status = {}
@@ -367,7 +385,6 @@ def get_top_proxies(count=10):
         final_proxy_list.append(p_dict)
 
     return final_proxy_list
-
 
 # ================= 新增区：高匿复测与状态落地封装模块 =================
 
