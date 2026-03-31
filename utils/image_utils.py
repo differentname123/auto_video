@@ -14,9 +14,10 @@ from utils.common_utils import safe_process_limit
 
 # 【优化删除】：删除了引发性能灾难的递归生成函数 get_partitions
 
-def get_valid_intervals_sat(sat, y, fs, img_w, img_h, threshold=20):
+def get_valid_intervals_sat(sat, y, fs, img_w, img_h, threshold=60):
     """
-    【重构】利用二维积分图 (SAT) 极速获取可用区间，时间复杂度 O(W)
+    【修复点 1】：将默认 threshold 从 20 提高到 60 (约 23% 透明度)。
+    这样可以有效免疫 AI 抠图模型在透明区域留下的“幽灵 Alpha 噪点”。
     """
     y1 = max(0, int(y))
     y2 = min(img_h, int(y + fs))
@@ -27,12 +28,10 @@ def get_valid_intervals_sat(sat, y, fs, img_w, img_h, threshold=20):
     in_interval = False
     start = 0
 
-    # 【优化】直接在安全边界内扫描，跳过两侧无用计算
     L_bound = int(img_w * 0.10)
     R_bound = int(img_w * 0.90)
 
     for x in range(L_bound, R_bound):
-        # 核心：利用积分图 O(1) 计算 x 坐标这一列的 Alpha 总和
         col_sum = sat[y2][x + 1] - sat[y1][x + 1] - sat[y2][x] + sat[y1][x]
         avg_alpha = col_sum / dy
 
@@ -48,10 +47,8 @@ def get_valid_intervals_sat(sat, y, fs, img_w, img_h, threshold=20):
     if in_interval:
         intervals.append((start, R_bound))
 
-    # 过滤过窄的区间
     safe_intervals = [(s, e) for s, e in intervals if (e - s) > fs * 0.6]
     return safe_intervals
-
 
 def layout_line_fixed_gap(chars, intervals, fs):
     """
@@ -144,9 +141,6 @@ def layout_line_fixed_gap(chars, intervals, fs):
 
 
 def try_layout_rigid_block(lines, fs, sat, img_w, img_h, font_path, spacing_ratio, position):
-    """
-    【重构】恢复原始代码精准的 Y 轴高度逻辑，摒弃上下扫描
-    """
     font = ImageFont.truetype(font_path, int(fs))
 
     lines_chars = []
@@ -157,7 +151,6 @@ def try_layout_rigid_block(lines, fs, sat, img_w, img_h, font_path, spacing_rati
 
     if not lines_chars: return False, None
 
-    # ===== 核心修复：完全还原旧代码的高度计算逻辑 =====
     true_high = int(img_w * 9 / 16)
     line_height = int(fs * spacing_ratio)
     total_text_height = line_height * (len(lines_chars) - 1) + fs
@@ -168,21 +161,23 @@ def try_layout_rigid_block(lines, fs, sat, img_w, img_h, font_path, spacing_rati
         'bottom_third': img_h * 0.75
     }
     block_y_center = position_map.get(position, img_h * 0.5)
-    start_y = block_y_center - total_text_height / 2
-    # ===============================================
+
+    # 【修复点 2】：增加 max(0, ...) 兜底。
+    # 强制消除图片长宽比哪怕 1 像素误差带来的负数 Y 坐标问题。
+    start_y = max(0, block_y_center - total_text_height / 2)
 
     block_success = True
     layout_result = []
 
-    # 直接使用计算好的完美的 start_y 进行排版测试
     for i, chars in enumerate(lines_chars):
         current_line_y = start_y + i * line_height
 
-        # 安全校验：如果高度直接超出图片外则判定该字号失败
-        if current_line_y < 0 or current_line_y + fs > img_h:
+        # 【修复点 3】：既然上方已经用 max(0) 兜底，这里只需检查是否超出底边即可。
+        if current_line_y + fs > img_h:
             return False, None
 
-        intervals = get_valid_intervals_sat(sat, current_line_y, fs, img_w, img_h)
+        # 调用时显式传入安全的 threshold
+        intervals = get_valid_intervals_sat(sat, current_line_y, fs, img_w, img_h, threshold=20)
         if not intervals:
             block_success = False
             break
@@ -198,7 +193,6 @@ def try_layout_rigid_block(lines, fs, sat, img_w, img_h, font_path, spacing_rati
         return True, layout_result
 
     return False, None
-
 
 def create_enhanced_cover_layered(
         bg_image_path: str,
@@ -669,7 +663,7 @@ if __name__ == "__main__":
     # 测试数据准备
     # ==========================================
     # 假设我们要写入的封面文案
-    texts = ["AI深度解析", "核心原理解密"]
+    texts = ["全场起立！ZywOo主场加冕","全场起立！ZywOo主场加冕"]
 
     # 你的字体路径 (Windows默认微软雅黑粗体)
     font = "C:/Windows/Fonts/msyhbd.ttc"
