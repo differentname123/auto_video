@@ -650,7 +650,7 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
             success_rate = stats.get('success_rate', 0.1)
 
             # 判断逻辑：24小时前更新 OR 成功率 > 0
-            if (current_time - last_update) > TWENTY_FOUR_HOURS and success_rate >= 0.7:
+            if (current_time - last_update) > TWENTY_FOUR_HOURS and success_rate >= 0.6:
                 # 存入元组 (代理字典, 成功率, 节点类型标签) 以便后续排序和统计构成
                 valid_proxies_with_rate.append((proxy, success_rate, "好节点"))
             else:
@@ -956,7 +956,12 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 h_stats['update_time'] = current_timestamp
                 h_stats['success_rate'] = h_stats['success'] / h_stats['total'] if h_stats['total'] > 0 else 0
                 h_stats['fail_rate'] = h_stats['failed'] / h_stats['total'] if h_stats['total'] > 0 else 0
+                # 将history放在h_stats的最后
+                temp_history = h_stats.pop('history')
+                h_stats['history'] = temp_history
 
+            # 将history_stats按照成功率降序排序后再保存到文件中，保持文件结构清晰
+            history_stats = dict(sorted(history_stats.items(), key=lambda item: item[1]['success_rate'], reverse=True))
             save_json(proxy_stats_file, history_stats)
 
         # 修改点：判断全局超时标志

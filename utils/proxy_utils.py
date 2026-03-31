@@ -1,6 +1,7 @@
 import requests
 import concurrent.futures
 import time
+from utils.common_utils import read_json, save_json
 
 # ================= 配置区 =================
 # 您的本地翻墙代理（用于拉取被墙的代理源，如 ProxyScrape 或 GitHub Raw）
@@ -15,6 +16,8 @@ TEST_TARGET_URL = "https://api.bilibili.com/x/web-interface/nav"
 # 基础超时宽容度（秒）：超过这个时间的代理直接判定死亡，不再参与排序
 BASE_TIMEOUT = 10.0  # 建议稍微调低到10秒，提高筛选效率
 
+# 代理状态保存路径
+PROXY_STATUS_FILE = r"W:\project\python_project\auto_video\config\proxy_status.json"
 
 # ==========================================
 # 代理源拉取函数区 (每个函数独立，增加了最多5次重试机制)
@@ -101,7 +104,8 @@ def fetch_from_github_proxifly():
 
 def format_and_test_proxy(proxy_address):
     """
-    测试并返回：(代理字典, 响应时间)
+    测试并返回：(代理地址字符串, 代理字典, 响应时间)
+    如果不通，响应时间默认返回 100.0
     """
     proxy_dict = {
         "http": f"http://{proxy_address}",
@@ -121,15 +125,17 @@ def format_and_test_proxy(proxy_address):
         )
         if response.status_code == 200 and "code" in response.json():
             elapsed_time = response.elapsed.total_seconds()
-            return (proxy_dict, elapsed_time)
+            return (proxy_address, proxy_dict, elapsed_time)
     except:
         pass
-    return None
+
+    # 不通时默认延迟 100
+    return (proxy_address, proxy_dict, 100.0)
 
 
 def get_top_proxies(count=10):
     """
-    主控函数：多源拉取 -> 去重 -> 多线程测速 -> 排序 -> 提取 Top N
+    主控函数：多源拉取 -> 去重 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
     """
     print("=== 第一阶段：从各个数据源聚合代理 ===")
 
@@ -154,6 +160,13 @@ def get_top_proxies(count=10):
         return []
 
     print(f"\n=== 第二阶段：并发测速 (宽容超时: {BASE_TIMEOUT}秒) ===")
+
+    # 载入现有的代理状态记录
+    proxy_status = read_json(PROXY_STATUS_FILE)
+    if not isinstance(proxy_status, dict):
+        proxy_status = {}
+
+    current_time = time.time()
     valid_proxies_with_time = []
 
     # 由于 GitHub 源加起来可能有上万个 IP，建议把最大线程数拉高到 300-500 以加快速度
@@ -163,30 +176,77 @@ def get_top_proxies(count=10):
     start_time = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
         results = executor.map(format_and_test_proxy, unique_proxies)
+
         for res in results:
-            if res is not None:
-                valid_proxies_with_time.append(res)
+            proxy_str, p_dict, delay = res
+
+            # 初始化代理字典结构（兼容旧版本数据）
+            if proxy_str not in proxy_status:
+                proxy_status[proxy_str] = {"history_list": []}
+            elif "history_list" not in proxy_status[proxy_str]:
+                proxy_status[proxy_str]["history_list"] = []
+
+            # 1. 添加本次测速记录
+            proxy_status[proxy_str]["history_list"].append({
+                "time": current_time,
+                "delay": delay
+            })
+
+            # 2. 清理历史：保留最近 1 小时的记录
+            history_list = proxy_status[proxy_str]["history_list"]
+            history_list = [record for record in history_list if current_time - record["time"] <= 3600]
+
+            # 保留最近的 10 个测试记录
+            history_list = history_list[-10:]
+
+            # 3. 计算平均延迟作为最终得分
+            if history_list:
+                avg_delay = sum(record["delay"] for record in history_list) / len(history_list)
+            else:
+                avg_delay = 100.0
+
+            # 4. 重新赋值更新，确保 delay 字段在 history_list 前面 (利用 Python 3.7+ 字典保序特性)
+            proxy_status[proxy_str] = {
+                "delay": round(avg_delay, 3),  # 保留三位小数更易读
+                "history_list": history_list
+            }
+
+            # 我们只把平均延迟低于100（说明近期有过至少一次通的记录）的代理放入备选列表
+            if avg_delay < 50.0:
+                valid_proxies_with_time.append((p_dict, avg_delay))
+
+    # 执行完毕后，处理要保存的 JSON 数据
+    # 将整个代理字典按照 delay 升序排列，并强制让所有节点的 delay 字段都排在前面
+    sorted_proxy_status = {}
+    sorted_items = sorted(proxy_status.items(), key=lambda x: x[1].get("delay", 100.0))
+    for k, v in sorted_items:
+        sorted_proxy_status[k] = {
+            "delay": v.get("delay", 100.0),
+            "history_list": v.get("history_list", [])
+        }
+
+    save_json(PROXY_STATUS_FILE, sorted_proxy_status)
 
     end_time = time.time()
-    print(f"⏱️ 测速耗时: {end_time - start_time:.2f} 秒")
+    print(f"⏱️ 测速与状态更新耗时: {end_time - start_time:.2f} 秒")
 
     if not valid_proxies_with_time:
         print("❌ 经过 B站 接口测试，没有免费代理存活。")
         return []
 
     print(
-        f"📊 测速完毕，仅有 {len(valid_proxies_with_time)} 个节点存活 (存活率: {len(valid_proxies_with_time) / len(unique_proxies) * 100:.2f}%)。")
+        f"📊 测速完毕，近期存活及可用节点共 {len(valid_proxies_with_time)} 个 (参考存活率: {len(valid_proxies_with_time) / len(unique_proxies) * 100:.2f}%)。")
 
-    # 按响应时间升序排序
+    # 按平均响应时间升序排序（得分越低越好）
     valid_proxies_with_time.sort(key=lambda x: x[1])
 
     # 提取前 count 个
     top_proxies_with_time = valid_proxies_with_time[:count] if count else valid_proxies_with_time
 
     final_proxy_list = []
-    print(f"\n🏆 为您提取 Top {len(top_proxies_with_time)} 最快节点：")
-    for idx, (p_dict, t_time) in enumerate(top_proxies_with_time):
-        # print(f"  [{idx + 1}] 延迟: {t_time:.3f}秒 ➔ {p_dict['http']}")
+    print(f"\n🏆 为您提取 Top {len(top_proxies_with_time)} 历史综合最快节点：")
+    for idx, (p_dict, avg_score) in enumerate(top_proxies_with_time):
+        # print(f"  [{idx + 1}] 平均延迟得分: {avg_score:.3f}秒 ➔ {p_dict['http']}")
         final_proxy_list.append(p_dict)
 
     return final_proxy_list
