@@ -119,7 +119,7 @@ def _check_source_freshness(url):
 
     except Exception as e:
         # 检测过程报错不应阻塞主流程，给予默认通过
-        return True, "检测时间失败"
+        return False, "检测时间失败"
 
 
 def _fetch_proxy_from_source(source_name, url, source_type):
