@@ -680,10 +680,10 @@ if __name__ == "__main__":
     print(">>> 开始生成老版本封面 (文字在最上层)...")
 
     # 老版本只需要一张完整的底图
-    old_input_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963.jpg"
+    old_input_img = r"W:\project\python_project\auto_video\videos\task\7533671760756051250\69cb755ed48b8dfd61523fa8\cover\7533671760756051250_02-07-000.jpg"
     old_output_img = old_input_img.replace(".jpg", "_old.png")  # 输出为 PNG 保持质量
 
-    create_enhanced_cover(
+    create_enhanced_cover_auto(
         input_image_path=old_input_img,
         output_image_path=old_output_img,
         text_lines=texts,
@@ -694,25 +694,25 @@ if __name__ == "__main__":
         overwrite=True
     )
 
-    # ==========================================
-    # 场景 2：调用新函数 (三明治防遮挡模式)
-    # ==========================================
-    print("\n>>> 开始生成新版本封面 (背景-文字-主体 三层结构)...")
-
-    # 新版本需要你提前把 test_input.jpg 拆分成两张图：
-    # 1. test_bg.png: 纯背景图
-    # 2. test_fg.png: 抠好的主体图 (必须带有Alpha透明通道，也就是抠图后背景是透明的PNG)
-    new_bg_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963_background.png"
-    new_fg_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963_subject.png"
-    new_output_img = new_fg_img.replace("_subject.png", "_layered.png")  # 输出为 PNG 保持质量
-
-    create_enhanced_cover_layered(
-        bg_image_path=new_bg_img,  # 传参变化 1：传入背景
-        fg_image_path=new_fg_img,  # 传参变化 2：传入透明主体
-        output_image_path=new_output_img,
-        text_lines=texts,
-        font_path=font,
-        color_theme='vibrant_yellow',
-        font_size_ratio=1.0,
-        overwrite=True
-    )
+    # # ==========================================
+    # # 场景 2：调用新函数 (三明治防遮挡模式)
+    # # ==========================================
+    # print("\n>>> 开始生成新版本封面 (背景-文字-主体 三层结构)...")
+    #
+    # # 新版本需要你提前把 test_input.jpg 拆分成两张图：
+    # # 1. test_bg.png: 纯背景图
+    # # 2. test_fg.png: 抠好的主体图 (必须带有Alpha透明通道，也就是抠图后背景是透明的PNG)
+    # new_bg_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963_background.png"
+    # new_fg_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963_subject.png"
+    # new_output_img = new_fg_img.replace("_subject.png", "_layered.png")  # 输出为 PNG 保持质量
+    #
+    # create_enhanced_cover_layered(
+    #     bg_image_path=new_bg_img,  # 传参变化 1：传入背景
+    #     fg_image_path=new_fg_img,  # 传参变化 2：传入透明主体
+    #     output_image_path=new_output_img,
+    #     text_lines=texts,
+    #     font_path=font,
+    #     color_theme='vibrant_yellow',
+    #     font_size_ratio=1.0,
+    #     overwrite=True
+    # )

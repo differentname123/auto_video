@@ -2,6 +2,7 @@ import hashlib
 import json
 import random
 import traceback
+from datetime import datetime
 
 import requests
 import base64
@@ -411,6 +412,10 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
     # 新增限制常量
     DEFAULT_SPEED_MB = 0.1  # 默认速度 0.1Mb/s
     MAX_EST_TIME = 900  # 最大允许预估时间 1800秒
+
+    hour = datetime.now().hour
+    if 1 <= hour < 6:
+        MAX_EST_TIME = 2000
 
     while True:
         with SimpleFileLock(lock_file_path):

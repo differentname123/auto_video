@@ -115,7 +115,7 @@ def _check_source_freshness(url):
             return True, f"更新于 {age_hours:.1f}h 前"
 
         # 3. 如果服务器连 Last-Modified 都不给，默认放行，交由后续测速决定
-        return True, "未知更新时间"
+        return False, "未知更新时间"
 
     except Exception as e:
         # 检测过程报错不应阻塞主流程，给予默认通过
