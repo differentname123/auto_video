@@ -651,16 +651,16 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
 
             # 判断逻辑：24小时前更新 OR 成功率 > 0
             if (current_time - last_update) > TWENTY_FOUR_HOURS and success_rate >= 0.7:
-                # 存入元组 (代理字典, 成功率) 以便后续排序
-                valid_proxies_with_rate.append((proxy, success_rate))
+                # 存入元组 (代理字典, 成功率, 节点类型标签) 以便后续排序和统计构成
+                valid_proxies_with_rate.append((proxy, success_rate, "好节点"))
             else:
-                # 24小时内更新，且成功率为0，属于近期明确失效节点
-                candidate_proxies_with_rate.append((proxy, success_rate))
+                # 24小时内更新，且成功率为0，属于近期明确失效节点 (或未达到上述高优条件)
+                candidate_proxies_with_rate.append((proxy, success_rate, "验证过较差节点"))
         else:
             # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
-            candidate_proxies_with_rate.append((proxy, 0.5))
+            candidate_proxies_with_rate.append((proxy, 0.5, "未验证节点"))
 
-    # 按照成功率降序排序 (成功率高的排前面)
+    # 按照成功率降序排序 (成功率高的排前面) - x[1] 依然是成功率，排序逻辑不受标签影响
     valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
 
     # 提取纯好节点列表（在保底补齐发生之前提取，确保里面没有任何补齐的较差节点）
@@ -689,12 +689,20 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     # 提取纯代理字典用于返回
     final_proxies = [item[0] for item in final_proxies_with_rate]
 
-    # 打印重要信息报表 (已增加对纯好节点数量的打印适配，标注含本地保底)
+    # --- 新增统计逻辑：分析最终输出的 final_proxies 的构成 ---
+    count_good = sum(1 for item in final_proxies_with_rate if item[2] == "好节点")
+    count_poor = sum(1 for item in final_proxies_with_rate if item[2] == "验证过较差节点")
+    count_unverified = sum(1 for item in final_proxies_with_rate if item[2] == "未验证节点")
+    # -----------------------------------------------------------
+
+    # 打印重要信息报表 (在输出中加入了构成统计)
     print(
-        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count}) 最低成功率: {final_proxies_with_rate[-1] if final_proxies_with_rate else 'N/A'} | 纯好节点池: {len(pure_good_proxies)} 个(含本地保底)")
+        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | "
+        f"最终输出可用: {len(final_proxies)} 个 (构成 -> 好节点:{count_good}, 验证过较差:{count_poor}, 未验证0.5:{count_unverified}) (上限 {max_count}) "
+        f"最低成功率: {final_proxies_with_rate[-1] if final_proxies_with_rate else 'N/A'} | 纯好节点池: {len(pure_good_proxies)} 个(含本地保底)"
+    )
 
     return final_proxies, pure_good_proxies
-
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
                                   max_run_time=14400):
