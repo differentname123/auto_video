@@ -15,7 +15,7 @@ LOCAL_PROXY = {
 }
 
 # 测试代理存活的目标网站（B站基础接口）
-TEST_TARGET_URL = "https://api.bilibili.com/x/web-interface/nav"
+TEST_TARGET_URL = "https://www.bilibili.com/"
 
 # 基础超时宽容度（秒）：超过这个时间的代理直接判定死亡，不再参与排序
 BASE_TIMEOUT = 15.0  # 建议稍微调低到10秒，提高筛选效率
@@ -297,7 +297,7 @@ def get_top_proxies(count=10):
             history_list = [record for record in history_list if current_time - record["time"] <= 3600]
 
             # 保留最近的 10 个测试记录
-            history_list = history_list[-10:]
+            history_list = history_list[-3:]
 
             # 3. 计算平均延迟作为最终得分
             if history_list:
@@ -307,11 +307,15 @@ def get_top_proxies(count=10):
 
             # 4. 重新赋值更新，确保 delay 和 is_high_anon 字段在 history_list 前面
             existing_anon = proxy_status[proxy_str].get("is_high_anon")
+            existing_exit_ip = proxy_status[proxy_str].get("exit_ip")
+
             new_status_data = {"delay": round(avg_delay, 3)}
 
-            # 防覆盖机制：如果有已测过的高匿标识，原样保留
+            # 防覆盖机制：如果有已测过的高匿标识或出口IP记录，原样保留
             if existing_anon is not None:
                 new_status_data["is_high_anon"] = existing_anon
+            if existing_exit_ip is not None:
+                new_status_data["exit_ip"] = existing_exit_ip
 
             new_status_data["history_list"] = history_list
             proxy_status[proxy_str] = new_status_data
@@ -330,6 +334,8 @@ def get_top_proxies(count=10):
         }
         if "is_high_anon" in v:
             sorted_proxy_status[k]["is_high_anon"] = v["is_high_anon"]
+        if "exit_ip" in v:
+            sorted_proxy_status[k]["exit_ip"] = v["exit_ip"]
         sorted_proxy_status[k]["history_list"] = v.get("history_list", [])
 
     save_json(PROXY_STATUS_FILE, sorted_proxy_status)
@@ -374,25 +380,25 @@ def get_real_ip():
 
 def _check_single_high_anon(proxy_dict, real_ip):
     """
-    内部辅助函数：校验单个代理是否高匿
-    返回元组: (proxy_dict, 是否为高匿布尔值)
+    内部辅助函数：校验单个代理是否高匿并提取实际出口 IP
+    返回元组: (proxy_dict, 是否为高匿布尔值, 实际出口IP字符串)
     """
     try:
-        resp = requests.get("http://httpbin.org/ip", proxies=proxy_dict, timeout=5.0)
+        resp = requests.get("http://httpbin.org/ip", proxies=proxy_dict, timeout=15.0)
         if resp.status_code == 200:
             origin_ip = resp.json().get("origin", "")
             if (real_ip and real_ip in origin_ip) or ("," in origin_ip):
-                return (proxy_dict, False)
-            return (proxy_dict, True)
+                return (proxy_dict, False, origin_ip)
+            return (proxy_dict, True, origin_ip)
     except:
         pass
-    return (proxy_dict, False)
+    return (proxy_dict, False, "")
 
 
 def batch_update_anon_status(anon_status_records):
     """
-    批量将高匿测速结果追加/更新到本地 JSON 文件中
-    :param anon_status_records: dict, 格式为 {"1.2.3.4:80": True/False}
+    批量将高匿测速结果及实际出口IP追加/更新到本地 JSON 文件中
+    :param anon_status_records: dict, 格式为 {"1.2.3.4:80": {"is_high_anon": True/False, "exit_ip": "x.x.x.x"}}
     """
     if not anon_status_records:
         return
@@ -402,9 +408,11 @@ def batch_update_anon_status(anon_status_records):
         return
 
     is_updated = False
-    for proxy_str, is_high_anon in anon_status_records.items():
+    for proxy_str, record_data in anon_status_records.items():
         if proxy_str in proxy_status:
-            proxy_status[proxy_str]["is_high_anon"] = is_high_anon
+            proxy_status[proxy_str]["is_high_anon"] = record_data["is_high_anon"]
+            if record_data.get("exit_ip"):
+                proxy_status[proxy_str]["exit_ip"] = record_data["exit_ip"]
             is_updated = True
 
     if is_updated:
@@ -413,28 +421,34 @@ def batch_update_anon_status(anon_status_records):
         sorted_items = sorted(proxy_status.items(), key=lambda x: x[1].get("delay", 100.0))
         for k, v in sorted_items:
             sorted_proxy_status[k] = {
-                "delay": v.get("delay", 100.0),
-                "is_high_anon": v.get("is_high_anon", False),
-                "history_list": v.get("history_list", [])
+                "delay": v.get("delay", 100.0)
             }
+            if "is_high_anon" in v:
+                sorted_proxy_status[k]["is_high_anon"] = v["is_high_anon"]
+            if "exit_ip" in v:
+                sorted_proxy_status[k]["exit_ip"] = v["exit_ip"]
+            sorted_proxy_status[k]["history_list"] = v.get("history_list", [])
         save_json(PROXY_STATUS_FILE, sorted_proxy_status)
 
 
 def filter_and_record_high_anon(best_free_proxies, count):
     """
-    核心封装：对传入的精英代理列表进行高匿检测，提取所需数量，并批量持久化结果。
+    核心封装：对传入的精英代理列表进行高匿检测，记录实际出口 IP，
+    并返回经过实际出口 IP 去重（保留最低延迟）的 常规列表 和 高匿列表。
     """
-    print("\n🛡️ [安全模式] 正在启动高匿二次过滤并记录状态...")
+    print("\n🛡️ [安全模式] 正在启动高匿二次过滤、出口IP去重并记录状态...")
     real_ip = get_real_ip()
     if real_ip:
         print(f"✅ 获取到本机真实 IP: {real_ip}")
     else:
         print("⚠️ 获取本机真实 IP 失败，将仅使用头部特征(逗号)进行基础匿名过滤。")
 
-    print(f"🔍 正在对 Top {len(best_free_proxies)} 个极速节点进行高匿并发核对...")
+    print(f"🔍 正在对 Top {len(best_free_proxies)} 个极速节点进行并发核对...")
 
-    base_proxy_list = []
-    anon_status_records = {}  # 收集高匿测速结果，用于最后统一落地
+    anon_status_records = {}
+    # 建立映射以保留列表原始传进来的延迟排序名次（索引越小，原始延迟越低）
+    proxy_rank = {p["http"]: idx for idx, p in enumerate(best_free_proxies)}
+    results = []
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         future_to_proxy = {
@@ -443,18 +457,50 @@ def filter_and_record_high_anon(best_free_proxies, count):
         }
 
         for future in concurrent.futures.as_completed(future_to_proxy):
-            p_dict, is_high_anon = future.result()
+            p_dict, is_high_anon, exit_ip = future.result()
             # 从 "http://1.2.3.4:80" 中剥离出纯 "1.2.3.4:80" 作为字典 key
             proxy_str = p_dict["http"].replace("http://", "")
-            anon_status_records[proxy_str] = is_high_anon
 
-            if is_high_anon and len(base_proxy_list) < count:
-                base_proxy_list.append(p_dict)
+            anon_status_records[proxy_str] = {
+                "is_high_anon": is_high_anon,
+                "exit_ip": exit_ip
+            }
 
-    # 所有测试跑完后，将这一批节点的匿名状态批量刷入 JSON
+            results.append((p_dict, is_high_anon, exit_ip, proxy_rank[p_dict["http"]]))
+
+    # 所有测试跑完后，将这一批节点的匿名状态和出口IP批量刷入 JSON
     batch_update_anon_status(anon_status_records)
 
-    return base_proxy_list
+    # 关键：按原始的延迟排名升序排序，确保在进行出口 IP 去重时，永远优先命中延迟最低的节点
+    results.sort(key=lambda x: x[3])
+
+    base_proxy_list = []
+    high_anon_proxy_list = []
+    seen_exit_ips_base = set()
+    seen_exit_ips_anon = set()
+    same_base_count = 0
+    same_high_anon_count = 0
+    for p_dict, is_high_anon, exit_ip, rank in results:
+        # 若测速失败未能获取出口IP，我们退化为使用代理本尊配置IP作为去重标识
+        eff_exit_ip = exit_ip if exit_ip else p_dict["http"]
+
+        # 1. 填充常规代理列表 (按实际出口IP严格去重)
+        if eff_exit_ip not in seen_exit_ips_base and len(base_proxy_list) < count:
+            seen_exit_ips_base.add(eff_exit_ip)
+            base_proxy_list.append(p_dict)
+        else:
+            same_base_count += 1
+
+        # 2. 填充纯高匿代理列表 (按实际出口IP严格去重)
+        if is_high_anon and exit_ip and exit_ip not in seen_exit_ips_anon and len(high_anon_proxy_list) < count:
+            seen_exit_ips_anon.add(exit_ip)
+            high_anon_proxy_list.append(p_dict)
+        else:
+            if is_high_anon:
+                same_high_anon_count += 1
+    print(f"🔍 高匿过滤与出口IP去重完成：常规列表中 {len(base_proxy_list)} 个独立出口IP，{same_base_count} 个同IP节点被排除；高匿列表中 {len(high_anon_proxy_list)} 个独立出口IP，{same_high_anon_count} 个同IP节点被排除。")
+
+    return base_proxy_list, high_anon_proxy_list
 
 
 # =========================================================================
@@ -464,21 +510,18 @@ def get_proxy(count=50):
     组装所有可用代理的主函数
     :param count: 最终需要返回的代理数量（分别对应普通和高匿的期望最大获取数）
     :return: 元组 (base_proxy_list, high_anon_proxy_list)
-             - base_proxy_list: 仅经过 B 站连通性测速的最快代理列表
-             - high_anon_proxy_list: 经过高匿二次校验的最快代理列表
+             - base_proxy_list: 经过实际出口IP去重后的常规最快代理列表
+             - high_anon_proxy_list: 经过高匿二次校验及实际出口IP去重后的最快代理列表
     """
-    # 放宽提取容量（取 3 倍），确保经过高匿严格过滤后，依然能凑够 count 数量
+    # 放宽提取容量（取 3 倍），确保经过高匿严格过滤和出口IP去重后，依然能凑够 count 数量
     fetch_count = count * 3
     best_free_proxies = get_top_proxies(count=fetch_count)
 
     if not best_free_proxies:
         return [], []
 
-    # 1. 常规代理列表：不需要高匿，直接截取连通测速最快的前 count 个
-    base_proxy_list = best_free_proxies[:count]
-
-    # 2. 高匿代理列表：将扩容后的整个优质池送入独立校验逻辑，检测并记录状态，最多提取 count 个
-    high_anon_proxy_list = filter_and_record_high_anon(best_free_proxies, count)
+    # 统一将扩容后的整个优质池送入独立校验逻辑，检测、记录状态并完成 IP 去重提取
+    base_proxy_list, high_anon_proxy_list = filter_and_record_high_anon(best_free_proxies, count)
 
     print(
         f"\n✅ 最终交付可用代理池容量：常规极速节点 {len(base_proxy_list)} 个，纯高匿节点 {len(high_anon_proxy_list)} 个。")
