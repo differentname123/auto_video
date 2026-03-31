@@ -471,6 +471,18 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
 
                         print(
                             f"基于历史记录(24h内)，选择最快上传线路: 线路节点速度 {best_upcdn} (测速: {max_speed / 1024:.2f} MB/s) 预估上传时间 {est_time:.2f}s  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} file_size:{file_size}")
+                    else:
+                        # 4. 新增兜底策略：只有在“所有节点都没被正常占用”（全局空闲）的情况下才兜底
+                        # 如果 len(available_cdns) != len(upcdn_list)，说明还有节点在忙，应该继续循环等待
+                        if len(available_cdns) == len(upcdn_list):
+                            best_upcdn = min(available_cdns,
+                                             key=lambda c: cdn_info.get(c, {}).get("timestamp", current_time))
+
+                            record = cdn_info.get(best_upcdn, {})
+                            speed = record.get("speed", 0)
+                            speed_mb = speed / 1024 if speed > 0 else DEFAULT_SPEED_MB
+                            est_time = file_size / speed_mb
+                            print(f"触发兜底策略(全局无节点运行且速度均不达标)，强制选择更新最早的线路: {best_upcdn} (测速: {speed_mb:.2f} MB/s) 预估上传时间 {est_time:.2f}s  当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} file_size:{file_size}")
 
             # 如果找到了节点，标记为占用，并返回
             if best_upcdn:

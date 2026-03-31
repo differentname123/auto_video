@@ -622,7 +622,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     return -1, used_index, light_status, used_proxy
 
 
-def filter_proxies(history_stats, proxies_list, max_count=20):
+def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     """
     根据历史统计数据过滤代理列表，加入探索与利用机制。
 
@@ -645,15 +645,15 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
 
         if stats:
             last_update = stats.get('update_time', 0)
-            success_rate = stats.get('success_rate', 0.2)
+            success_rate = stats.get('success_rate', 0.1)
 
             # 判断逻辑：24小时前更新 OR 成功率 > 0
-            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate >= 0.5:
+            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate >= 0.8:
                 # 存入元组 (代理字典, 成功率) 以便后续排序
                 valid_proxies_with_rate.append((proxy, success_rate))
             else:
                 # 24小时内更新，且成功率为0，属于近期明确失效节点
-                candidate_proxies_with_rate.append((proxy, success_rate))
+                candidate_proxies_with_rate.append((proxy, 0.1))
         else:
             # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
             candidate_proxies_with_rate.append((proxy, 0.1))
@@ -663,12 +663,12 @@ def filter_proxies(history_stats, proxies_list, max_count=20):
 
     initial_valid_count = len(valid_proxies_with_rate)
     padded_count = 0
+    if initial_valid_count < min_count:
+        needed = min_count - initial_valid_count
 
-    # 检查是否需要保底补齐 (10个)
-    if initial_valid_count < 15:
-        needed = 15 - initial_valid_count
-        # 从候选列表(死节点)中取所需数量来补齐
-        pad_list = candidate_proxies_with_rate[:needed]
+        # 不重复 + 自动处理 needed 过大
+        actual_take = min(needed, len(candidate_proxies_with_rate))
+        pad_list = random.sample(candidate_proxies_with_rate, actual_take)
         valid_proxies_with_rate.extend(pad_list)
         padded_count = len(pad_list)
 
@@ -703,7 +703,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     timeout_triggered = False  # 新增：全局超时标志位
 
     for attempt in range(1, max_retries + 1):
-        proxies_list = get_proxy()
+        proxies_list = get_proxy(count=1000)
         proxies_list = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
         if not proxies_list:
             print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
