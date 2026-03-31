@@ -570,7 +570,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     use_worker = False
     if pure_good_proxies:
         len_good = len(pure_good_proxies) + worker_url_list_count
-        len_total = len(proxies_list) if proxies_list else len_good
+        len_total = (len(proxies_list)+worker_url_list_count) if proxies_list else len_good
         if len_total > 0:
             probability = len_good / len_total
             use_worker = random.random() < probability
