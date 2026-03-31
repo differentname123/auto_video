@@ -558,21 +558,28 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     proxies = None
     if proxies_list:
         proxies = random.choice(proxies_list)
-
-    # ==== 2. 随机决定路线 (抛硬币：True代表Worker，False代表老办法) ====
-    use_worker = random.choice([True, False, False])
+    worker_url_list = [
+    "https://far-dolphin-10.differentname123.deno.net/",
+    "https://vercel-proxy-kappa-ruddy.vercel.app/api",
+    "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
+    "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
+    "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
+    ]
+    worker_url_list_count = len(worker_url_list)
+    # ==== 2. 随机决定路线 (根据 pure_good_proxies 占比动态决定) ====
+    use_worker = False
+    if pure_good_proxies:
+        len_good = len(pure_good_proxies) + worker_url_list_count
+        len_total = len(proxies_list) if proxies_list else len_good
+        if len_total > 0:
+            probability = len_good / len_total
+            use_worker = random.random() < probability
 
     # ==== 3. 真正需要拉取的用户进入这里 ====
     if use_worker:
         proxies = random.choice(pure_good_proxies)
         proxy_str = proxies.get("http") if proxies else None
-        worker_url_list =  [
-        "https://far-dolphin-10.differentname123.deno.net/",
-        "https://vercel-proxy-kappa-ruddy.vercel.app/api",
-        "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
-        "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
-        "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
-    ]
+
         worker_url = random.choice(worker_url_list)  # 随机选择一个 Worker URL，增加冗余和稳定性
         videos = get_user_videos_via_worker(mid=uid, desired_count=40, local_proxy=proxy_str, worker_url=worker_url)
         used_index = random_index
@@ -617,7 +624,6 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
 
     return -1, used_index, light_status, used_proxy
 
-
 def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     """
     根据历史统计数据过滤代理列表，加入探索与利用机制。
@@ -644,15 +650,15 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
             success_rate = stats.get('success_rate', 0.1)
 
             # 判断逻辑：24小时前更新 OR 成功率 > 0
-            if (current_time - last_update) > TWENTY_FOUR_HOURS or success_rate >= 0.8:
+            if (current_time - last_update) > TWENTY_FOUR_HOURS and success_rate >= 0.7:
                 # 存入元组 (代理字典, 成功率) 以便后续排序
                 valid_proxies_with_rate.append((proxy, success_rate))
             else:
                 # 24小时内更新，且成功率为0，属于近期明确失效节点
-                candidate_proxies_with_rate.append((proxy, 0.1))
+                candidate_proxies_with_rate.append((proxy, success_rate))
         else:
             # 没有记录的新节点，作为优质节点给它机会，默认成功率算 0 以便排序放到已知高成功率节点后面
-            candidate_proxies_with_rate.append((proxy, 0.1))
+            candidate_proxies_with_rate.append((proxy, 0.5))
 
     # 按照成功率降序排序 (成功率高的排前面)
     valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
@@ -672,10 +678,8 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     padded_count = 0
     if initial_valid_count < min_count:
         needed = min_count - initial_valid_count
-
-        # 不重复 + 自动处理 needed 过大
-        actual_take = min(needed, len(candidate_proxies_with_rate))
-        pad_list = random.sample(candidate_proxies_with_rate, actual_take)
+        # 从候选列表(死节点)中取所需数量来补齐
+        pad_list = candidate_proxies_with_rate[:needed]
         valid_proxies_with_rate.extend(pad_list)
         padded_count = len(pad_list)
 
