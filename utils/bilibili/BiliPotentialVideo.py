@@ -624,7 +624,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
 
     return -1, used_index, light_status, used_proxy
 
-def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
+def filter_proxies(history_stats, proxies_list, base_proxy_list, max_count=100, min_count=50):
     """
     根据历史统计数据过滤代理列表，加入探索与利用机制。
 
@@ -674,6 +674,15 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     if local_proxy not in pure_good_proxies:
         pure_good_proxies.append(local_proxy)
 
+    # --- 新增逻辑：确保 pure_good_proxies 至少有 3 个元素，不足则从 proxies_list 中补充 ---
+    if len(pure_good_proxies) < 3:
+        for p in base_proxy_list:
+            if p not in pure_good_proxies:
+                pure_good_proxies.append(p)
+            if len(pure_good_proxies) >= 3:
+                break
+    # --------------------------------------------------------------------------------------
+
     initial_valid_count = len(valid_proxies_with_rate)
     padded_count = 0
     if initial_valid_count < min_count:
@@ -704,6 +713,7 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
 
     return final_proxies, pure_good_proxies
 
+
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
                                   max_run_time=14400):
     """
@@ -722,8 +732,8 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     timeout_triggered = False  # 新增：全局超时标志位
 
     for attempt in range(1, max_retries + 1):
-        proxies_list = get_proxy(count=1000)
-        proxies_list, pure_good_proxies = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
+        base_proxy_list, high_anon_proxy_list = get_proxy(count=1000)
+        proxies_list, pure_good_proxies = filter_proxies(history_stats, high_anon_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
         if not proxies_list:
             print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
             fail_count += 1

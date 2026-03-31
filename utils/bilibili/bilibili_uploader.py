@@ -539,7 +539,7 @@ def save_cdn_record(upcdn: str, file_size: int, duration: float):
                 fail_count = cdn_info[upcdn].get("fail_count", 0) + 1
                 cdn_info[upcdn]["fail_count"] = fail_count
 
-                if fail_count >= 3:
+                if fail_count >= 5:
                     # 连续3次失败，强制将速度置为0，并更新时间戳（防止被当做"未测试"节点优先分配）
                     cdn_info[upcdn]["speed"] = 0
                     cdn_info[upcdn]["timestamp"] = time.time()
