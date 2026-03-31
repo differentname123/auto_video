@@ -1,6 +1,9 @@
 import requests
 import concurrent.futures
 import time
+import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 from utils.common_utils import read_json, save_json
 
@@ -19,6 +22,10 @@ BASE_TIMEOUT = 10.0  # 建议稍微调低到10秒，提高筛选效率
 
 # 代理状态保存路径
 PROXY_STATUS_FILE = r"W:\project\python_project\auto_video\config\proxy_status.json"
+
+# 【新增配置】数据源最大容忍未更新时间（小时）
+# 如果一个源超过 48 小时未更新，大概率变成僵尸源，直接抛弃不拉取
+MAX_SOURCE_AGE_HOURS = 48.0
 
 # ==========================================
 # 代理源拉取统一配置区
@@ -69,12 +76,63 @@ PROXY_SOURCES = [
 ]
 
 
+# ================= 新增区：源鲜度检测模块 =================
+
+def _check_source_freshness(url):
+    """
+    检查源的最后更新时间，判断是否过期。
+    返回: (is_fresh: bool, reason: str)
+    """
+    try:
+        now = datetime.now(timezone.utc)
+
+        # 1. 如果是 GitHub 源，尝试使用 GitHub API 获取最后一次 commit 时间 (最准确)
+        github_match = re.match(r'https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.*)', url)
+        if github_match:
+            owner, repo, branch, path = github_match.groups()
+            api_url = f"https://api.github.com/repos/{owner}/{repo}/commits?path={path}&sha={branch}&per_page=1"
+            # GitHub API 限制无 Token 为 60次/小时，我们的源数量完全在安全线内
+            resp = requests.get(api_url, proxies=LOCAL_PROXY, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data and isinstance(data, list):
+                    commit_date_str = data[0]['commit']['committer']['date']
+                    commit_date = datetime.fromisoformat(commit_date_str.replace("Z", "+00:00"))
+                    age_hours = (now - commit_date).total_seconds() / 3600
+                    if age_hours > MAX_SOURCE_AGE_HOURS:
+                        return False, f"过期 {age_hours:.1f}h"
+                    return True, f"更新于 {age_hours:.1f}h 前"
+
+        # 2. 如果不是 GitHub，或者 API 失败，退化为使用 HTTP HEAD 检查 Last-Modified
+        head_resp = requests.head(url, proxies=LOCAL_PROXY, timeout=5)
+        last_modified_str = head_resp.headers.get('Last-Modified')
+
+        if last_modified_str:
+            last_modified_time = parsedate_to_datetime(last_modified_str)
+            age_hours = (now - last_modified_time).total_seconds() / 3600
+            if age_hours > MAX_SOURCE_AGE_HOURS:
+                return False, f"过期 {age_hours:.1f}h"
+            return True, f"更新于 {age_hours:.1f}h 前"
+
+        # 3. 如果服务器连 Last-Modified 都不给，默认放行，交由后续测速决定
+        return True, "未知更新时间"
+
+    except Exception as e:
+        # 检测过程报错不应阻塞主流程，给予默认通过
+        return True, "检测时间失败"
+
+
 def _fetch_proxy_from_source(source_name, url, source_type):
     """
     统一代理源拉取引擎：自带多重重试机制，并能兼容绝大多数代理文本格式变种。
-    返回值: (source_name, proxies_list)
+    返回值: (source_name, proxies_list, status_message)
     """
     all_proxies = []
+
+    # 先做鲜度检查
+    is_fresh, time_msg = _check_source_freshness(url)
+    if not is_fresh:
+        return source_name, [], f"⚠️ 忽略过期源 ({time_msg})"
 
     if source_type == "json_geonode":
         # 专门处理 Geonode 的 JSON 分页格式
@@ -122,13 +180,21 @@ def _fetch_proxy_from_source(source_name, url, source_type):
                         # 兼容处理3: 以冒号切分，严格提取前两个组成部分（解决如 ip:port:country 格式）
                         parts = entry.split(':')
                         if len(parts) >= 2 and parts[0][0].isdigit():
-                            all_proxies.append(f"{parts[0]}:{parts[1]}")
+                            # 过滤明显的脏数据 (如 0.0.0.0 或者非数字端口)
+                            ip, port = parts[0], parts[1]
+                            if ip != "0.0.0.0" and port.isdigit():
+                                all_proxies.append(f"{ip}:{port}")
                     break  # 成功提取后跳出重试循环
             except Exception:
                 if attempt < 4:
                     time.sleep(1)
 
-    return source_name, all_proxies
+    if all_proxies:
+        msg = f"✅ 成功获取 {len(all_proxies):>5} 个 | 示例: {all_proxies[0]:<21} | 状态: {time_msg}"
+    else:
+        msg = f"❌ 获取失败或无有效数据 | 状态: {time_msg}"
+
+    return source_name, all_proxies, msg
 
 
 # ==========================================
@@ -180,13 +246,10 @@ def get_top_proxies(count=10):
         futures = [executor.submit(_fetch_proxy_from_source, name, url, stype) for name, url, stype in PROXY_SOURCES]
 
         for future in concurrent.futures.as_completed(futures):
-            source_name, proxy_list = future.result()
+            source_name, proxy_list, status_msg = future.result()
+            print(f"  └─ {status_msg} | 来源: {source_name}")
             if proxy_list:
-                # 统一输出拉取状态：带上了示例和来源名称，排版对齐
-                print(f"  └─ ✅ 成功获取 {len(proxy_list):>5} 个 | 示例: {proxy_list[0]:<21} | 来源: {source_name}")
                 raw_proxies.extend(proxy_list)
-            else:
-                print(f"  └─ ❌ 获取失败或无数据 | 来源: {source_name}")
 
     # 列表去重（不同源之间可能有大量重复的公共免费IP）
     unique_proxies = list(set(raw_proxies))
