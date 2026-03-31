@@ -89,8 +89,12 @@ def fetch_from_github_proxifly():
             response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
             if response.status_code == 200:
                 lines = [p.strip() for p in response.text.split('\n') if p.strip()]
-                # 如果是纯 ip:port 则直接用，如果有附加信息则提取第一段
-                proxies = [line.split()[0].split(',')[0] for line in lines]
+                proxies = []
+                for line in lines:
+                    raw_proxy = line.split()[0].split(',')[0]
+                    # 核心修复：去除自带的 http:// 或 https:// 前缀，防止下游拼接错乱
+                    clean_proxy = raw_proxy.replace("http://", "").replace("https://", "")
+                    proxies.append(clean_proxy)
                 print(f"  └─ 成功获取 {len(proxies)} 个")
                 return proxies
         except Exception as e:
@@ -99,6 +103,67 @@ def fetch_from_github_proxifly():
                 time.sleep(1)
     return []
 
+# === 以下为新增的 5 个高质量源 ===
+
+def fetch_from_github_shiftytr():
+    """从 GitHub: ShiftyTR/Proxy-List 拉取 HTTP 代理"""
+    print("正在拉取源: GitHub (ShiftyTR)...")
+    url = "https://raw.githubusercontent.com/ShiftyTR/Proxy-List/master/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+def fetch_from_github_jetkai():
+    """从 GitHub: jetkai/proxy-list 拉取 HTTP 代理"""
+    print("正在拉取源: GitHub (jetkai)...")
+    url = "https://raw.githubusercontent.com/jetkai/proxy-list/main/online-proxies/txt/proxies-http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+
+def fetch_from_spys_me():
+    """从 spys.me 拉取 HTTP 代理"""
+    print("正在拉取源: spys.me...")
+    url = "https://spys.me/proxy.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                lines = [p.strip() for p in response.text.split('\n') if p.strip()]
+                proxies = []
+                # spys.me 的格式包含说明和附加信息，需要过滤出有效的 IP:Port
+                for line in lines:
+                    parts = line.split()
+                    if parts and ":" in parts[0] and parts[0][0].isdigit():
+                        proxies.append(parts[0])
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
 
 # ==========================================
 # 测速与调度核心代码
@@ -135,6 +200,120 @@ def format_and_test_proxy(proxy_address):
     return (proxy_address, proxy_dict, 100.0)
 
 
+def fetch_from_github_clarketm():
+    """从 GitHub: clarketm/proxy-list 拉取代理（每日更新）"""
+    print("正在拉取源: GitHub (clarketm)...")
+    url = "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+def fetch_from_github_komutan234():
+    """从 GitHub: komutan234/Proxy-List-Free 拉取 HTTP 代理（每2分钟更新）"""
+    print("正在拉取源: GitHub (komutan234)...")
+    url = "https://raw.githubusercontent.com/komutan234/Proxy-List-Free/main/proxies/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+def fetch_from_github_iplocate():
+    """从 GitHub: iplocate/free-proxy-list 拉取 HTTP 代理（每30分钟更新）"""
+    print("正在拉取源: GitHub (iplocate)...")
+    url = "https://raw.githubusercontent.com/iplocate/free-proxy-list/main/protocols/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+def fetch_from_github_mmpx12():
+    """从 GitHub: mmpx12/proxy-list 拉取 HTTP 代理（每小时更新）"""
+    print("正在拉取源: GitHub (mmpx12)...")
+    url = "https://raw.githubusercontent.com/mmpx12/proxy-list/master/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
+
+def fetch_from_github_zloi():
+    """GitHub: zloi-user/hideip.me"""
+    print("正在拉取源: GitHub (zloi-user)...")
+    url = "https://raw.githubusercontent.com/zloi-user/hideip.me/main/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                lines = [p.strip() for p in response.text.split('\n') if p.strip()]
+                proxies = []
+                for line in lines:
+                    # 核心修复：格式通常为 ip:port:country，以冒号分割并严格截取前两部分组装
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        proxies.append(f"{parts[0]}:{parts[1]}")
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+def fetch_from_github_prxchk():
+    """GitHub: prxchk/proxy-list"""
+    print("正在拉取源: GitHub (prxchk)...")
+    url = "https://raw.githubusercontent.com/prxchk/proxy-list/main/http.txt"
+    for attempt in range(5):
+        try:
+            response = requests.get(url, proxies=LOCAL_PROXY, timeout=15)
+            if response.status_code == 200:
+                proxies = [p.strip() for p in response.text.split('\n') if p.strip()]
+                print(f"  └─ 成功获取 {len(proxies)} 个")
+                return proxies
+        except Exception as e:
+            print(f"  └─ ❌ 获取失败 (第 {attempt + 1}/5 次重试): {e}")
+            if attempt < 4:
+                time.sleep(1)
+    return []
+
+
 def get_top_proxies(count=10):
     """
     主控函数：多源拉取 -> 去重 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
@@ -146,12 +325,33 @@ def get_top_proxies(count=10):
         fetch_from_proxyscrape,
         fetch_from_github_thespeedx,
         fetch_from_github_monosans,
-        fetch_from_github_proxifly
+        fetch_from_github_proxifly,
+
+
+        # 挂载新增的数据源 gemini
+        fetch_from_github_shiftytr,
+        fetch_from_github_jetkai,
+        fetch_from_spys_me,
+
+
+        # grok
+        fetch_from_github_clarketm,
+        fetch_from_github_komutan234,
+        fetch_from_github_iplocate,
+        fetch_from_github_mmpx12,
+
+        # gpt
+        fetch_from_github_zloi,
+        fetch_from_github_prxchk
     ]
 
     raw_proxies = []
     for source_func in sources:
-        raw_proxies.extend(source_func())
+        proxy_list = source_func()
+        raw_proxies.extend(proxy_list)
+        # 打印一个proxy_list的元素
+        if proxy_list:
+            print(f"  └─ 示例: {proxy_list[0]} (共 {len(proxy_list)} 个) 函数名: {source_func.__name__}")
 
     # 列表去重（不同源之间可能有大量重复的公共免费IP）
     unique_proxies = list(set(raw_proxies))
