@@ -529,7 +529,7 @@ def check_user_need_heavy_request(uid, exist_video_info, max_hour, new_profile_l
     return False, -1, light_status, current_video_count, random_index
 
 
-def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None, proxies_list=None):
+def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None, proxies_list=None, pure_good_proxies=None):
     """
     修改点：引入外置的判定逻辑，让这部分核心主流程更加直观，只处理真正需要拉取的用户。
     并将最终使用的 proxy 继续透传回调度器。
@@ -564,12 +564,8 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
 
     # ==== 3. 真正需要拉取的用户进入这里 ====
     if use_worker:
-        # 【按您的绝佳思路】：直接提取字典里的 'http' 字符串传给 local_proxy，原函数完全不用改！
+        proxies = random.choice(pure_good_proxies)
         proxy_str = proxies.get("http") if proxies else None
-        random_value = random.random()
-        if random_value > 0.5:
-            proxy_str = "http://127.0.0.1:7890"
-
         worker_url_list =  [
         "https://far-dolphin-10.differentname123.deno.net/",
         "https://vercel-proxy-kappa-ruddy.vercel.app/api",
@@ -661,6 +657,17 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     # 按照成功率降序排序 (成功率高的排前面)
     valid_proxies_with_rate.sort(key=lambda x: x[1], reverse=True)
 
+    # 提取纯好节点列表（在保底补齐发生之前提取，确保里面没有任何补齐的较差节点）
+    pure_good_proxies = [item[0] for item in valid_proxies_with_rate]
+
+    # 注入本地保底代理
+    local_proxy = {
+        "http": "http://127.0.0.1:7890",
+        "https": "http://127.0.0.1:7890"
+    }
+    if local_proxy not in pure_good_proxies:
+        pure_good_proxies.append(local_proxy)
+
     initial_valid_count = len(valid_proxies_with_rate)
     padded_count = 0
     if initial_valid_count < min_count:
@@ -678,11 +685,11 @@ def filter_proxies(history_stats, proxies_list, max_count=100, min_count=50):
     # 提取纯代理字典用于返回
     final_proxies = [item[0] for item in final_proxies_with_rate]
 
-    # 打印重要信息报表
+    # 打印重要信息报表 (已增加对纯好节点数量的打印适配，标注含本地保底)
     print(
-        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count}) 最低成功率: {final_proxies_with_rate[-1] if final_proxies_with_rate else 'N/A'}")
+        f"[代理过滤] 输入池: {len(proxies_list)} 个 | 优质达标(>24h/无记录/成功率>0): {initial_valid_count} 个 | 触发保底补齐: {padded_count} 个 | 最终输出可用: {len(final_proxies)} 个 (上限 {max_count}) 最低成功率: {final_proxies_with_rate[-1] if final_proxies_with_rate else 'N/A'} | 纯好节点池: {len(pure_good_proxies)} 个(含本地保底)")
 
-    return final_proxies
+    return final_proxies, pure_good_proxies
 
 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
@@ -704,7 +711,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
 
     for attempt in range(1, max_retries + 1):
         proxies_list = get_proxy(count=1000)
-        proxies_list = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
+        proxies_list, pure_good_proxies = filter_proxies(history_stats, proxies_list)  # 根据历史统计过滤代理列表
         if not proxies_list:
             print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
             fail_count += 1
@@ -736,7 +743,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_mid = {
                 executor.submit(process_single_user, mid, all_video_info, data_lock, max_hour, new_profile_list,
-                                proxies_list): mid
+                                proxies_list, pure_good_proxies): mid
                 for mid in all_mid_list
             }
 
