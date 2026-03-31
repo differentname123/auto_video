@@ -711,7 +711,6 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             time.sleep(5)
             continue
 
-
         round_start_time = time.time()  # 保持原有的单轮计时用于日志打印
         success_count = 0
         fail_count = 0
@@ -869,29 +868,77 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
         # ================== 新增：代理统计持久化落盘逻辑 ==================
         if proxy_stats:
             history_stats = read_json(proxy_stats_file)
-
             current_timestamp = time.time()
+            # 定义 24 小时的时间窗口范围 (秒)
+            twenty_four_hours_ago = current_timestamp - 24 * 3600
+
             for p_str, stats in proxy_stats.items():
                 if p_str not in history_stats:
-                    history_stats[p_str] = {'total': 0, 'success': 0, 'failed': 0}
+                    history_stats[p_str] = {
+                        'total': 0, 'success': 0, 'failed': 0,
+                        'history': []  # 增加 history 列表记录每次明细
+                    }
 
-                # 累加历史数据
                 h_stats = history_stats[p_str]
-                if h_stats['total'] > 100:
-                    h_stats['total'] = 0
-                    h_stats['success'] = 0
-                    h_stats['failed'] = 0
 
-                h_stats['total'] += stats['total']
-                h_stats['success'] += stats['success']
-                h_stats['failed'] += stats['failed']
+                # 为了兼容老的 json 数据结构，如果不存在 history 则先初始化
+                if 'history' not in h_stats:
+                    h_stats['history'] = []
 
-                # 更新时间和成功/失败率
+                # 1. 记录本轮调用的明细
+                h_stats['history'].append({
+                    'time': current_timestamp,
+                    'success': stats['success'],
+                    'failed': stats['failed']
+                })
+
+                # 2. 滑动窗口：过滤并只保留最近 24 小时内的记录
+                valid_history = [record for record in h_stats['history'] if record['time'] >= twenty_four_hours_ago]
+                h_stats['history'] = valid_history
+
+                # 3. 从新往旧统计，最多只累计 50 个请求的数据计算成功率
+                recent_success = 0
+                recent_failed = 0
+                recent_total = 0
+
+                # valid_history 中最新的数据在列表末尾，用 reversed 进行倒序遍历(从最新到最旧)
+                for record in reversed(valid_history):
+                    batch_total = record['success'] + record['failed']
+                    if batch_total == 0:
+                        continue
+
+                    # 如果加上当前批次超过了50，只需截取不足50的部分
+                    if recent_total + batch_total > 50:
+                        needed = 50 - recent_total
+                        # 按这批次的实际成功率，等比例换算需要的成功数和失败数
+                        success_ratio = record['success'] / batch_total
+                        add_success = int(round(needed * success_ratio))
+                        add_failed = needed - add_success
+
+                        recent_success += add_success
+                        recent_failed += add_failed
+                        recent_total += needed
+                        break
+                    else:
+                        recent_success += record['success']
+                        recent_failed += record['failed']
+                        recent_total += batch_total
+
+                    # 如果刚好达到 50，结束统计
+                    if recent_total == 50:
+                        break
+
+                # 4. 更新基础统计字段，保持跟旧逻辑调用处的兼容性
+                h_stats['success'] = recent_success
+                h_stats['failed'] = recent_failed
+                h_stats['total'] = recent_total
+
+                # 5. 更新时间和成功/失败率
                 h_stats['update_time'] = current_timestamp
                 h_stats['success_rate'] = h_stats['success'] / h_stats['total'] if h_stats['total'] > 0 else 0
                 h_stats['fail_rate'] = h_stats['failed'] / h_stats['total'] if h_stats['total'] > 0 else 0
-            save_json(proxy_stats_file, history_stats)
 
+            save_json(proxy_stats_file, history_stats)
 
         # 修改点：判断全局超时标志
         if timeout_triggered:
@@ -909,7 +956,6 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 print(f"警告：已达到最大重试次数({max_retries}次)，fail_count 仍大于 200 ({fail_count})，强制结束本阶段。")
 
     return fail_count < 200
-
 
 def process_single_tag(tag, all_user_info, max_hour=24):
     start_time = time.time()
@@ -1252,6 +1298,39 @@ def get_sorted_high_score_videos(max_hour=24, check_video_type=True):
     return all_video_score_list, all_video_info
 
 
+def test_connect():
+    """
+    进行代理节点的连通性测试，验证是否能够成功拉取到指定 UP 主的视频信息。
+    :return:
+    """
+    TARGET_MID = 546195
+    success_count = 0
+    max_count = 1
+    worker_url_list = [
+        "https://far-dolphin-10.differentname123.deno.net/",
+        "https://vercel-proxy-kappa-ruddy.vercel.app/api",
+        "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
+        "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
+        "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
+    ]
+    for i in range(max_count):
+
+        for worker_url in worker_url_list:
+            # worker_url = "https://vercel-proxy-kappa-ruddy.vercel.app/api"
+            videos = get_user_videos_via_worker(mid=TARGET_MID, worker_url=worker_url)
+
+            print("\n" + "=" * 50)
+            if videos:
+                success_count += 1
+                print(f"🎉 成功拉取到 {len(videos)} 个视频！")
+                for idx, v in enumerate(videos, 1):
+                    print(f"{idx}. [{v.get('created')}] {v.get('title')} (播放量: {v.get('play')})")
+                    break
+            else:
+                print("😭 拉取失败或该 UP 主没有视频。")
+    print("\n" + "=" * 50)
+    print(f"✅ 总共成功拉取 {success_count}/{max_count * len(worker_url_list)} 次")
+
 def update_good_user_video():
     all_video_score_list, all_video_info = get_sorted_high_score_videos()
 
@@ -1367,6 +1446,7 @@ if __name__ == "__main__":
     counter, finish_streak, last_run_time = 0, 0, 0
     # is_finish = update_good_user_video()
     # get_all_user_video_info()
+    # test_connect()
     hour = datetime.now().hour
     if 1 <= hour < 5:
         run_extended_tasks()

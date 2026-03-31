@@ -410,7 +410,7 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
 
     # 新增限制常量
     DEFAULT_SPEED_MB = 0.1  # 默认速度 0.1Mb/s
-    MAX_EST_TIME = 1800  # 最大允许预估时间 1800秒
+    MAX_EST_TIME = 900  # 最大允许预估时间 1800秒
 
     while True:
         with SimpleFileLock(lock_file_path):
@@ -493,6 +493,7 @@ def save_cdn_record(upcdn: str, file_size: int, duration: float):
     """
     计算上传速度（字节/秒）并保存到本地记录中。
     重要：无论时长是否有效，都必须将节点的占用的状态释放掉！
+    新增逻辑：如果连续 3 次未产生有效测速（失败/中断），则将该节点测速强制重置为 0。
     """
     cdn_info_path = r'W:\project\python_project\auto_video\config\cnd_info.json'
     lock_file_path = cdn_info_path + '.lock'
@@ -516,17 +517,27 @@ def save_cdn_record(upcdn: str, file_size: int, duration: float):
                     "size": file_size,
                     "duration": duration,
                     "speed": speed,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
+                    "fail_count": 0  # 成功产生测速时，清零连续失败次数
                 })
                 print(
                     f"成功记录并释放节点 {upcdn} 状态: 耗时 {duration:.2f}秒, 速度 {speed / 1024:.2f}MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')} ")
             else:
-                print(f"释放节点 {upcdn} (未产生有效测速) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+                # 失败或未产生有效测速时，累加连续失败次数
+                fail_count = cdn_info[upcdn].get("fail_count", 0) + 1
+                cdn_info[upcdn]["fail_count"] = fail_count
+
+                if fail_count >= 3:
+                    # 连续3次失败，强制将速度置为0，并更新时间戳（防止被当做"未测试"节点优先分配）
+                    cdn_info[upcdn]["speed"] = 0
+                    cdn_info[upcdn]["timestamp"] = time.time()
+                    print(f"节点 {upcdn} 连续 {fail_count} 次未产生有效测速，已将测速强制置为 0 MB/s 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
+                else:
+                    print(f"释放节点 {upcdn} (未产生有效测速，当前连续失败 {fail_count} 次) 当前时间：{time.strftime('%Y-%m-%d %H:%M:%S')}")
 
             save_json(cdn_info_path, cdn_info)
         except Exception as e:
             print(f"记录/释放 CDN 状态时发生错误: {e}")
-
 
 def upload_to_bilibili(
         video_path: str,
