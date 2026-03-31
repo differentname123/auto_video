@@ -18,7 +18,7 @@ LOCAL_PROXY = {
 TEST_TARGET_URL = "https://api.bilibili.com/x/web-interface/nav"
 
 # 基础超时宽容度（秒）：超过这个时间的代理直接判定死亡，不再参与排序
-BASE_TIMEOUT = 10.0  # 建议稍微调低到10秒，提高筛选效率
+BASE_TIMEOUT = 15.0  # 建议稍微调低到10秒，提高筛选效率
 
 # 代理状态保存路径
 PROXY_STATUS_FILE = r"W:\project\python_project\auto_video\config\proxy_status.json"
