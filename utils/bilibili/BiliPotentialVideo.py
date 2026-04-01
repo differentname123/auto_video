@@ -733,7 +733,11 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
 
     for attempt in range(1, max_retries + 1):
         base_proxy_list, high_anon_proxy_list = get_proxy(count=1000)
-        proxies_list, pure_good_proxies = filter_proxies(history_stats, high_anon_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
+        if attempt > 1:
+            proxies_list, pure_good_proxies = filter_proxies(history_stats, base_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
+        else:
+            proxies_list, pure_good_proxies = filter_proxies(history_stats, high_anon_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
+
         if not proxies_list:
             print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
             fail_count += 1
@@ -1341,7 +1345,7 @@ def test_connect():
     success_count = 0
     max_count = 1
     worker_url_list = [
-        "https://far-dolphin-10.differentname123.deno.net/",
+        # "https://far-dolphin-10.differentname123.deno.net/",
         "https://vercel-proxy-kappa-ruddy.vercel.app/api",
         "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
         "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理

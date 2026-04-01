@@ -340,7 +340,7 @@ def get_top_proxies(count=10):
             proxy_status[proxy_str] = new_status_data
 
             # 我们只把平均延迟低于100（说明近期有过至少一次通的记录）的代理放入备选列表
-            if avg_delay < 50.0 and delay < 100.0:
+            if avg_delay < 50.0:
                 valid_proxies_with_time.append((p_dict, avg_delay))
 
     # 执行完毕后，处理要保存的 JSON 数据

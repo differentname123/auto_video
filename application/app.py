@@ -866,6 +866,7 @@ def _monitor_processes():
     last_recover_time = time.time()  # 记录首次执行 recover_task 的时间
 
     while True:
+        print(f"💓 [监控线程-心跳] 运行正常 | 队列积压: {task_queue.qsize()} | 消费者数量: {len(consumers)}")
         try:
             # 0. 每4小时执行一次 recover_task()
             current_time = time.time()
@@ -979,7 +980,7 @@ if __name__ == "__main__":
     task_queue = multiprocessing.Queue()
 
     # 3. 启动消费者集群
-    max_workers = 5
+    max_workers = 10
     print(f"主线程: 启动 {max_workers} 个消费者进程...")
 
     for _ in range(max_workers):

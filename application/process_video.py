@@ -764,7 +764,7 @@ def _task_process_worker(task_queue, running_task_ids):
     manager = MongoManager(mongo_base_instance)
 
     # 设定当前 Worker 进程最多处理几个任务后重启
-    MAX_TASKS_PER_WORKER = 5
+    MAX_TASKS_PER_WORKER = 50
     processed_count = 0
 
     # print(f"[消费者-{os.getpid()}] 启动...")
