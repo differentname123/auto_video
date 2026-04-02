@@ -43,7 +43,7 @@ class SimpleFileLock:
 # --- 配置参数 ---
 SESSDATA = get_config("xiaoxiaosu_bilibili_sessdata_cookie")  # 必需。你的B站登录会话 SESSDATA cookie 值。
 BILI_JCT = get_config("xiaoxiaosu_bilibili_csrf_token")
-
+full_cookie = get_config("xiaoxiaosu_bilibili_total_cookie")
 # 默认投稿设置
 DEFAULT_COPYRIGHT = 1  # 1: 自制, 2: 转载
 DEFAULT_TID = 21  # 21-日常
@@ -88,7 +88,7 @@ def get_deterministic_ua(bili_jct: str) -> str:
     return USER_AGENTS[index]
 
 
-def get_session(sessdata, bili_jct) -> requests.Session:
+def get_session(sessdata, bili_jct, full_cookie) -> requests.Session:
     sess = requests.Session()
 
     session_headers = HEADERS.copy()
@@ -98,6 +98,7 @@ def get_session(sessdata, bili_jct) -> requests.Session:
     sess.headers.update(session_headers)
     sess.cookies.set("SESSDATA", sessdata)
     sess.cookies.set("bili_jct", bili_jct)
+    session_headers['Cookie'] = full_cookie
     return sess
 
 
@@ -411,7 +412,7 @@ def get_best_upcdn(upcdn_list: list, size=1) -> str:
 
     # 新增限制常量
     DEFAULT_SPEED_MB = 0.1  # 默认速度 0.1Mb/s
-    MAX_EST_TIME = 1800  # 最大允许预估时间 1800秒
+    MAX_EST_TIME = 900  # 最大允许预估时间 1800秒
 
     hour = datetime.now().hour
     if 1 <= hour < 6:
@@ -569,6 +570,7 @@ def upload_to_bilibili(
         no_reprint: int = DEFAULT_NO_REPRINT,
         sessdata=SESSDATA,
         bili_jct=BILI_JCT,
+        full_cookie=full_cookie,
         human_type2=1002,
         topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
         topic_id: int = 1313687,
@@ -585,7 +587,7 @@ def upload_to_bilibili(
     if not os.path.exists(video_path) or not os.path.exists(cover_path):
         raise FileNotFoundError("视频或封面文件不存在")
 
-    sess = get_session(sessdata, bili_jct)
+    sess = get_session(sessdata, bili_jct, full_cookie)
 
     def check_timeout(step_name):
         if time.time() > deadline:

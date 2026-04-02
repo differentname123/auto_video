@@ -435,6 +435,7 @@ def build_bilibili_params(task_info, video_path, best_script, user_config, userN
         "video_path": video_path,
         "sessdata": config[0],
         "bili_jct": config[1],
+        "full_cookie": config[2],
         "human_type2": human_type2,
         "topic_detail": topic_detail,
         "topic_id": topic_id,
