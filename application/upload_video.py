@@ -105,11 +105,15 @@ def sort_tasks(existing_video_tasks, not_existing_video_tasks, user_info_map):
         return (count, schedule_date_str, create_time)
 
     def get_file_size_sort_key(task):
+        current_hour = datetime.now().hour
+
         # 1. 获取 userName
         user_name = task.get('userName')
 
         count = user_info_map.get(user_name, 0)
         file_size = task.get('file_size', 100 * 1024 * 1024)
+        if 1< current_hour and current_hour < 5:
+            file_size = -file_size
 
         # 默认是小的时间
         create_time = task.get('create_time', datetime.min)
