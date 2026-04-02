@@ -559,7 +559,7 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
     if proxies_list:
         proxies = random.choice(proxies_list)
     worker_url_list = [
-    "https://far-dolphin-10.differentname123.deno.net/",
+    # "https://far-dolphin-10.differentname123.deno.net/",
     "https://vercel-proxy-kappa-ruddy.vercel.app/api",
     "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
     "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
