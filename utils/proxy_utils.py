@@ -232,9 +232,76 @@ def format_and_test_proxy(proxy_address):
     return (proxy_address, proxy_dict, 100.0)
 
 
+# ================= 新增区：异常节点提取模块 =================
+
+def _get_failed_proxies_from_stats(stats_file_path):
+    """
+    从 proxy_stats.json 中提取满足复测条件的节点：
+    条件: 最近 1 小时内或最近 5 次记录中，不全为“恶性失败”。
+    (即：只要有成功的次数，或者失败理由包含非恶性理由如风控拦截，就给予复测机会)
+    """
+    proxies_to_retest = []
+    try:
+        proxy_stats = read_json(stats_file_path)
+        if not isinstance(proxy_stats, dict):
+            return proxies_to_retest
+
+        # 定义恶性失败的错误类型
+        malignant_types = {"未知错误", "SSL证书异常", "代理异常", "网络超时"}
+        current_t = time.time()
+
+        for key, data in proxy_stats.items():
+            # 1. 匹配并提取节点名格式 (仅保留 IP:PORT 部分)
+            match = re.match(r'^http://(\d{1,3}(?:\.\d{1,3}){3}:\d+)', key)
+            if not match:
+                continue
+            ip_port = match.group(1)
+
+            history_list = data.get("history", [])
+            if not history_list:
+                continue
+
+            # 确保记录按时间升序排列
+            history_list = sorted(history_list, key=lambda x: x.get("time", 0))
+            overall_reasons = data.get("fail_reasons", {})
+
+            def is_malignant(record):
+                """判断单条记录是否为彻头彻尾的恶性失败"""
+                # 条件 A：如果有成功次数，绝对不是恶性失败，直接放行
+                if record.get("success", 0) > 0:
+                    return False
+
+                # 条件 B：没有成功次数，则检查失败理由
+                # 优先获取该条历史记录自带的 fail_reasons，若没有则回退使用节点的全局 fail_reasons
+                reasons = record.get("fail_reasons", overall_reasons)
+
+                # 如果理由的集合是恶性类型的子集（且没有成功次数），则是纯恶性失败
+                # （注：如果为空 {} 也会视为子集返回 True，因为毫无理由的 0 成功就是恶性的）
+                return set(reasons.keys()).issubset(malignant_types)
+
+            # 截取近期的记录切片
+            last_5 = history_list[-5:]
+            recent_1h = [r for r in history_list if current_t - r.get("time", 0) <= 3600]
+
+            # 2. 条件判断：只要记录列表不为空，且其中【存在至少一条】不是恶性失败的记录，就达标
+            valid_in_last_5 = any(not is_malignant(r) for r in last_5) if last_5 else False
+            valid_in_1h = any(not is_malignant(r) for r in recent_1h) if recent_1h else False
+
+            # 满足任一维度的宽容条件即加入待测池
+            if valid_in_last_5 or valid_in_1h:
+                proxies_to_retest.append(ip_port)
+
+    except Exception as e:
+        print(f"\n⚠️ 读取 proxy_stats.json 进行聚合时出现异常: {e}")
+
+    return proxies_to_retest
+
+
+# =========================================================================
+
 def get_top_proxies(count=10):
     """
-    主控函数：多源拉取 -> 去重 -> 聚合历史优质节点 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
+    主控函数：多源拉取 -> 去重 -> 聚合历史优质节点 -> 聚合异常复测节点 -> 多线程测速 -> 记录历史得分 -> 排序 -> 提取 Top N
     """
     print("=== 第一阶段：从各个数据源聚合代理 ===")
 
@@ -276,6 +343,22 @@ def get_top_proxies(count=10):
         print(
             f"♻️ 从历史记录中成功唤回 {added_from_history} 个延迟 < 50 的优质节点。当前总测试数量提升至: {len(unique_proxies)}")
     # ============================================================
+
+    # ================= 新增区：从 proxy_stats.json 聚合异常复测节点 =================
+    stats_file = r'W:\project\python_project\auto_video\config\proxy_stats.json'
+    failed_proxies_to_retest = _get_failed_proxies_from_stats(stats_file)
+    added_from_stats = 0
+
+    for proxy_str in failed_proxies_to_retest:
+        if proxy_str not in unique_proxies_set:
+            unique_proxies.append(proxy_str)
+            unique_proxies_set.add(proxy_str)
+            added_from_stats += 1
+
+    if added_from_stats > 0:
+        print(
+            f"📊 从 proxy_stats.json 成功去重并唤回 {added_from_stats} 个满足特定异常条件的节点。当前总测试数量提升至: {len(unique_proxies)}")
+    # ==============================================================================
 
     if not unique_proxies:
         print("❌ 没有任何原始代理，退出。")
@@ -381,10 +464,11 @@ def get_top_proxies(count=10):
     final_proxy_list = []
     print(f"\n🏆 为您提取 Top {len(top_proxies_with_time)} 历史综合最快节点：")
     for idx, (p_dict, avg_score) in enumerate(top_proxies_with_time):
-        # print(f"  [{idx + 1}] 平均延迟得分: {avg_score:.3f}秒 ➔ {p_dict['http']}")
         final_proxy_list.append(p_dict)
 
     return final_proxy_list
+
+
 
 # ================= 新增区：高匿复测与状态落地封装模块 =================
 

@@ -157,19 +157,29 @@ BASE_PROFILES = [
     }
 ]
 
+
+def _categorize_err(e_str, code=None):
+    if code == -352: return "风控拦截(-352)"
+    s = str(e_str)
+    if "412 Client Error" in s: return "风控拦截(412)"
+    if "timeout" in s.lower(): return "网络超时"
+    if "10054" in s or "ConnectionResetError" in s: return "连接重置(10054)"
+    if "ProxyError" in s or "502 Bad Gateway" in s: return "代理异常"
+    if "SSL" in s: return "SSL证书异常"
+    return "未知错误"
+
 def get_user_videos_via_worker(mid: int,
                                worker_url: str = "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
                                desired_count: int = 30,
                                order: str = 'pubdate',
-                               local_proxy: str = "http://127.0.0.1:7890") -> list:
+                               local_proxy: str = "http://127.0.0.1:7890") -> tuple:
     """
     纯粹的 Cloudflare Worker 转发版，专注拉取数据。
-    满足要求：
-    1. 代理仅在 session 级别生效，不污染全局环境变量
-    2. 只有 mid 是必填参数
-    3. 极致稳健，任何报错均返回空列表 []
+    修改点：增加 error_category 返回，用于归类失败原因
     """
-    # 【核心 3：绝对稳健】全量逻辑被 Try/Except 包裹，阻断一切崩溃可能
+
+
+    error_category = None
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
@@ -191,14 +201,12 @@ def get_user_videos_via_worker(mid: int,
         session = requests.Session()
         session.headers.update(headers)
 
-        # 【核心 1：隔离代理影响】通过 Session 局部注入代理，用完即毁，绝不污染系统环境变量
         if local_proxy:
             session.proxies = {
                 "http": local_proxy,
                 "https": local_proxy
             }
 
-        # ---------------- 内部工具函数 ----------------
         def get_mixin_key(orig: str) -> str:
             mixin_key_enc_tab = [
                 46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
@@ -229,7 +237,6 @@ def get_user_videos_via_worker(mid: int,
             params['w_rid'] = md5((query + mixin_key).encode()).hexdigest()
             return params
 
-        # ---------------- 主逻辑 ----------------
         img_key, sub_key = get_wbi_keys()
 
         collected_videos = []
@@ -260,6 +267,7 @@ def get_user_videos_via_worker(mid: int,
             result = response.json()
 
             if result.get("code") != 0:
+                error_category = _categorize_err("", result.get("code"))
                 print(f"❌ 接口报错: {result.get('message')}")
                 break
 
@@ -280,11 +288,12 @@ def get_user_videos_via_worker(mid: int,
             current_page += 1
             time.sleep(1)
 
-        return collected_videos
+        return collected_videos, error_category
 
     except Exception as e:
+        error_category = _categorize_err(e)
         print(f"⚠️ 函数执行期间发生异常，已静默拦截拦截: {e} {local_proxy} {worker_url}")
-        return []
+        return [], error_category
 
 
 
@@ -292,30 +301,27 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
                            use_proxy: bool = False, proxies: dict = None,
                            new_profile_list=BASE_PROFILES) -> tuple:
     """
-    独立且免(登录)Cookie的B站用户视频获取函数 - 并发防风控版
-    修改点：增加返回使用的 proxies 字典，方便调用层进行代理质量统计。
+    修改点：增加返回 error_category
     """
+    error_category = None
 
-    # 【核心优化】：身份池。将配套的 UA、Headers、Cookie 和 显卡指纹强绑定
     if new_profile_list:
         PROFILES = new_profile_list
 
     if use_proxy and proxies is None:
         proxies = random.choice([
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754", "https": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114", "https": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540", "https": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014", "https": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543", "https": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462", "https": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641", "https": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837", "https": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611", "https": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611"},
-    {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185", "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
-])
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754", "https": "http://viyvlyeo:lfklf4e2v9qm@31.59.20.176:6754"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114", "https": "http://viyvlyeo:lfklf4e2v9qm@23.95.150.145:6114"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540", "https": "http://viyvlyeo:lfklf4e2v9qm@198.23.239.134:6540"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014", "https": "http://viyvlyeo:lfklf4e2v9qm@45.38.107.97:6014"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543", "https": "http://viyvlyeo:lfklf4e2v9qm@107.172.163.27:6543"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462", "https": "http://viyvlyeo:lfklf4e2v9qm@198.105.121.200:6462"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641", "https": "http://viyvlyeo:lfklf4e2v9qm@64.137.96.74:6641"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837", "https": "http://viyvlyeo:lfklf4e2v9qm@216.10.27.159:6837"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611", "https": "http://viyvlyeo:lfklf4e2v9qm@142.111.67.146:5611"},
+            {"http": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185", "https": "http://viyvlyeo:lfklf4e2v9qm@191.96.254.138:6185"}
+        ])
 
-    # 随机抽取一个身份档案进行请求伪装
-    # 获取随机的index 通过index获取profile
     random_index = random.randint(0, len(PROFILES) - 1)
     profile = PROFILES[random_index]
     session = requests.Session()
@@ -355,15 +361,15 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
     try:
         img_key, sub_key = get_wbi_keys()
     except Exception as e:
+        error_category = _categorize_err(e)
         print(f"初始化 WBI Keys 失败，可能 IP/Cookie 已被风控: {e} {proxies}")
-        return [], random_index, proxies  # 修改点：将 proxies 随错误一起返回
+        return [], random_index, proxies, error_category
 
     collected_videos = []
     current_page = 1
     page_size = 40
 
     while len(collected_videos) < desired_count:
-        # 将动态参数与当前 profile 绑定的显卡指纹参数合并
         unsigned_params = {
             'pn': current_page, 'ps': page_size, 'tid': 0, 'special_type': '',
             'order': order, 'mid': mid, 'index': 0, 'keyword': keyword, 'order_avoided': 'true',
@@ -379,6 +385,7 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             result = response.json()
 
             if result.get("code") != 0:
+                error_category = _categorize_err("", result.get("code"))
                 print(
                     f"mid :{mid} 接口报错，错误码: {result.get('code')}, 信息: {result.get('message')} proxies {proxies} random_index：{random_index}")
                 break
@@ -400,11 +407,12 @@ def get_user_videos_public(mid: int, desired_count: int = 30, order: str = 'pubd
             current_page += 1
 
         except Exception as e:
+            error_category = _categorize_err(e)
             print(f"查询请求发生网络或未知错误: proxies {proxies} random_index：{random_index}  {e}")
             break
 
     final_result = collected_videos[:desired_count]
-    return final_result, random_index, proxies  # 修改点：返回使用的 proxies
+    return final_result, random_index, proxies, error_category
 
 
 def calculate_video_scores(video_list, current_timestamp, windows=(6, 12, 24, 36, 48, 100000)):
@@ -531,42 +539,37 @@ def check_user_need_heavy_request(uid, exist_video_info, max_hour, new_profile_l
 
 def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile_list=None, proxies_list=None, pure_good_proxies=None):
     """
-    修改点：引入外置的判定逻辑，让这部分核心主流程更加直观，只处理真正需要拉取的用户。
-    并将最终使用的 proxy 继续透传回调度器。
+    修改点：将底层的 error_category 透传出去
     """
     with data_lock:
         exist_video_info = all_video_info.get(str(uid), {}).copy()
         exist_video_list = exist_video_info.get('video_list', [])
         last_video_count = exist_video_info.get('total_video_count', 0)
 
-    # ==== 提取出的高可读性判断逻辑 ====
     is_skip, skip_code, light_status, current_video_count, random_index = check_user_need_heavy_request(
         uid, exist_video_info, max_hour, new_profile_list
     )
 
     if is_skip:
-        if skip_code == 2:  # 轻量探测成功拦截
+        if skip_code == 2:
             exist_video_info['update_time'] = int(time.time())
             exist_video_info['update_time_str'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with data_lock:
                 all_video_info[str(uid)] = exist_video_info
-            return 2, random_index, light_status, None
-        else:  # 时间冷却跳过 (skip_code == 0)
-            return 0, -1, 0, None
+            return 2, random_index, light_status, None, None
+        else:
+            return 0, -1, 0, None, None
 
-    # ==== 1. 先随机选择代理 ====
     proxies = None
     if proxies_list:
         proxies = random.choice(proxies_list)
     worker_url_list = [
-    # "https://far-dolphin-10.differentname123.deno.net/",
-    "https://vercel-proxy-kappa-ruddy.vercel.app/api",
-    "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
-    "https://hilarious-zuccutto-a5815c.netlify.app/api",  # 👈 新加入的 Netlify 代理
-    "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
+        "https://vercel-proxy-kappa-ruddy.vercel.app/api",
+        "https://muddy-thunder-a21b.zhuxiaohu98.workers.dev/",
+        "https://hilarious-zuccutto-a5815c.netlify.app/api",
+        "https://zhuxiaohu98--e9174bf22c5111f1985042dde27851f2.web.val.run"
     ]
     worker_url_list_count = len(worker_url_list)
-    # ==== 2. 随机决定路线 (根据 pure_good_proxies 占比动态决定) ====
     use_worker = False
     if pure_good_proxies:
         len_good = len(pure_good_proxies) + worker_url_list_count
@@ -575,18 +578,16 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
             probability = len_good / len_total
             use_worker = random.random() < probability
 
-    # ==== 3. 真正需要拉取的用户进入这里 ====
     if use_worker:
         proxies = random.choice(pure_good_proxies)
         proxy_str = proxies.get("http") if proxies else None
 
-        worker_url = random.choice(worker_url_list)  # 随机选择一个 Worker URL，增加冗余和稳定性
-        videos = get_user_videos_via_worker(mid=uid, desired_count=40, local_proxy=proxy_str, worker_url=worker_url)
+        worker_url = random.choice(worker_url_list)
+        videos, error_category = get_user_videos_via_worker(mid=uid, desired_count=40, local_proxy=proxy_str, worker_url=worker_url)
         used_index = random_index
-        used_proxy = f'{proxy_str}_{worker_url}'  # 依然如实记录这次使用了哪个代理字典
+        used_proxy = f'{proxy_str}_{worker_url}'
     else:
-        # 走老方法
-        videos, used_index, used_proxy = get_user_videos_public(
+        videos, used_index, used_proxy, error_category = get_user_videos_public(
             mid=uid,
             desired_count=40,
             use_proxy=True,
@@ -594,7 +595,6 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
             proxies=proxies
         )
 
-    # ==== 下方逻辑一字未改，严格遵守您的要求 ====
     min_created_timestamp = 1000000000000
 
     if videos:
@@ -620,9 +620,11 @@ def process_single_user(uid, all_video_info, data_lock, max_hour=24, new_profile
 
         with data_lock:
             all_video_info[str(uid)] = exist_video_info
-        return 1, used_index, light_status, used_proxy
+        return 1, used_index, light_status, used_proxy, None
 
-    return -1, used_index, light_status, used_proxy
+    return -1, used_index, light_status, used_proxy, error_category
+
+
 
 def filter_proxies(history_stats, proxies_list, base_proxy_list, max_count=100, min_count=50):
     """
@@ -717,10 +719,7 @@ def filter_proxies(history_stats, proxies_list, base_proxy_list, max_count=100, 
 def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, save_interval=20, max_hour=24,
                                   max_run_time=14400):
     """
-    修改点：
-    1. 增加 proxy_stats 字典，统计并打印每种代理的成功、失败及总量情况。
-    2. 增加 max_run_time 默认 14400 秒 (4小时) 的全局超时控制。
-    3. 新增将 proxy_stats 增量持久化到本地 json 的逻辑，供 get_proxy 过滤使用。
+    修改点：将统计出的 error_category (失败原因) 持久化记录到 history 中。
     """
     proxy_stats_file = r"W:\project\python_project\auto_video\config\proxy_stats.json"
     history_stats = read_json(proxy_stats_file)
@@ -728,15 +727,15 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
     data_lock = threading.Lock()
     max_retries = 5
     fail_count = 200
-    global_start_time = time.time()  # 新增：记录整个函数的全局开始时间
-    timeout_triggered = False  # 新增：全局超时标志位
+    global_start_time = time.time()
+    timeout_triggered = False
 
     for attempt in range(1, max_retries + 1):
         base_proxy_list, high_anon_proxy_list = get_proxy(count=1000)
         if attempt > 1:
-            proxies_list, pure_good_proxies = filter_proxies(history_stats, base_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
+            proxies_list, pure_good_proxies = filter_proxies(history_stats, base_proxy_list, base_proxy_list)
         else:
-            proxies_list, pure_good_proxies = filter_proxies(history_stats, high_anon_proxy_list, base_proxy_list)  # 根据历史统计过滤代理列表
+            proxies_list, pure_good_proxies = filter_proxies(history_stats, high_anon_proxy_list, base_proxy_list)
 
         if not proxies_list:
             print(f"\n[警告] 第 {attempt} 轮获取到的代理列表为空，正在重试... (失败次数: {fail_count})")
@@ -744,7 +743,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             time.sleep(5)
             continue
 
-        round_start_time = time.time()  # 保持原有的单轮计时用于日志打印
+        round_start_time = time.time()
         success_count = 0
         fail_count = 0
         jump_count = 0
@@ -761,7 +760,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                 new_profile_list.append(new_profile)
 
         profile_stats = {}
-        proxy_stats = {}  # 新增：代理追踪统计表
+        proxy_stats = {}
 
         print(
             f"\n--- 开始多线程处理 (第 {attempt}/{max_retries} 轮)，共提取 {total_mids} 个独立用户，设定最大并发线程: {max_workers} ---")
@@ -776,27 +775,21 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             for index, future in enumerate(concurrent.futures.as_completed(future_to_mid)):
                 mid = future_to_mid[future]
 
-                # 修改点：全局超时检测与等待队列清空
                 if not timeout_triggered:
                     if (time.time() - global_start_time) > max_run_time:
                         print(f"\n[超时控制] 全局运行时间已超过最大限制 ({max_run_time}秒)，正在清空等待队列...")
                         cancel_count = 0
                         for f in future_to_mid:
-                            # cancel() 只会取消等待中的任务，不会打断正在执行的线程
                             if f.cancel():
                                 cancel_count += 1
                         print(f"[超时控制] 成功清理 {cancel_count} 个排队中的任务，正在等待当前运行中的任务收尾...")
                         timeout_triggered = True
 
                 try:
-                    # 修改点：解包接收 4 个返回值，包含了使用的代理信息
-                    result, used_index, light_status, used_proxy = future.result()
+                    result, used_index, light_status, used_proxy, error_category = future.result()
 
-                    # 归档统计使用的 proxy
-                    # 注意：只有在发生重度请求(result为 1或-1)时，才统计 proxy 使用情况
                     if result in (1, -1):
                         if used_proxy is not None:
-                            # 提取字典中的 http 字段用于记录，或将其转为字符串
                             if isinstance(used_proxy, dict) and 'http' in used_proxy:
                                 proxy_str = used_proxy['http']
                             else:
@@ -805,27 +798,28 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                             proxy_str = "None(直连)"
 
                         if proxy_str not in proxy_stats:
-                            proxy_stats[proxy_str] = {'success': 0, 'failed': 0, 'total': 0}
+                            proxy_stats[proxy_str] = {'success': 0, 'failed': 0, 'total': 0, 'fail_reasons': {}}
 
                         proxy_stats[proxy_str]['total'] += 1
                         if result == 1:
                             proxy_stats[proxy_str]['success'] += 1
                         else:
                             proxy_stats[proxy_str]['failed'] += 1
+                            if error_category:
+                                proxy_stats[proxy_str]['fail_reasons'][error_category] = proxy_stats[proxy_str][
+                                                                                             'fail_reasons'].get(
+                                    error_category, 0) + 1
 
-                    # 归档统计使用的 profile
                     if used_index != -1:
                         if used_index not in profile_stats:
                             profile_stats[used_index] = {'used': 0, 'failed': 0}
                         profile_stats[used_index]['used'] += 1
 
-                    # 统计轻量接口的数据
                     if light_status != 0:
                         light_total_count += 1
                         if light_status == -1:
                             light_fail_count += 1
 
-                    # 统计重度接口及拦截的数据
                     if result == 1:
                         success_count += 1
                         heavy_request_count += 1
@@ -837,7 +831,7 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                             profile_stats[used_index]['failed'] += 1
                     elif result == 2:
                         light_skip_count += 1
-                    else:  # result == 0
+                    else:
                         jump_count += 1
 
                     if index % 100 == 0 or index == total_mids - 1:
@@ -851,7 +845,6 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
                         processed_since_save = 0
 
                 except concurrent.futures.CancelledError:
-                    # 被超时机制 cancel 的任务在获取 result() 时会触发此异常，直接跳过即可
                     continue
                 except Exception as e:
                     traceback.print_exc()
@@ -877,10 +870,8 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             print("  本轮没有使用任何 Profile (可能是用户数据都在未过期跳过范围内)。")
         print(">>> -------------------------------------- <<<")
 
-        # 修改点：在此处新增打印本轮 IP代理（Proxies） 的详细统计报表 (已增加成功率降序排序逻辑)
         print(">>> 🌐 本轮 IP代理 (Proxies) 详细统计 <<<")
         if proxy_stats:
-            # 按照成功率 (success/total) 降序排序
             sorted_proxy_stats = sorted(
                 proxy_stats.items(),
                 key=lambda x: (x[1]['success'] / x[1]['total']) if x[1]['total'] > 0 else 0,
@@ -889,8 +880,9 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
             for p_str, stats in sorted_proxy_stats:
                 success_rate = (stats['success'] / stats['total']) * 100 if stats['total'] > 0 else 0
                 fail_rate = (stats['failed'] / stats['total']) * 100 if stats['total'] > 0 else 0
+                fail_reasons_str = str(stats.get('fail_reasons', {})) if stats.get('fail_reasons') else "无"
                 print(
-                    f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 成功率: {success_rate:>6.2f}% | 失败率: {fail_rate:>6.2f}%")
+                    f"  代理 [{p_str}]: 总调度次数: {stats['total']:<4} | 成功: {stats['success']:<4} | 失败: {stats['failed']:<4} | 成功率: {success_rate:>6.2f}% | 失败率: {fail_rate:>6.2f}% | 错误分布: {fail_reasons_str}")
         else:
             print("  本轮未触发需要真正拉取的重度请求，无代理调度记录。")
         print(
@@ -898,87 +890,83 @@ def process_mid_list_concurrently(all_mid_list, all_video_info, max_workers=5, s
 
         print(">>> -------------------------------------- <<<\n")
 
-        # ================== 新增：代理统计持久化落盘逻辑 ==================
         if proxy_stats:
             history_stats = read_json(proxy_stats_file)
             current_timestamp = time.time()
-            # 定义 24 小时的时间窗口范围 (秒)
             twenty_four_hours_ago = current_timestamp - 24 * 3600
 
             for p_str, stats in proxy_stats.items():
                 if p_str not in history_stats:
                     history_stats[p_str] = {
                         'total': 0, 'success': 0, 'failed': 0,
-                        'history': []  # 增加 history 列表记录每次明细
+                        'history': [],
+                        'fail_reasons': {}
                     }
 
                 h_stats = history_stats[p_str]
+                if 'history' not in h_stats: h_stats['history'] = []
+                if 'fail_reasons' not in h_stats: h_stats['fail_reasons'] = {}
 
-                # 为了兼容老的 json 数据结构，如果不存在 history 则先初始化
-                if 'history' not in h_stats:
-                    h_stats['history'] = []
-
-                # 1. 记录本轮调用的明细
                 h_stats['history'].append({
                     'time': current_timestamp,
                     'success': stats['success'],
-                    'failed': stats['failed']
+                    'failed': stats['failed'],
+                    'fail_reasons': stats.get('fail_reasons', {})
                 })
 
-                # 2. 滑动窗口：过滤并只保留最近 24 小时内的记录
                 valid_history = [record for record in h_stats['history'] if record['time'] >= twenty_four_hours_ago]
                 h_stats['history'] = valid_history
 
-                # 3. 从新往旧统计，最多只累计 50 个请求的数据计算成功率
                 recent_success = 0
                 recent_failed = 0
                 recent_total = 0
+                recent_reasons = {}
 
-                # valid_history 中最新的数据在列表末尾，用 reversed 进行倒序遍历(从最新到最旧)
                 for record in reversed(valid_history):
                     batch_total = record['success'] + record['failed']
                     if batch_total == 0:
                         continue
 
-                    # 如果加上当前批次超过了50，只需截取不足50的部分
                     if recent_total + batch_total > 50:
                         needed = 50 - recent_total
-                        # 按这批次的实际成功率，等比例换算需要的成功数和失败数
                         success_ratio = record['success'] / batch_total
                         add_success = int(round(needed * success_ratio))
                         add_failed = needed - add_success
 
                         recent_success += add_success
                         recent_failed += add_failed
+
+                        fail_ratio = add_failed / record['failed'] if record['failed'] > 0 else 0
+                        for reason, r_count in record.get('fail_reasons', {}).items():
+                            recent_reasons[reason] = recent_reasons.get(reason, 0) + int(round(r_count * fail_ratio))
+
                         recent_total += needed
                         break
                     else:
                         recent_success += record['success']
                         recent_failed += record['failed']
                         recent_total += batch_total
+                        for reason, r_count in record.get('fail_reasons', {}).items():
+                            recent_reasons[reason] = recent_reasons.get(reason, 0) + r_count
 
-                    # 如果刚好达到 50，结束统计
                     if recent_total == 50:
                         break
 
-                # 4. 更新基础统计字段，保持跟旧逻辑调用处的兼容性
                 h_stats['success'] = recent_success
                 h_stats['failed'] = recent_failed
                 h_stats['total'] = recent_total
+                h_stats['fail_reasons'] = recent_reasons
 
-                # 5. 更新时间和成功/失败率
                 h_stats['update_time'] = current_timestamp
                 h_stats['success_rate'] = h_stats['success'] / h_stats['total'] if h_stats['total'] > 0 else 0
                 h_stats['fail_rate'] = h_stats['failed'] / h_stats['total'] if h_stats['total'] > 0 else 0
-                # 将history放在h_stats的最后
+
                 temp_history = h_stats.pop('history')
                 h_stats['history'] = temp_history
 
-            # 将history_stats按照成功率降序排序后再保存到文件中，保持文件结构清晰
             history_stats = dict(sorted(history_stats.items(), key=lambda item: item[1]['success_rate'], reverse=True))
             save_json(proxy_stats_file, history_stats)
 
-        # 修改点：判断全局超时标志
         if timeout_triggered:
             print(f"[超时退出] 全局运行时间已超过最大限制({max_run_time}秒)，自动结束本阶段执行，不再重试。")
             break
