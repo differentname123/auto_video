@@ -999,8 +999,13 @@ def auto_upload(manager):
     # 3. 【恢复原样】：死等所有上传任务完成，锁住大循环节奏
     if futures:
         print(f"⏳ 等待 {len(futures)} 个后台投稿任务完成...")
-        concurrent.futures.wait(futures, timeout=None)
-        print("✅ 本轮后台投稿任务全部完成！")
+        # 加上超时机制，比如视频最大上传时间应该不超过 30 分钟 (1800秒)
+        done, not_done = concurrent.futures.wait(futures, timeout=1800)
+        if not_done:
+            print(f"⚠️ 严重警告：有 {len(not_done)} 个投稿任务超时卡死！强行跳过，防止主线程假死。")
+            # 超时的 future 留在了线程池里，虽然无法强制杀死线程，但至少主循环能继续走下去。
+        else:
+            print("✅ 本轮后台投稿任务全部完成！")
 
     return len(already_upload_users)
 
@@ -1097,11 +1102,17 @@ def auto_produce(manager, max_produce_count=2):
 def upload_loop(manager):
     """主线程循环：永不停歇的调度中心"""
     while True:
-        exist_count = auto_upload(manager)
-        if exist_count == 0:
-            time.sleep(60)
-        else:
-            time.sleep(5)
+        try:
+            exist_count = auto_upload(manager)
+            if exist_count == 0:
+                time.sleep(60)
+            else:
+                time.sleep(5)
+        except Exception as e:
+            # 这样就算出错，主线程也不会死，而且你能立刻在控制台看到红色的错误信息
+            print(f"🔥 严重错误：upload_loop 主循环发生异常: {e}")
+            traceback.print_exc()
+            time.sleep(30)  # 报错后睡一会儿，防止疯狂循环刷屏
 
 
 def produce_loop(manager):

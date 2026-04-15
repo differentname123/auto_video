@@ -194,8 +194,19 @@ def generate_audio_and_get_duration_sync(
     3. 将处理后的音频保存为临时的 WAV 文件（无损格式，适合处理）。
     4. 使用 ffmpeg 的 loudnorm 对 WAV 文件进行响度归一化。
     5. 返回最终音频的时长。
-    *  新增: 如果在步骤1-4中发生任何异常，将重试最多3次，每次重试前等待5秒。
+    * 新增: 如果在步骤1-4中发生任何异常，将重试最多3次，每次重试前等待5秒。
     """
+    # 封装参数以便在报错时输出
+    func_args = {
+        "text": text, # 避免超长文本刷屏
+        "output_filename": output_filename,
+        "voice_name": voice_name,
+        "trim_silence": trim_silence,
+        "target_loudness": target_loudness,
+        "rate": rate,
+        "pitch": pitch
+    }
+
     start_time = time.time()
     # ==================== 处理空文本 (无变化) ====================
     if not text or not text.strip():
@@ -211,6 +222,7 @@ def generate_audio_and_get_duration_sync(
             return duration_seconds
         except Exception as e:
             print(f"❌ 在生成静音文件时发生错误: {e}")
+            print(f"DEBUG 参数详情: {func_args}")
             traceback.print_exc()
             return None
     # ===============================================================
@@ -275,6 +287,7 @@ def generate_audio_and_get_duration_sync(
 
             except Exception as e:
                 print(f"❌ 尝试 {attempt + 1}/{max_retries} 失败: {e}")
+                print(f"DEBUG 参数详情: {func_args}")
                 if attempt < max_retries - 1:
                     print(f"ⓘ 等待 {retry_delay_seconds} 秒后重试...")
                     time.sleep(retry_delay_seconds)
@@ -335,9 +348,9 @@ if __name__ == "__main__":
                 for i, text in enumerate(text_list):
                     output_file = f"tts_output/说话人{voice_name.split('-')[-1].replace('Neural','')}_音调{pitch}_语速{rate}_句子{i + 1}.mp3"
                     print(f"--- 正在生成第 {i + 1}/{len(text_list)} 个文件: {output_file} ---")
-                    if os.path.exists(output_file):
-                        print(f"⚠️ 文件已存在，跳过: {output_file}\n")
-                        continue
+                    # if os.path.exists(output_file):
+                    #     print(f"⚠️ 文件已存在，跳过: {output_file}\n")
+                    #     continue
 
                     duration = generate_audio_and_get_duration_sync(
                         text=text,
