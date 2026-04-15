@@ -26,6 +26,7 @@ from typing import Union, List, Optional
 
 import aiofiles
 import aiohttp
+import requests
 from filelock import FileLock, Timeout
 
 
@@ -1300,3 +1301,39 @@ def simple_cipher(text, mode='encrypt', key=888):
             result.append(char)
 
     return "".join(result)
+
+
+def get_current_ip() -> str:
+    """
+    获取当前公网 IP 地址（带有备用接口和反拦截机制）
+    :return: IP 字符串（失败则返回 "未知 IP"）
+    """
+    # 增加 User-Agent，防止部分服务器拒绝 Python 的默认请求头
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
+    # 定义多个 API 接口（按顺序尝试）
+    # 如果你需要返回 JSON 格式，可以选择提供 JSON 的接口；这里为了最高兼容性，推荐直接返回纯 IP 字符串的接口
+    api_list = [
+        "https://myip.ipip.net/s",  # 极速、稳定，返回纯文本 IP
+        "https://ident.me",  # 返回纯文本 IP
+        "https://api.ipify.org"  # 原 API 作为最后备选
+    ]
+
+    for api in api_list:
+        try:
+            resp = requests.get(api, headers=headers, timeout=5)
+            resp.raise_for_status()
+
+            # 由于前两个 API 返回的是纯文本，我们直接获取 .text 即可
+            ip = resp.text.strip()
+            print(f"当前公网 IP: {ip}")
+            return ip
+
+        except requests.exceptions.RequestException as e:
+            print(f"从 {api} 获取失败，正在尝试下一个...")
+            continue  # 如果当前 API 报错，跳过并尝试下一个
+
+    print("所有接口均获取失败。")
+    return "未知 IP"

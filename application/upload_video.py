@@ -29,7 +29,7 @@ from application.video_common_config import TaskStatus, ERROR_STATUS, check_fail
     USER_BVID_FILE
 from utils.bilibili.bilibili_uploader import upload_to_bilibili
 from utils.common_utils import read_json, is_valid_target_file_simple, init_config, save_json, get_top_comments, \
-    extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu
+    extract_guides, format_bilibili_emote, parse_and_group_danmaku, filter_danmu, get_current_ip
 from utils.image_utils import create_enhanced_cover_auto
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
@@ -1126,6 +1126,8 @@ def produce_loop(manager):
 
 
 if __name__ == "__main__":
+    get_current_ip()
+
     from utils.mongo_base import gen_db_object
     from utils.mongo_manager import MongoManager
 
