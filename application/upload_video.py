@@ -597,7 +597,7 @@ def upload_worker(
 
         err_str = str(err)
         # 判断错误信息是否包含“登录”或“封禁”
-        if "登录" in err_str or "封禁" in err_str:
+        if "登录" in err_str or "封禁" in err_str or "406 Client Error" in err_str or "验证码" in err_str:
             error_user_map[userName] = err_str or "未知错误"
 
         print(f"❌ 后台投稿失败 user={userName} video_id_list={video_id_list}：{err_str}")

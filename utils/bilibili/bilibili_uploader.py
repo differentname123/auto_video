@@ -94,11 +94,11 @@ def get_session(sessdata, bili_jct, full_cookie) -> requests.Session:
     session_headers = HEADERS.copy()
     # 调用新函数来获取确定的UA
     session_headers['User-Agent'] = get_deterministic_ua(bili_jct)
+    session_headers['Cookie'] = full_cookie
 
     sess.headers.update(session_headers)
     sess.cookies.set("SESSDATA", sessdata)
     sess.cookies.set("bili_jct", bili_jct)
-    session_headers['Cookie'] = full_cookie
     return sess
 
 
@@ -597,18 +597,19 @@ def upload_to_bilibili(
     check_timeout("上传封面")
 
 
-    pre = preupload_video(sess, video_path)
-    check_timeout("预上传视频")
-    video_upload_start_time = time.time()  # 记录纯视频上传开始时间
-
-    biz_id = pre["biz_id"]
-    filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
-    chosen_upcdn = pre.pop('_chosen_upcdn', None)  # 提取 upcdn
-
-    video_upload_end_time = None
 
     # 将上传逻辑使用 try-finally 包裹，保证不论成功失败，节点占用必定被释放
     try:
+        pre = preupload_video(sess, video_path)
+        check_timeout("预上传视频")
+        video_upload_start_time = time.time()  # 记录纯视频上传开始时间
+
+        biz_id = pre["biz_id"]
+        filename = os.path.splitext(os.path.basename(pre["upos_uri"]))[0]
+        chosen_upcdn = pre.pop('_chosen_upcdn', None)  # 提取 upcdn
+
+        video_upload_end_time = None
+
         meta = post_video_meta(sess, pre, video_path)
         check_timeout("提交视频元数据")
 
