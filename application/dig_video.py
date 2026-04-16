@@ -180,7 +180,7 @@ def query_all_material_videos(manager, is_need_refresh):
     return local_material_video_info
 
 
-def process_and_sort_video_info(video_info, target_tags_info, blacklist=[], similarity_threshold=0.3):
+def process_and_sort_video_info(video_info, target_tags_info, blacklist=[], similarity_threshold=0.4):
     """
     计算匹配得分并更新到 video_info 中，最后返回按得分降序排序的 video_info 字典。
 
@@ -449,7 +449,7 @@ def gen_hot_video_llm(video_info, hot_video=None):
         except Exception as e:
             print(f"第 {attempt} 次尝试: 生成视频内容计划时出错: {e}")
             time.sleep(2 ** attempt)
-    return video_content_plans, full_prompt
+    return [], full_prompt
 
 
 def get_target_tags(manager, task_info):
@@ -507,7 +507,7 @@ def get_need_dig_video_list():
     return all_dig_video_list, good_tags_info, good_video_list
 
 
-def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=100, blacklist=[]):
+def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=80, blacklist=[], stable_ratio=0.9):
     """
     获取本次挖掘最终的素材列表
     :return:
@@ -529,7 +529,7 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     good_video_info = {}
     min_match_score = 0.01
     for vid, info in top_video_info.items():
-        if info.get('match_score', 0) > 0.1:
+        if info.get('match_score', 0) > 0.2:
             good_video_info[vid] = info
             min_match_score = info.get('match_score', 0)
 
@@ -538,8 +538,8 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     # 如果good_video_info超过(top_n - 50)，按照 80% 高分稳定、20% 随机探索 的比例抽取
     if len(final_good_video_list) > top_n - 50:
         target_count = top_n - 50
-        stable_count = int(target_count * 0.8)  # 80% 高分稳定素材数量
-        explore_count = target_count - stable_count  # 20% 探索素材数量
+        stable_count = int(target_count * stable_ratio)  # 高分稳定素材数量
+        explore_count = target_count - stable_count  # 探索素材数量
 
         all_keys = list(final_good_video_list.keys())
 
@@ -946,10 +946,10 @@ def find_good_plan(manager):
         if target_tags not in collected_target_tags[target_video_type]:
             collected_target_tags[target_video_type].append(target_tags)
 
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,
-                                                 top_n=100, blacklist=blacklist)
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,blacklist=blacklist)
         if len(final_good_video_list) == 0:
             print(f"未找到符合条件的热门视频，跳过本次挖掘。当前自由挖掘类型: {target_video_type} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+            continue
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(
             f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
