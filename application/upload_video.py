@@ -257,8 +257,8 @@ def check_need_upload(task_info, user_upload_info, current_time, already_upload_
         # print(f"本轮已投稿用户过多，跳过 {log_pre}")
         return False
 
-    right_now_user_list = user_config.get('right_now_user_list', [])
-    if user_name not in right_now_user_list:
+    self_user_list = user_config.get('self_user_list', [])
+    if user_name in self_user_list:
         # if not (5 <= datetime.now().hour < 24):
         #     cooldown_reason = "当前时间不在允许的上传时间段（5点-24点）内。"
         #     # print(f"{user_name} 因为 {cooldown_reason} 跳过 {log_pre}")
