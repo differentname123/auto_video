@@ -473,7 +473,8 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     获取本次挖掘最终的素材列表
     :return:
     """
-    filter_all_video_info = {vid: info for vid, info in all_video_info.items() if info.get('video_type') == target_video_type}
+    filter_all_video_info = {vid: info for vid, info in all_video_info.items() if
+                             info.get('video_type') == target_video_type}
     if target_video_type == 'game' and no_asr:
         delete_keys = []
         for vid, info in filter_all_video_info.items():
@@ -495,14 +496,31 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
 
     final_good_video_list = good_video_info.copy()
 
-    # 如果good_video_info超过50就随机选择50
+    # 如果good_video_info超过(top_n - 50)，按照 80% 高分稳定、20% 随机探索 的比例抽取
     if len(final_good_video_list) > top_n - 50:
-        selected_keys = random.sample(list(final_good_video_list.keys()), top_n - 50)
+        target_count = top_n - 50
+        stable_count = int(target_count * 0.8)  # 80% 高分稳定素材数量
+        explore_count = target_count - stable_count  # 20% 探索素材数量
+
+        all_keys = list(final_good_video_list.keys())
+
+        # 截取头部 80% 作为高分稳定素材 (原列表已按得分排序)
+        stable_keys = all_keys[:stable_count]
+
+        # 将剩下的素材作为探索池，从中随机抽取 20%
+        remaining_keys = all_keys[stable_count:]
+        explore_keys = random.sample(remaining_keys, explore_count)
+
+        # 合并最终选中的 keys
+        selected_keys = stable_keys + explore_keys
         final_good_video_list = {key: final_good_video_list[key] for key in selected_keys}
 
-    print(f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)}  target_tags {len(target_tags)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    print(
+        f"本次挖掘符合条件的素材视频数量: {len(final_good_video_list)}，过滤前的数量为{len(filter_all_video_info)}  target_tags {len(target_tags)} 前{top_n}数量为： {len(good_video_info)} 最低匹配得分: {min_match_score}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
     return final_good_video_list
+
+
 
 def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=5):
     """
