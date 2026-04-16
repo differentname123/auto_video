@@ -87,7 +87,7 @@ def query_all_material_videos(manager, is_need_refresh):
 
     count_before_filter = len(local_material_video_info)  # [新增] 记录过滤前的数据总量
 
-    # [新增] 过滤使用次数超过10次的素材
+    # [新增] 过滤使用次数超过1000次的素材
     max_usage_num = 0
     high_freq_removed_count = 0
 
@@ -911,7 +911,7 @@ def find_good_plan(manager):
                     temp_score_list.append(video_id_avg_score_map.get(video_id, 0))
                 # 计算平均值
                 if len(temp_score_list) > 0:
-                    final_score = sum(temp_score_list) / len(temp_score_list) + final_score
+                    final_score = sum(temp_score_list) / len(temp_score_list) + 100
                 creative_guidance = f"视频主题: {plan.get('video_theme')}, {plan.get('story_outline')}"
                 plan['video_type'] = target_video_type
                 plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8

@@ -596,8 +596,7 @@ def upload_to_bilibili(
     cover_url = upload_cover(sess, cover_path, bili_jct=bili_jct)
     check_timeout("上传封面")
 
-
-
+    chosen_upcdn = None
     # 将上传逻辑使用 try-finally 包裹，保证不论成功失败，节点占用必定被释放
     try:
         pre = preupload_video(sess, video_path)
