@@ -23,9 +23,11 @@ from utils.common_utils import read_json, save_json, has_long_common_substring, 
 from utils.gemini_cli import ask_gemini
 from utils.mongo_base import gen_db_object
 from utils.mongo_manager import MongoManager
+from utils.taobao.search_engine import encode_text, compute_similarity_by_vecs
 
 NEED_REFRESH = False
 USE_CLI = False
+
 
 def query_all_material_videos(manager, is_need_refresh):
     """
@@ -37,6 +39,8 @@ def query_all_material_videos(manager, is_need_refresh):
 
     global NEED_REFRESH
     local_material_video_info = read_json(ALL_MATERIAL_VIDEO_INFO_PATH)
+    # [新增] 将已读取的本地文件作为缓存字典，用于向量复用跳过耗时计算
+    cached_material_info = local_material_video_info if local_material_video_info else {}
 
     # 判断ALL_MATERIAL_VIDEO_INFO_PATH这个文件上次修改时间是否超过1天，超过1天则重新从数据库中查询
     if os.path.exists(ALL_MATERIAL_VIDEO_INFO_PATH):
@@ -68,8 +72,9 @@ def query_all_material_videos(manager, is_need_refresh):
             if bvid:
                 video_usage_count[video_id] = video_usage_count.get(video_id, 0) + 1
             video_usage_count[video_id] = video_usage_count.get(video_id, 0) + 1
-
+    index_count = 0
     for video_info in all_material_list:
+        index_count += 1
         video_id = video_info['video_id']
         logical_scene_info = video_info.get('logical_scene_info', {})
         owner_asr_info = video_info.get('owner_asr_info', [])
@@ -82,6 +87,31 @@ def query_all_material_videos(manager, is_need_refresh):
             temp_dict['video_type'] = all_video_type_map.get(video_id, 'game')
             temp_dict['max_scenes'] = max_scenes
             temp_dict['owner_asr_info'] = owner_asr_info
+
+            # ================= [新增] 向量计算与缓存逻辑 =================
+            if video_id in cached_material_info and 'vector' in cached_material_info[video_id]:
+                # 缓存命中，复用以跳过耗时计算
+                temp_dict['vector'] = cached_material_info[video_id]['vector']
+            else:
+                # 1. 提取 tags_info 中 value 最大的 10 个标签
+                sorted_tags = sorted(tags_info.items(), key=lambda x: x[1], reverse=True)[:10]
+                top_10_tags_str = " ".join([tag for tag, count in sorted_tags])
+
+                # 2. 提取 video_summary
+                video_summary = logical_scene_info.get('video_summary', '')
+
+                # 3. 组合待计算字符串
+                text_to_encode = f"{top_10_tags_str} {video_summary}".strip()
+
+                # 4. 计算向量，并将 numpy array 转换为 list 以便能正确写入 JSON
+                if text_to_encode:
+                    temp_dict['vector'] = encode_text(text_to_encode).tolist()
+                else:
+                    temp_dict['vector'] = []
+                # 打印进度和当前时间
+                if index_count % 50 == 0:
+                    print(f"已处理 {index_count}/{raw_db_count} 条素材视频，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+            # =============================================================
 
             local_material_video_info[video_id] = temp_dict
 
@@ -150,45 +180,53 @@ def query_all_material_videos(manager, is_need_refresh):
     return local_material_video_info
 
 
-def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
+def process_and_sort_video_info(video_info, target_tags_info, blacklist=[], similarity_threshold=0.3):
     """
     计算匹配得分并更新到 video_info 中，最后返回按得分降序排序的 video_info 字典。
 
     得分计算包含两部分：
-    1. tags_info 标签加权匹配。
-    2. info 整体转字符串后的全文模糊匹配（防止漏掉没有tags_info但内容匹配的数据）。
-    3. 黑名单过滤：如果 info 字符串包含黑名单内容，强制得分为 0。
+    1. 目标标签与素材 vector 之间的相似度加权匹配（已彻底替换原有的字符串匹配）。
+    2. 黑名单过滤：如果 info 字符串包含黑名单内容，强制得分为 0。
 
-    外部依赖: has_long_common_substring(str1, str2) -> bool
+    外部依赖: encode_text(text) -> numpy.ndarray
+              compute_similarity_by_vecs(vec_a, vec_b) -> float
     """
+    # ================= 预计算阶段 =================
+    # 为了避免在双重循环中重复调用耗时的 encode_text，提前计算 target_tags_info 的权重和向量
+    target_tags_weights = {}
+    target_tags_vectors = {}
+    total_target_count = sum(target_tags_info.values())
+
+    if total_target_count > 0:
+        for t_tag, t_count in target_tags_info.items():
+            # 每个tag的权重按照tag对应的次数来进行计算，所有的tag权重加起来为1
+            target_tags_weights[t_tag] = t_count / total_target_count
+            # 提前将目标 tag 转化为向量
+            target_tags_vectors[t_tag] = encode_text(t_tag)
+    # ===============================================
+
     for vid, info in video_info.items():
         total_score = 0
         common_str_list = []
+        info_str = str(info)  # 用于后续的黑名单检测
 
-        # --- 第一部分：基于 tags_info 的加权匹配 ---
-        video_tags_info = info.get('tags_info', {})
+        # --- 基于向量相似度的加权匹配 ---
+        video_vector = info.get('vector')
+        if video_vector and len(video_vector) > 0 and total_target_count > 0:
+            for t_tag, t_weight_normalized in target_tags_weights.items():
+                t_vec = target_tags_vectors[t_tag]
 
-        # 只有当 tags_info 不为空时才进行这部分计算
-        if video_tags_info:
-            for v_tag, v_weight in video_tags_info.items():
-                for t_tag, t_weight in target_tags_info.items():
-                    # 调用外部匹配函数
+                # 1. 计算每个 target_tag 向量与素材 vector 的相似度
+                sim = compute_similarity_by_vecs(t_vec, video_vector)
 
-                    has_comm, common_str = has_long_common_substring(v_tag, t_tag)
-                    if has_comm:
-                        # 双方都有权重，乘积累加
-                        total_score += (v_weight + t_weight) * 2
-                        common_str_list.append((v_tag, t_tag))
-        info_str = str(info)
+                # 2. 对相似度有阈值要求，只统计高于这个相似度的值
+                if sim > similarity_threshold:
+                    # 3. 计算最终的得分，采用 权重 * 相似度 累加到总分
+                    total_score += t_weight_normalized * sim
+                    common_str_list.append(f"VectorSim({t_tag}:{sim:.2f})")
+        # ---------------------------------------------------
 
-        for t_tag, t_weight in target_tags_info.items():
-            has_comm, common_str = has_long_common_substring(info_str, t_tag)
-
-            if has_comm:
-                total_score += t_weight + t_weight
-                common_str_list.append(common_str)
-
-        # --- 新增逻辑：黑名单检查 ---
+        # --- 黑名单检查 ---
         # 如果 info_str 包含任意黑名单字符串，直接将总分置为 0
         for black_str in blacklist:
             if black_str in info_str:
@@ -207,6 +245,7 @@ def process_and_sort_video_info(video_info, target_tags_info, blacklist=[]):
     )
 
     return sorted_video_info
+
 
 def gen_target_tags(user_name='danzhu'):
     """
@@ -488,9 +527,9 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags, blacklist=blacklist)
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
     good_video_info = {}
-    min_match_score = 1
+    min_match_score = 0.01
     for vid, info in top_video_info.items():
-        if info.get('match_score', 0) > 1:
+        if info.get('match_score', 0) > 0.1:
             good_video_info[vid] = info
             min_match_score = info.get('match_score', 0)
 
@@ -845,6 +884,9 @@ def find_good_plan(manager):
 
             tag_key = '_'.join(target_tags_list)
             target_tags = all_target_tags_new.get(tag_key, target_tags)
+            # 获取target_tags value的和
+            total_weight = sum(target_tags.values())
+            target_tags[f'{hot_video}'] = total_weight
 
             # === 【修改】以 target_video_type 为 key，将 target_tags 汇总入列表 ===
             if target_video_type not in collected_target_tags:
@@ -853,6 +895,9 @@ def find_good_plan(manager):
                 collected_target_tags[target_video_type].append(target_tags)
 
             final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type)
+            if len(final_good_video_list) == 0:
+                print(f"未找到符合条件的热门视频，跳过本次挖掘。{hot_video} {target_video_type}")
+                continue
             video_data = build_prompt_data(final_good_video_list, target_video_type)
             print(
                 f"符合条件的热门视频数量: {len(final_good_video_list)}，当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，final_score: {final_score} 数据为 {play_comment_info_list[-1]} 素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
@@ -903,6 +948,8 @@ def find_good_plan(manager):
 
         final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,
                                                  top_n=100, blacklist=blacklist)
+        if len(final_good_video_list) == 0:
+            print(f"未找到符合条件的热门视频，跳过本次挖掘。当前自由挖掘类型: {target_video_type} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         video_data = build_prompt_data(final_good_video_list, target_video_type)
         print(
             f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

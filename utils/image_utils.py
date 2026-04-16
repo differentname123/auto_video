@@ -194,6 +194,7 @@ def try_layout_rigid_block(lines, fs, sat, img_w, img_h, font_path, spacing_rati
 
     return False, None
 
+
 def create_enhanced_cover_layered(
         bg_image_path: str,
         fg_image_path: str,
@@ -240,7 +241,6 @@ def create_enhanced_cover_layered(
         chosen_theme = color_themes[color_theme]
 
     # ================= 核心性能优化 =================
-    # print("\n>>> [Pass 0] 预处理遮罩: 生成 Alpha 通道积分图 (SAT)...")
     alpha_data = list(fg_alpha.getdata())
     sat = [[0] * (img_w + 1) for _ in range(img_h + 1)]
     idx = 0
@@ -251,8 +251,6 @@ def create_enhanced_cover_layered(
             sat[y][x] = sat[y - 1][x] + row_sum
             idx += 1
     # ===============================================
-
-    # print(">>> [Pass 1] 启动【刚性区块】顶格排版，计算绝对完美字号...")
 
     clean_lines = [line for line in text_lines if line.strip()]
     if not clean_lines: return None
@@ -307,7 +305,58 @@ def create_enhanced_cover_layered(
             current_line_y = block_start_y + i * int(best_fs * line_spacing_ratio)
             best_layout.append({'y': current_line_y, 'placements': placements})
 
-    # print(f"✅ 计算完毕！敲定统一字号: {best_fs}px (字距/行距已完全数学锁定)")
+    # ================= 核心新增：排版质量质检与兜底触发机制 =================
+    if best_layout:
+        check_font = ImageFont.truetype(font_path, best_fs)
+        fixed_gap = int(best_fs * 0.06)
+        is_unacceptable = False
+
+        for line_info in best_layout:
+            placements = line_info['placements']
+            if not placements or len(placements) <= 1:
+                continue
+
+            fragments_count = 1
+            total_weight = 0
+            weighted_x_sum = 0
+
+            for j in range(len(placements)):
+                curr_char = placements[j]['char']
+                curr_x = placements[j]['x']
+                curr_w = check_font.getlength(curr_char)
+
+                # 1. 计算视觉重心：以每个字的宽度作为“重量权重”，计算加权平均中心点
+                char_center_x = curr_x + curr_w / 2
+                weighted_x_sum += char_center_x * curr_w
+                total_weight += curr_w
+
+                # 2. 计算碎片化程度：和上一个字比较间距
+                if j > 0:
+                    prev_char = placements[j - 1]['char']
+                    prev_x = placements[j - 1]['x']
+                    prev_w = check_font.getlength(prev_char)
+
+                    if (curr_x - prev_x) > (prev_w + fixed_gap + 5):
+                        fragments_count += 1
+
+            # 得出真实的“视觉重心”
+            visual_center_x = weighted_x_sum / total_weight if total_weight > 0 else (img_w / 2)
+
+            # 判断真实视觉重心是否偏离图片几何中心超过 5%
+            center_offset = abs(visual_center_x - (img_w / 2))
+            is_off_center = center_offset > (img_w * 0.05)
+            print(
+                f"排版质检未通过: 片段数={fragments_count}, 真实视觉重心偏离量={center_offset:.1f}px (限制范围 < {img_w * 0.05:.1f}px)")
+            # 【双重判定条件】：大于等于2个片段 + 视觉重心明显偏离
+            if fragments_count >= 2 and is_off_center:
+                is_unacceptable = True
+
+                break
+
+        if is_unacceptable:
+            print("🚫 判定为排版过于琐碎且视觉重心失衡，主动放弃分层排版，退回经典兜底模式。")
+            return None  # 核心点：直接返回 None，上层 auto 函数接收后会自动进入经典兜底逻辑
+    # =========================================================================
 
     escaped_font_path = font_path.replace(':', '\\:') if os.name == 'nt' else font_path
 
@@ -663,18 +712,14 @@ if __name__ == "__main__":
     # 测试数据准备
     # ==========================================
     # 假设我们要写入的封面文案
-    texts = ["全场起立！ZywOo主场加冕","全场起立！ZywOo主场加冕"]
+    texts = ["并非运气，而是实力"]
 
     # 你的字体路径 (Windows默认微软雅黑粗体)
     font = "C:/Windows/Fonts/msyhbd.ttc"
 
-    # ==========================================
-    # 场景 1：调用老函数 (经典单图覆盖模式)
-    # ==========================================
-    print(">>> 开始生成老版本封面 (文字在最上层)...")
 
     # 老版本只需要一张完整的底图
-    old_input_img = r"W:\project\python_project\auto_video\videos\task\7533671760756051250\69cb755ed48b8dfd61523fa8\cover\7533671760756051250_02-07-000.jpg"
+    old_input_img = r"W:\project\python_project\auto_video\videos\task\7622116077577956963\69c919a5d48b8dfd61523d00\cover\7622116077577956963.jpg"
     old_output_img = old_input_img.replace(".jpg", "_old.png")  # 输出为 PNG 保持质量
 
     create_enhanced_cover_auto(

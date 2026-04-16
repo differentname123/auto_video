@@ -9,6 +9,8 @@
 
 """
 import os
+
+import numpy as np
 import pandas as pd
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -174,10 +176,62 @@ def update_and_search(keyword_list, top_n=5):
     return search_results
 
 
+# ================= 基础语义工具函数 =================
+# ================= 基础语义工具函数 =================
+
+_DEFAULT_MODEL_PATH = r"C:\Users\zxh\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
+_model_cache = {}
+
+
+def _get_model(model_path=_DEFAULT_MODEL_PATH, device="cuda"):
+    if model_path not in _model_cache:
+        print(f"正在加载模型: {model_path} ...")
+        _model_cache[model_path] = SentenceTransformer(model_path, device=device)
+    return _model_cache[model_path]
+
+
+def encode_text(text, model_path=_DEFAULT_MODEL_PATH):
+    """
+    单条文本 -> 归一化向量。
+    """
+    model = _get_model(model_path)
+    return np.asarray(model.encode(text, normalize_embeddings=True))
+
+
+def compute_similarity(text_a, text_b, model_path=_DEFAULT_MODEL_PATH):
+    """
+    两个字符串 -> 余弦相似度 float。
+    """
+    model = _get_model(model_path)
+    vec_a = model.encode(text_a, normalize_embeddings=True)
+    vec_b = model.encode(text_b, normalize_embeddings=True)
+    return float(np.dot(vec_a, vec_b))
+
+
+def compute_similarity_by_vecs(vec_a, vec_b):
+    """
+    两个已归一化向量 -> 余弦相似度 float。
+    """
+    return float(np.dot(np.asarray(vec_a), np.asarray(vec_b)))
+
+
+# ================= 调用示例 =================
+
+def example():
+    # 1. 直接算两个字符串的相似度
+    score = compute_similarity("英雄联盟手办", "LOL游戏周边模型")
+    print(f"相似度: {score:.4f}")
+
+    # 2. 提前为素材编码向量，后续复用
+    material_vec = encode_text("户外露营帐篷折叠便携")
+    query_vec = encode_text("野营装备")
+    score2 = compute_similarity_by_vecs(material_vec, query_vec)
+    print(f"向量相似度: {score2:.4f}")
 
 if __name__ == "__main__":
-
-    search_results = update_and_search(keyword_list=["英雄联盟联名", "电竞周边", "游戏挂件"], top_n=5)
-    for res in search_results:
-        # 字段变更为 item_name
-        print(f"商品: {res.get('item_name', '未知')}, 相似度: {res.get('search_similarity'):.4f}")
+    example()
+    #
+    # search_results = update_and_search(keyword_list=["英雄联盟联名", "电竞周边", "游戏挂件"], top_n=5)
+    # for res in search_results:
+    #     # 字段变更为 item_name
+    #     print(f"商品: {res.get('item_name', '未知')}, 相似度: {res.get('search_similarity'):.4f}")
