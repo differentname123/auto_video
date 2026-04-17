@@ -529,8 +529,10 @@ def process_single_hudong_task(task_info, commenter_map, uid):
     comment_used_list = hudong_info.get('comment_used', [])
     comment_used_list.extend(exist_comment_text)
 
-    print(f"[{bvid}] [步骤 5/8] 调用 pick_commenters 选择评论者...")
-    comment_commenters = pick_commenters(commenter_map, COMMENTER_USAFE_FILE,
+    print(f"[{bvid}] [步骤 5/8] 调用 pick_commenters 选择评论者（已排除owner）...")
+    # 修改点：构建一个排除 owner 的 map，确保 owner 账号不会被用于发布评论
+    other_commenter_map = {k: v for k, v in commenter_map.items() if k != uid}
+    comment_commenters = pick_commenters(other_commenter_map, COMMENTER_USAFE_FILE,
                                          n=max_success_comment_count)
     print(f"[{bvid}] [步骤 5/8] pick_commenters 调用完成，选择了 {len(comment_commenters)} 个评论者。")
 
@@ -890,9 +892,6 @@ def update_block_video(config_map):
     return exist_block_video_info, new_added_info
 
 
-
-
-
 def fun(manager):
     global NEED_UPDATE_SIGN
     try:
@@ -901,7 +900,6 @@ def fun(manager):
         pre_midnight = today_midnight - timedelta(days=5)
 
         recent_uploaded_tasks = manager.find_tasks_after_time_with_status(pre_midnight, [TaskStatus.UPLOADED])
-
 
         processed_count = 0
         print("开始执行 fun 函数...当前时间:", datetime.now().isoformat())
@@ -968,19 +966,30 @@ def fun(manager):
         manager.upsert_tasks(need_update_task_list)
         statistic_good_video(recent_uploaded_tasks)
 
-
-
         filter_tasks = []
         three_hours_ago = datetime.now() - timedelta(hours=20)
 
         for task_info in need_update_task_list:
-            uploaded_time = task_info.get('uploaded_time')
             hudong_info = task_info.get('hudong_info', {})
             last_processed_date = hudong_info.get('last_processed_date', '')
             if last_processed_date:
                 continue
-            if uploaded_time and uploaded_time >= three_hours_ago:
-                filter_tasks.append(task_info)
+
+            # --- 修改部分：使用B站真实公开时间作为判断基准 ---
+            bili_created_timestamp = task_info.get('created')
+
+            if bili_created_timestamp:
+                bili_publish_time = datetime.fromtimestamp(bili_created_timestamp)
+                if bili_publish_time >= three_hours_ago:
+                    filter_tasks.append(task_info)
+            else:
+                print(f"警告：任务 {task_info.get('video_id_list', [])} 缺少B站创建时间，无法判断是否在最近3小时内上传。将使用入库上传时间作为兜底判断。")
+                # 兜底逻辑：如果没有拿到B站公开时间，仍然使用入库上传时间
+                uploaded_time = task_info.get('uploaded_time')
+                if uploaded_time and uploaded_time >= three_hours_ago:
+                    filter_tasks.append(task_info)
+            # ------------------------------------------------
+
         print(f"共找到 {len(filter_tasks)} 个最近3小时内上传的任务。")
         count = 0
 

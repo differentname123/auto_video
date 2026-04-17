@@ -346,7 +346,8 @@ def submit_post(
         bili_jct: str = BILI_JCT,
         human_type2=1002,
         topic_detail={"from_topic_id": 1313687, "from_source": "arc.web.recommend"},
-        topic_id: int = 1313687
+        topic_id: int = 1313687,
+        dtime: int = None
 
 ) -> dict:
     """
@@ -380,6 +381,11 @@ def submit_post(
         "web_os": 3,
         "csrf": bili_jct,
     }
+
+    # 动态插入定时时间戳
+    if dtime is not None and dtime > 0:
+        payload["dtime"] = dtime
+
     resp = session.post(
         "https://member.bilibili.com/x/vu/web/add/v3",
         params={"ts": int(time.time() * 1000), "csrf": bili_jct},

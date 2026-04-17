@@ -515,7 +515,7 @@ def init_config():
         '3546978046708266':'jun',
         # '3632306801609223': 'shuijun2',
         # '3632301781026991': 'junxiao',
-        '3632319661344845': 'junda',
+        # '3632319661344845': 'junda',
         '3632315397834763':'lin',
         # '3632317008447555': 'jj',
         # '3546913316014394':'xiaohao',
@@ -861,7 +861,7 @@ def filter_danmu(danmu_list, total_seconds):
         if isinstance(item.get('推荐弹幕内容'), list):
             processed_danmu_count += len(item['推荐弹幕内容'])
 
-    target_num = 20
+    target_num = 10
     # === 第二步（新增逻辑）：检查弹幕数量并补足到25条 ===
     num_to_add = target_num - processed_danmu_count
     num_to_add = min(num_to_add, len(common_danmu_list))  # 避免超出通用池范围
