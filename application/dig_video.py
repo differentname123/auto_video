@@ -14,6 +14,8 @@ import random
 import time
 import traceback
 
+import numpy as np
+
 from application.video_common_config import ALL_MATERIAL_VIDEO_INFO_PATH, BLOCK_VIDEO_BVID_FILE, get_tags_info, \
     DIG_HOT_VIDEO_PLAN_FILE, STATISTIC_PLAY_COUNT_FILE, is_contain_owner_speaker, analyze_scene_content, \
     BLOCK_VIDEO_ID_FILE, DIG_HOT_VIDEO_PLAN_ARCHIVE_FILE, ALL_TARGET_TAGS_INFO_FILE, RECENT_HOT_TAGS_FILE
@@ -507,7 +509,7 @@ def get_need_dig_video_list():
     return all_dig_video_list, good_tags_info, good_video_list
 
 
-def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=80, blacklist=[], stable_ratio=0.9):
+def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=80, blacklist=[], stable_ratio=0.9, only_filter=False):
     """
     获取本次挖掘最终的素材列表
     :return:
@@ -524,6 +526,8 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
         for vid in delete_keys:
             del filter_all_video_info[vid]
 
+    if only_filter:
+        return filter_all_video_info
     sorted_video_info = process_and_sort_video_info(filter_all_video_info, target_tags, blacklist=blacklist)
     top_video_info = dict(list(sorted_video_info.items())[:top_n])
     good_video_info = {}
@@ -820,6 +824,155 @@ def update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh):
             save_json(ALL_TARGET_TAGS_INFO_FILE, all_target_tags_new)
     return all_target_tags_new
 
+def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, max_size=50):
+    """
+    基于密度的素材聚类算法，自动将探索素材按相似度聚合成簇。
+
+    Args:
+        video_info:     dict, {vid: {..., 'vector': [float, ...], ...}}
+        sim_threshold:  float or None, 邻居判定阈值；None 时根据数据分布自适应推断
+        min_size:       int, 每簇最少素材数
+        max_size:       int, 每簇最多素材数
+
+    Returns:
+        List[dict]  —  [{'score': float, 'materials': {vid: info, ...}}, ...]
+                       按簇得分降序排列，至少包含一个簇
+    """
+    if not video_info:
+        return []
+
+    vid_list = list(video_info.keys())
+    n = len(vid_list)
+
+    # 素材数本身不足 min_size，直接整体打包
+    if n <= min_size:
+        return [{'score': 1.0, 'materials': video_info.copy()}]
+
+    # ================================================================
+    # Step 1  构建向量矩阵 → 一次矩阵乘法得到全量余弦相似度
+    # ================================================================
+    dim = None
+    for vid in vid_list:
+        vec = video_info[vid].get('vector')
+        if vec and len(vec) > 0:
+            dim = len(vec)
+            break
+
+    if dim is None:
+        # 没有任何有效向量，保底返回前 min_size 个
+        subset = {vid_list[i]: video_info[vid_list[i]] for i in range(min_size)}
+        return [{'score': 0.0, 'materials': subset}]
+
+    raw = np.zeros((n, dim), dtype=np.float32)
+    valid = np.ones(n, dtype=bool)
+    for i, vid in enumerate(vid_list):
+        vec = video_info[vid].get('vector')
+        if vec and len(vec) == dim:
+            raw[i] = vec
+        else:
+            valid[i] = False
+
+    norms = np.linalg.norm(raw, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    normed = raw / norms
+    sim_matrix = normed @ normed.T                       # O(n²d)，BLAS 加速
+    np.clip(sim_matrix, -1.0, 1.0, out=sim_matrix)
+
+    # 无效向量对应行列清零
+    inv_idx = np.where(~valid)[0]
+    if inv_idx.size > 0:
+        sim_matrix[inv_idx, :] = 0.0
+        sim_matrix[:, inv_idx] = 0.0
+
+    # 对角线置 0：后续得分计算无需再特判自身
+    np.fill_diagonal(sim_matrix, 0.0)
+
+    # ================================================================
+    # Step 2  确定相似度阈值（支持自适应）
+    # ================================================================
+    if sim_threshold is None:
+        upper = sim_matrix[np.triu_indices(n, k=1)]
+        thr = float(np.percentile(upper, 85)) if upper.size > 0 else 0.50
+        sim_threshold = float(np.clip(thr, 0.40, 0.80))
+
+    # ================================================================
+    # Step 3  邻居掩码 & 密度
+    # ================================================================
+    neighbor_mask = sim_matrix > sim_threshold             # (n, n) bool
+    degree = neighbor_mask.sum(axis=1)                     # (n,)
+
+    # ================================================================
+    # Step 4  贪心建簇
+    #   seed 选取：按 degree 降序
+    #   成员准入：不仅要与 seed 相似，还要与已有簇成员的平均相似度达标
+    # ================================================================
+    sorted_seeds = np.argsort(-degree)
+    used = np.zeros(n, dtype=bool)
+    clusters = []
+    entry_thr = sim_threshold * 0.85                       # 进簇门槛略低于邻居阈值
+
+    for seed in sorted_seeds:
+        seed = int(seed)
+        if used[seed]:
+            continue
+        # degree 已排序；如果全图邻居数都凑不够，后面更不可能
+        if degree[seed] < min_size - 1:
+            break
+
+        # 与 seed 相似 & 尚未被使用的候选
+        cands = np.where(neighbor_mask[seed] & ~used)[0]
+        if cands.size < min_size - 1:
+            continue
+
+        # 按与 seed 的相似度降序，优先拉最像的
+        cands = cands[np.argsort(-sim_matrix[seed, cands])]
+
+        # 逐个准入：检查候选与【整个已有簇】的平均相似度
+        cluster = [seed]
+        for c in cands:
+            if len(cluster) >= max_size:
+                break
+            c = int(c)
+            avg_sim_to_cluster = sim_matrix[c, cluster].mean()
+            if avg_sim_to_cluster >= entry_thr:
+                cluster.append(c)
+
+        if len(cluster) < min_size:
+            continue
+
+        # 簇得分 = 簇内平均两两相似度（对角线已为 0）
+        idx = np.array(cluster)
+        k = len(cluster)
+        score = float(sim_matrix[np.ix_(idx, idx)].sum()) / (k * (k - 1))
+
+        clusters.append({
+            'score': round(score, 4),
+            'materials': {vid_list[i]: video_info[vid_list[i]] for i in cluster}
+        })
+        used[idx] = True
+
+    # ================================================================
+    # Step 5  保底：主流程未产出任何簇时，强制取最密核心
+    # ================================================================
+    if not clusters:
+        seed = int(sorted_seeds[0])
+        sims = sim_matrix[seed].copy()
+        sims[seed] = -np.inf                               # 排除自身参与排序
+        top_k = np.argsort(-sims)[: min_size - 1]
+        forced = np.concatenate([[seed], top_k]).astype(int)
+
+        k = len(forced)
+        sub = sim_matrix[np.ix_(forced, forced)]
+        score = float(sub.sum()) / (k * (k - 1)) if k > 1 else 0.0
+
+        clusters.append({
+            'score': round(score, 4),
+            'materials': {vid_list[int(i)]: video_info[vid_list[int(i)]] for i in forced}
+        })
+
+    clusters.sort(key=lambda c: c['score'], reverse=True)
+    return clusters
+
 
 def find_good_plan(manager):
     """
@@ -848,6 +1001,23 @@ def find_good_plan(manager):
 
     exist_video_plan_info, video_id_avg_score_map = update_exist_dig_data(exist_video_plan_info, good_video_list)
     save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+
+    # ================= [新增：提取历史簇指纹] =================
+    history_fingerprints = []
+    seen_fp_hashes = set()  # 用于去重，防止同一个簇产生多个方案导致重复计算
+
+    for topic, plans in exist_video_plan_info.items():
+        for plan in plans:
+            fp = plan.get('cluster_fingerprint')
+            if fp and isinstance(fp, list):
+                # 将列表转为元组存入set去重，降低内存
+                fp_tuple = tuple(fp)
+                if fp_tuple not in seen_fp_hashes:
+                    seen_fp_hashes.add(fp_tuple)
+                    history_fingerprints.append(set(fp))  # 存为 set 方便后续极速算交集
+
+    print(f"当前从已有方案中提取到 {len(history_fingerprints)} 个唯一的历史簇指纹。")
+    # ==========================================================
 
     for selected_video_info in all_dig_video_list:
         upload_params = selected_video_info.get('upload_params', {})
@@ -917,8 +1087,6 @@ def find_good_plan(manager):
         print(
             f"完成视频方案挖掘，当前热门视频主题: {hot_video}，新挖掘数量: {len(exist_video_plan_info[hot_video]) - exist_count}，耗时: {time.time() - start_time:.2f} 秒 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
 
-    # free_dig_info_path = r'W:\project\python_project\auto_video\config\free_dig_info.json'
-    # free_dig_info = read_json(free_dig_info_path)
     # 进行自由挖掘
     for target_video_type, target_tags in good_tags_info.items():
         if target_video_type == 'sport' and random.random() < 0.8:
@@ -927,7 +1095,6 @@ def find_good_plan(manager):
         if target_video_type == 'fun' and random.random() < 0.8:
             continue
         # 2. 针对非保留类型：如果既不是 game 也不是 sport，全部跳过
-        # 注意：sport 如果通过了上面那一关，会走到这里，所以这里要放行 sport
         if target_video_type not in ['game', 'sport', 'fun']:
             continue
         if target_video_type == 'fun':
@@ -946,51 +1113,91 @@ def find_good_plan(manager):
         if target_tags not in collected_target_tags[target_video_type]:
             collected_target_tags[target_video_type].append(target_tags)
 
-        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,blacklist=blacklist)
+        final_good_video_list = get_target_video(all_video_info, target_tags, target_video_type, no_asr=False,
+                                                 blacklist=blacklist, only_filter=True)
         if len(final_good_video_list) == 0:
-            print(f"未找到符合条件的热门视频，跳过本次挖掘。当前自由挖掘类型: {target_video_type} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+            print(
+                f"未找到符合条件的热门视频，跳过本次挖掘。当前自由挖掘类型: {target_video_type} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             continue
-        video_data = build_prompt_data(final_good_video_list, target_video_type)
-        print(
-            f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type}  素材视频数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
-        video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
-        timestamp = int(time.time())
-        # if len(video_content_plans) > 0:
-        #     free_dig_info[f"{timestamp}"] = {
-        #         'video_content_plans':video_content_plans,
-        #         'full_prompt': full_prompt,
-        #
-        #     }
-        #     save_json(free_dig_info_path, free_dig_info)
-        for plan_info in video_content_plans:
-            hot_video = plan_info.get('video_theme', '有趣的视频')
-            if hot_video not in exist_video_plan_info:
-                exist_video_plan_info[hot_video] = []
-            exist_video_plan_info[hot_video].append(plan_info)
-            final_score = 100
-            for plan in exist_video_plan_info[hot_video]:
 
-                video_id_list = plan.get('video_id_list', [])
+        # =======================================================
+        # 新增的逻辑替换：使用聚类函数替换原本一股脑打包的处理
+        # =======================================================
+        cluster_list = cluster_materials_by_density(final_good_video_list, sim_threshold=0.82, min_size=15, max_size=40)
+
+        for cluster_idx, cluster_dict in enumerate(cluster_list):
+            cluster_score = cluster_dict['score']
+            cluster_materials = cluster_dict['materials']
+
+            # ================= [新增：核心指纹拦截逻辑] =================
+            # 提取当前簇的“指纹”：取前 8 个素材ID (基于密度算法，前面的是核心)
+            current_vids = list(cluster_materials.keys())
+            current_fingerprint_list = current_vids[:8]
+            current_fingerprint_set = set(current_fingerprint_list)
+
+            is_overlap = False
+            for past_fp_set in history_fingerprints:
+                # 计算交集大小
+                overlap_count = len(current_fingerprint_set.intersection(past_fp_set))
+                # 核心指纹最大为8，如果有5个以上重叠，说明骨架高度一致，直接跳过
+                if overlap_count >= 5:
+                    is_overlap = True
+                    break
+
+            if is_overlap:
+                print(
+                    f"跳过第 {cluster_idx + 1}/{len(cluster_list)} 簇: 核心素材与历史挖掘指纹高度重合，判定缺乏潜力。当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+                continue
+            # ==========================================================
+
+            video_data = build_prompt_data(cluster_materials, target_video_type)
+            print(
+                f"符合条件的热门视频数量: {len(final_good_video_list)}，当前自由挖掘类型: {target_video_type} 第 {cluster_idx + 1}/{len(cluster_list)} 簇 (得分 {cluster_score:.4f}) 送审素材数量: {len(video_data)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+            video_content_plans, full_prompt = gen_hot_video_llm(video_data, None)
+            timestamp = int(time.time())
+
+            # ================= [新增：若送审成功，将当前指纹加入内存，避免本次同批次重复] =================
+            if video_content_plans:
+                history_fingerprints.append(current_fingerprint_set)
+            # ==========================================================
+
+            for plan_info in video_content_plans:
+                hot_video = plan_info.get('video_theme', '有趣的视频')
+                if hot_video not in exist_video_plan_info:
+                    exist_video_plan_info[hot_video] = []
+
+                # ================= [修改：修复了原代码循环覆盖所有历史方案的Bug，现只更新当前新方案] =================
+                video_id_list = plan_info.get('video_id_list', [])
                 temp_score_list = []
                 for video_id in video_id_list:
                     temp_score_list.append(video_id_avg_score_map.get(video_id, 0))
+
                 # 计算平均值
+                final_score = 100
                 if len(temp_score_list) > 0:
                     final_score = sum(temp_score_list) / len(temp_score_list) + 100
-                creative_guidance = f"视频主题: {plan.get('video_theme')}, {plan.get('story_outline')}"
-                plan['video_type'] = target_video_type
-                plan['final_score'] = final_score * plan.get('score', 0) / 100 * 0.8
-                plan['dig_type'] = "free_dig_new"
-                plan['timestamp'] = timestamp
-                plan['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-                plan['creative_guidance'] = creative_guidance
-        save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
 
-        print(
-            f"完成视频方案挖掘，当前自由挖掘类型: {target_video_type}，新挖掘数量: {len(video_content_plans)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+                creative_guidance = f"视频主题: {plan_info.get('video_theme')}, {plan_info.get('story_outline')}"
+                plan_info['video_type'] = target_video_type
+                plan_info['final_score'] = final_score * plan_info.get('score', 0) / 100 * 0.8
+                plan_info['dig_type'] = "free_dig_new"
+                plan_info['timestamp'] = timestamp
+                plan_info['update_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+                plan_info['creative_guidance'] = creative_guidance
+                plan_info['cluster_fingerprint'] = current_fingerprint_list  # <-- 核心：带上本簇骨架指纹
 
+                # 将处理好的当前 plan 追加进入总库
+                exist_video_plan_info[hot_video].append(plan_info)
+                # =========================================================================================
+
+            save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+
+            print(
+                f"完成第 {cluster_idx + 1} 簇视频方案挖掘，当前自由挖掘类型: {target_video_type}，新挖掘数量: {len(video_content_plans)}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}\n\n")
+            # 一次循环只能拉取一次
+            break
     save_json(RECENT_HOT_TAGS_FILE, collected_target_tags)
-
 
 
 if __name__ == '__main__':
