@@ -112,7 +112,8 @@ def query_all_material_videos(manager, is_need_refresh):
                     temp_dict['vector'] = []
                 # 打印进度和当前时间
                 if index_count % 50 == 0:
-                    print(f"已处理 {index_count}/{raw_db_count} 条素材视频，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+                    print(
+                        f"已处理 {index_count}/{raw_db_count} 条素材视频，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
             # =============================================================
 
             local_material_video_info[video_id] = temp_dict
@@ -262,11 +263,12 @@ def gen_target_tags(user_name='danzhu'):
     target_tags = {tag: 1 for tag in user_tags_list}
     return target_tags
 
+
 def build_merged_scene_list_auto(
-    new_scene_info,
-    owner_asr_info,
-    max_scenes,
-    is_need_narration=False
+        new_scene_info,
+        owner_asr_info,
+        max_scenes,
+        is_need_narration=False
 ):
     """
     自动判断 merge_mode，然后生成 merged_scene_list
@@ -307,7 +309,8 @@ def build_prompt_data(video_info, video_type=None):
             scene_summary_list.append(scene_summary)
 
         # if video_type == 'game':
-        merged_scene_list = build_merged_scene_list_auto(new_scene_info, info.get('owner_asr_info', []), info.get('max_scenes', 0), is_need_narration=True)
+        merged_scene_list = build_merged_scene_list_auto(new_scene_info, info.get('owner_asr_info', []),
+                                                         info.get('max_scenes', 0), is_need_narration=True)
         scene_summary_list = []
         for merged_scene in merged_scene_list:
             scene_summary = merged_scene.get('scene_summary', [])
@@ -321,6 +324,7 @@ def build_prompt_data(video_info, video_type=None):
         }
         prompt_data_info[vid] = prompt_entry
     return prompt_data_info
+
 
 def check_video_content_plan(video_content_plans, valid_video_list):
     """
@@ -389,6 +393,7 @@ def check_video_content_plan(video_content_plans, valid_video_list):
     # 所有检查通过
     return True, ""
 
+
 def check_filter_tags(filter_tag_list, valid_tag_list):
     """
     检查视频内容计划的有效性。
@@ -412,8 +417,284 @@ def check_filter_tags(filter_tag_list, valid_tag_list):
     # 所有检查通过
     return True, ""
 
-def gen_hot_video_llm(video_info, hot_video=None):
 
+
+def rate_unrated_plans(manager):
+    """
+    [新增] 对已有方案进行打分
+    1.读取所有方案,然后检查哪些未进行评分.
+    2.如果找不齐原始的素材,直接写入信息保存然后跳过.
+    3.给未评分的方案进行调用review_video_plan_llm进行分析(仅提供关键精简字段),并将结果保存到方案文件.
+    """
+    # [最高级防御] 最外层兜底捕获，确保任何极端情况都不会把异常抛给调用方
+    try:
+        try:
+            exist_video_plan_info = read_json(DIG_HOT_VIDEO_PLAN_FILE)
+        except Exception as e:
+            print(f"读取方案文件异常: {e}")
+            return
+
+        # 防御性判断：确保文件读取结果是字典，防止后续 .items() 报错崩溃
+        if not exist_video_plan_info or not isinstance(exist_video_plan_info, dict):
+            return
+
+        try:
+            # 获取所有素材信息，用于提供给大模型作为上下文 (带有本地缓存机制，不会有额外性能开销)
+            all_video_info = query_all_material_videos(manager, is_need_refresh=False)
+        except Exception as e:
+            print(f"查询素材数据异常: {e}")
+            return
+
+        # 防御性判断
+        if not isinstance(all_video_info, dict):
+            all_video_info = {}
+
+        need_save = False
+        for topic, plans in exist_video_plan_info.items():
+            if not isinstance(plans, list):
+                continue
+
+            for plan in plans:
+                # [核心防御] 内层循环异常隔离，单条方案处理崩溃绝不波及其他方案
+                try:
+                    if not isinstance(plan, dict):
+                        continue
+
+                    # 检查方案是否未进行过大模型深度评分 (以此字段作为判断标志)
+                    if 'review_result' not in plan:
+                        print(
+                            f"发现未深度评分的方案，主题: {topic}，正在准备素材数据，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}...")
+
+                        video_id_list = plan.get('video_id_list', [])
+                        if not isinstance(video_id_list, list):
+                            video_id_list = []
+
+                        relevant_info_dict = {}
+                        is_missing_materials = False
+
+                        # 1. 检查素材完整性，并只提取 relevant_video_info 关键信息
+                        for vid in video_id_list:
+                            if vid in all_video_info:
+                                info = all_video_info[vid]
+                                if not isinstance(info, dict):
+                                    continue
+
+                                logical_scene_info = info.get('logical_scene_info', {})
+                                if not isinstance(logical_scene_info, dict):
+                                    logical_scene_info = {}
+
+                                # 提取 scene_summary_list
+                                scene_summary_list = []
+                                new_scene_info = logical_scene_info.get('new_scene_info', [])
+                                if isinstance(new_scene_info, list):
+                                    for scene in new_scene_info:
+                                        if isinstance(scene, dict):
+                                            scene_summary = scene.get('scene_summary', '')
+                                            if scene_summary:
+                                                scene_summary_list.append(scene_summary)
+
+                                relevant_info_dict[vid] = {
+                                    'video_id': vid,
+                                    'summary': logical_scene_info.get('video_summary', ''),
+                                    'scenes': scene_summary_list
+                                }
+                            else:
+                                is_missing_materials = True
+                                break
+
+                        # 找不齐原始素材，直接写入提示信息，保存并跳过
+                        if is_missing_materials:
+                            print(f"方案评分跳过：主题 {topic} 中的素材在库中找不齐。")
+                            plan['review_result'] = {
+                                "verdict": "Skip",
+                                "final_score": 0,
+                                "reason": "missing_original_materials"
+                            }
+                            need_save = True
+                            try:
+                                save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)  # 记录跳过状态
+                            except Exception as e:
+                                print(f"保存跳过状态异常: {e}")
+                            continue
+
+                        # 2. 只取需要的字段到 llm 函数中 (针对 plan 本身)
+                        simplified_plan = {
+                            'video_id_list': plan.get('video_id_list', []),
+                            'video_theme': plan.get('video_theme', ''),
+                            'story_outline': plan.get('story_outline', ''),
+                            'reason_for_selection': plan.get('reason_for_selection', '')
+                        }
+
+                        simplified_plan_str = json.dumps(simplified_plan, ensure_ascii=False, indent=2)
+                        relevant_info_dict_list = list(relevant_info_dict.values())
+                        relevant_info_dict_list_str = json.dumps(relevant_info_dict_list, ensure_ascii=False, indent=2)
+
+                        # [高危防护] 大模型 API 调用是最容易发生网络异常或返回非预期结构的地方
+                        review_result = None
+                        try:
+                            # 调用现有的 review_video_plan_llm 函数
+                            review_result, _ = review_video_plan_llm(simplified_plan_str, relevant_info_dict_list_str)
+                        except Exception as e:
+                            print(f"调用大模型 review_video_plan_llm 发生异常，主题 {topic}: {e}")
+
+                        # 确保大模型返回的确实是字典，防止后续 get() 报错
+                        if review_result and isinstance(review_result, dict):
+                            # 将大模型的深度评估结果挂载到方案数据上
+                            plan['review_result'] = review_result
+                            need_save = True
+                            print(
+                                f"方案评分成功， verdict: {review_result.get('verdict')} ，最终得分: {review_result.get('final_score')}")
+
+                            # 评完一个立刻持久化，防止中途异常崩溃导致进度丢失
+                            try:
+                                save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+                            except Exception as e:
+                                print(f"单次保存进度异常: {e}")
+                        else:
+                            print(f"方案评分失败 (模型未通过校验或调用异常)，跳过当前方案。")
+
+                except Exception as e:
+                    print(f"处理主题 {topic} 下的单个方案时发生内部异常: {e}")
+                    continue  # 当前方案处理失败，优雅跳出，继续下一个方案
+
+        if need_save:
+            try:
+                save_json(DIG_HOT_VIDEO_PLAN_FILE, exist_video_plan_info)
+                print(f"所有未评分方案处理完毕，数据已保存。")
+            except Exception as e:
+                print(f"最终保存数据异常: {e}")
+
+    except Exception as e:
+        # 终极保险，捕获任何预料之外的错误
+        print(f"rate_unrated_plans 发生严重的全局未捕获异常: {e}")
+
+
+def review_video_plan_llm(single_plan, relevant_video_info):
+    """
+    使用版本1 (极度严密版) 对单个视频内容计划进行独立深度评估。
+
+    Args:
+        single_plan (str): 需要评估的单个方案数据 (JSON字符串)
+        relevant_video_info (str): 该方案涉及到的原始素材文本 (JSON字符串)
+
+    Returns:
+        tuple: (评估结果字典, 完整的Prompt字符串)
+    """
+    PROMPT_FILE_PATH = './prompt/挖掘视频独立评分.txt'  # 确保里面是你发的版本1提示词
+
+    base_prompt = read_file_to_str(PROMPT_FILE_PATH)
+
+    # 严格按照版本1提示词末尾的格式要求拼接输入数据
+    full_prompt = (
+        f"{base_prompt}\n\n"
+        f"[Candidate Scheme]\n"
+        f"{single_plan}\n\n"
+        f"[Related Materials]\n"
+        f"{relevant_video_info}"
+    )
+
+    # 既然不在乎消耗，强烈建议打分环节使用顶配模型，因为V1的逻辑推理极深
+    model_name = "gemini-3-flash-preview"
+    max_retries = 3
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"尝试第 {attempt} 次生成方案评估结果 (V1深度评估版) ...")
+            if USE_CLI:
+                raw = ask_gemini(full_prompt, model_name=model_name)
+            else:
+                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None,
+                                                                         model_name=model_name)
+
+            # 将大模型返回的 JSON 字符串解析为字典
+            review_result = string_to_object(raw)
+
+            # 校验复杂的 V1 版 JSON 结构
+            is_valid, error_message = check_review_result(review_result)
+            if not is_valid:
+                raise ValueError(f"第 {attempt} 次尝试: LLM 返回的数据格式无效: {error_message}")
+
+            # 记录打分时间戳
+            review_result['review_time'] = int(time.time())
+            return review_result, full_prompt
+
+        except Exception as e:
+            print(f"第 {attempt} 次尝试: 生成评估结果时出错: {e}")
+            time.sleep(2 ** attempt)
+
+    return None, full_prompt
+
+
+def check_review_result(review_result):
+    """
+    检查新版评估打分结果的有效性（深度嵌套检查）。
+    核心修改：移除了 raw_score，新增了 thought_process。
+    """
+    if not isinstance(review_result, dict):
+        return False, "返回数据格式错误：必须是一个字典 (JSON Object)"
+
+    # 1. 检查根节点必需字段 (移除了 raw_score，加入了 thought_process)
+    required_root_keys = {
+        'thought_process', 'final_score', 'verdict', 'logic_relation_type',
+        'caps_triggered', 'dimension_scores', 'claim_checks',
+        'key_strengths', 'fatal_issues', 'improvement_suggestions', 'one_sentence_summary'
+    }
+    missing_keys = required_root_keys - set(review_result.keys())
+    if missing_keys:
+        return False, f"评估结果缺失根节点字段：{', '.join(missing_keys)}"
+
+    # 2. 检查数值和基础字符串 (只查 final_score)
+    try:
+        float(review_result.get('final_score'))
+    except (ValueError, TypeError):
+        return False, "得分字段 (final_score) 必须为数值"
+
+    if not isinstance(review_result.get('verdict'), str) or not isinstance(review_result.get('logic_relation_type'),
+                                                                           str):
+        return False, "verdict 或 logic_relation_type 必须是字符串"
+
+    # 检查新增的 thought_process 是否为列表
+    if not isinstance(review_result.get('thought_process'), list):
+        return False, "thought_process 必须是列表 (List of Strings)"
+
+    # 3. 检查 dimension_scores (维度得分)
+    dimensions = review_result.get('dimension_scores')
+    if not isinstance(dimensions, dict):
+        return False, "dimension_scores 必须是字典"
+    required_dims = {'material_support', 'logic_strength', 'feasibility', 'narrative_fit', 'viral_potential'}
+    if not required_dims.issubset(set(dimensions.keys())):
+        return False, "dimension_scores 内部子维度缺失"
+    for dim_key in required_dims:
+        if not isinstance(dimensions[dim_key], dict) or 'score' not in dimensions[dim_key]:
+            return False, f"维度 {dim_key} 格式错误，缺少 score"
+
+    # 4. 检查 claim_checks (证据断言映射)
+    claims = review_result.get('claim_checks')
+    if not isinstance(claims, list):
+        return False, "claim_checks 必须是列表"
+    for idx, claim in enumerate(claims):
+        if not isinstance(claim, dict):
+            return False, f"claim_checks[{idx}] 必须是字典"
+        # 注意：这里不再强制校验 story_role，因为新版提示词中已经放宽了这部分要求
+        if 'claim' not in claim or 'support_level' not in claim or 'evidence' not in claim:
+            return False, f"claim_checks[{idx}] 缺少 claim/support_level/evidence 字段"
+        if not isinstance(claim['evidence'], list):
+            return False, f"claim_checks[{idx}].evidence 必须是列表"
+
+    # 5. 检查 caps_triggered 和 improvement_suggestions 是否为列表
+    if not isinstance(review_result.get('caps_triggered'), list):
+        return False, "caps_triggered 必须是列表"
+    if not isinstance(review_result.get('improvement_suggestions'), list):
+        return False, "improvement_suggestions 必须是列表"
+
+    # 6. 检查基础文本数组
+    for arr_key in ['key_strengths', 'fatal_issues']:
+        if not isinstance(review_result.get(arr_key), list):
+            return False, f"{arr_key} 必须是列表"
+
+    return True, ""
+
+def gen_hot_video_llm(video_info, hot_video=None):
     if hot_video:
         PROMPT_FILE_PATH = './prompt/挖掘热门视频.txt'
     else:
@@ -436,9 +717,9 @@ def gen_hot_video_llm(video_info, hot_video=None):
             if USE_CLI:
                 raw = ask_gemini(full_prompt, model_name=model_name)
             else:
-                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None, model_name= "gemini-3-flash-preview")
+                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None,
+                                                                         model_name="gemini-3-flash-preview")
 
-            # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
             video_content_plans = string_to_object(raw)
             valid_video_list = video_info.keys()
             is_valid, error_message = check_video_content_plan(video_content_plans, valid_video_list)
@@ -491,7 +772,8 @@ def get_need_dig_video_list():
     for target_video_type in ['sport', 'game', 'fun']:
         user_type_info = user_config.get('user_type_info', {})
         target_user_list = user_type_info.get(target_video_type, [])
-        filter_good_video_list = [task_info for task_info in good_video_list if task_info.get('userName') in target_user_list]
+        filter_good_video_list = [task_info for task_info in good_video_list if
+                                  task_info.get('userName') in target_user_list]
         if len(filter_good_video_list) == 0:
             print(f"未找到符合条件的热门视频，跳过本次挖掘。{target_video_type}")
             continue
@@ -505,11 +787,13 @@ def get_need_dig_video_list():
         video_type_count_map[target_video_type] = len(final_good_video_list)
         all_dig_video_list.extend(final_good_video_list)
     formatted_map = json.dumps(video_type_count_map, ensure_ascii=False, indent=4)
-    print(f"本次挖掘总共涉及热门视频数量: {len(all_dig_video_list)} ，各题材视频数量分布:\n {formatted_map} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    print(
+        f"本次挖掘总共涉及热门视频数量: {len(all_dig_video_list)} ，各题材视频数量分布:\n {formatted_map} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     return all_dig_video_list, good_tags_info, good_video_list
 
 
-def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=80, blacklist=[], stable_ratio=0.9, only_filter=False):
+def get_target_video(all_video_info, target_tags, target_video_type, no_asr=False, top_n=80, blacklist=[],
+                     stable_ratio=0.9, only_filter=False):
     """
     获取本次挖掘最终的素材列表
     :return:
@@ -564,7 +848,6 @@ def get_target_video(all_video_info, target_tags, target_video_type, no_asr=Fals
     return final_good_video_list
 
 
-
 def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=5):
     """
     检查是否需要进行视频方案挖掘
@@ -574,7 +857,8 @@ def check_need_dig(exist_video_plan_info, hot_video, max_dig_count=5):
         exist_video_plan_info[hot_video] = []
     # 判断exist_video_plan_info[hot_video]中 score 大于95的方案数量是否大于等于10
     high_score_plan_count = sum(1 for plan in exist_video_plan_info[hot_video] if plan.get('score', 0) >= 95)
-    print(f"当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，高分方案数量: {high_score_plan_count}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    print(
+        f"当前热门视频主题: {hot_video} 已挖掘数量{len(exist_video_plan_info[hot_video])} ，高分方案数量: {high_score_plan_count}，当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     if high_score_plan_count >= max_dig_count:
         return False
     return True
@@ -735,7 +1019,6 @@ def archive_outdated_plans(exist_info, archive_info, days=7):
 
 
 def gen_true_tags_llm(tags_list):
-
     PROMPT_FILE_PATH = './prompt/过滤得到真正的标签.txt'
     base_prompt = read_file_to_str(PROMPT_FILE_PATH)
 
@@ -750,7 +1033,8 @@ def gen_true_tags_llm(tags_list):
             if USE_CLI:
                 raw = ask_gemini(full_prompt, model_name=model_name)
             else:
-                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None, model_name= "gemini-3-flash-preview")
+                gen_error_info, raw = generate_gemini_content_playwright(full_prompt, file_path=None,
+                                                                         model_name="gemini-3-flash-preview")
             # raw = get_llm_content(prompt=full_prompt, model_name=model_name)
             filter_tag_info = string_to_object(raw)
             filter_tag_list = filter_tag_info.get('filtered_tags', [])
@@ -789,14 +1073,12 @@ def update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh):
         hot_video = upload_params.get('title', '变得有吸引力一点')
         name_map[tag_key] = hot_video
 
-
     for target_video_type, target_tags in good_tags_info.items():
         target_tags_list = list(target_tags.keys())
         target_tags_list.sort()
         tag_key = '_'.join(target_tags_list)
         all_target_tags_info[tag_key] = target_tags
         name_map[tag_key] = f"热门视频{target_video_type}"
-
 
     for key, target_tags in all_target_tags_info.items():
 
@@ -805,7 +1087,8 @@ def update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh):
         tag_key = '_'.join(target_tags_list)
         true_name = name_map.get(tag_key, '未知话题')
 
-        print(f"\n\n正在处理话题: {true_name} 标签数量为{len(target_tags)}，标签列表为{target_tags_list} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+        print(
+            f"\n\n正在处理话题: {true_name} 标签数量为{len(target_tags)}，标签列表为{target_tags_list} 当前时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
         if tag_key in all_target_tags_new:
             continue
 
@@ -823,6 +1106,7 @@ def update_target_tags(all_dig_video_list, good_tags_info, is_need_refresh):
 
             save_json(ALL_TARGET_TAGS_INFO_FILE, all_target_tags_new)
     return all_target_tags_new
+
 
 def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, max_size=50):
     """
@@ -875,7 +1159,7 @@ def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, ma
     norms = np.linalg.norm(raw, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     normed = raw / norms
-    sim_matrix = normed @ normed.T                       # O(n²d)，BLAS 加速
+    sim_matrix = normed @ normed.T  # O(n²d)，BLAS 加速
     np.clip(sim_matrix, -1.0, 1.0, out=sim_matrix)
 
     # 无效向量对应行列清零
@@ -898,8 +1182,8 @@ def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, ma
     # ================================================================
     # Step 3  邻居掩码 & 密度
     # ================================================================
-    neighbor_mask = sim_matrix > sim_threshold             # (n, n) bool
-    degree = neighbor_mask.sum(axis=1)                     # (n,)
+    neighbor_mask = sim_matrix > sim_threshold  # (n, n) bool
+    degree = neighbor_mask.sum(axis=1)  # (n,)
 
     # ================================================================
     # Step 4  贪心建簇
@@ -909,7 +1193,7 @@ def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, ma
     sorted_seeds = np.argsort(-degree)
     used = np.zeros(n, dtype=bool)
     clusters = []
-    entry_thr = sim_threshold * 0.85                       # 进簇门槛略低于邻居阈值
+    entry_thr = sim_threshold * 0.85  # 进簇门槛略低于邻居阈值
 
     for seed in sorted_seeds:
         seed = int(seed)
@@ -957,7 +1241,7 @@ def cluster_materials_by_density(video_info, sim_threshold=None, min_size=10, ma
     if not clusters:
         seed = int(sorted_seeds[0])
         sims = sim_matrix[seed].copy()
-        sims[seed] = -np.inf                               # 排除自身参与排序
+        sims[seed] = -np.inf  # 排除自身参与排序
         top_k = np.argsort(-sims)[: min_size - 1]
         forced = np.concatenate([[seed], top_k]).astype(int)
 
@@ -1204,9 +1488,13 @@ if __name__ == '__main__':
     # time.sleep(3600 * 3)
     mongo_base_instance = gen_db_object()
     manager = MongoManager(mongo_base_instance)
+
+
+
     while True:
         try:
             find_good_plan(manager)
+            rate_unrated_plans(manager)
             time.sleep(1)
         except Exception as e:
             traceback.print_exc()
